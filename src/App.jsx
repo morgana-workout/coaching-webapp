@@ -391,12 +391,124 @@ function ClientApp({ session }) {
 /* ------------------------------------------------------------------ */
 /* AREA ADMIN                                                          */
 /* ------------------------------------------------------------------ */
+function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
+  const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", note_cliente: "", stato: "revisionato" });
+  const [salvando, setSalvando] = useState(false);
+  const campo = (label, key, unit) => (
+    <div>
+      <label className="text-xs text-slate-500">{label}</label>
+      <input type="number" step="0.1" value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })}
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+    </div>
+  );
+  const salva = async () => {
+    setSalvando(true);
+    const payload = { client_id: clientId, data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato };
+    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm"]) {
+      payload[k] = f[k] === "" ? null : Number(f[k]);
+    }
+    await supabase.from("checkins").insert(payload);
+    setSalvando(false);
+    onSalvato();
+  };
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Aggiungi check</p>
+      <div><label className="text-xs text-slate-500">Data</label>
+        <input type="date" value={f.data_check} onChange={(e) => setF({ ...f, data_check: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {campo("Peso (kg)", "peso_kg")}
+        {campo("Petto (cm)", "petto_cm")}
+        {campo("Sopra ombelico (cm)", "sopra_ombelico_cm")}
+        {campo("Ombelico (cm)", "ombelico_cm")}
+        {campo("Sotto ombelico (cm)", "sotto_ombelico_cm")}
+        {campo("Coscia dx (cm)", "coscia_dx_cm")}
+        {campo("Braccio dx (cm)", "braccio_dx_cm")}
+      </div>
+      <textarea placeholder="Note" value={f.note_cliente} onChange={(e) => setF({ ...f, note_cliente: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva check"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
+
+function NuovaNotaForm({ clientId, onSalvato, onAnnulla }) {
+  const [testo, setTesto] = useState("");
+  const [tipo, setTipo] = useState("coach");
+  const [salvando, setSalvando] = useState(false);
+  const salva = async () => {
+    if (!testo) return;
+    setSalvando(true);
+    await supabase.from("notes").insert({ client_id: clientId, data: new Date().toISOString().slice(0, 10), tipo, testo });
+    setSalvando(false);
+    setTesto("");
+    onSalvato();
+  };
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Nuova nota</p>
+      <div className="flex gap-2">
+        <button onClick={() => setTipo("coach")} className={`px-3 py-1.5 rounded-full text-sm ${tipo === "coach" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>Privata (solo tu)</button>
+        <button onClick={() => setTipo("cliente")} className={`px-3 py-1.5 rounded-full text-sm ${tipo === "cliente" ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-600"}`}>Visibile alla cliente</button>
+      </div>
+      <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={3} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="Scrivi la nota..." />
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva nota"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
+
+function NutrizioneForm({ clientId, ultimo, onSalvato }) {
+  const [f, setF] = useState({
+    kcal: ultimo?.kcal || "", proteine_g: ultimo?.proteine_g || "", carboidrati_g: ultimo?.carboidrati_g || "",
+    grassi_g: ultimo?.grassi_g || "", note: ultimo?.note || "",
+  });
+  const [salvando, setSalvando] = useState(false);
+  const campo = (label, key) => (
+    <div><label className="text-xs text-slate-500">{label}</label>
+      <input type="number" value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+    </div>
+  );
+  const salva = async () => {
+    setSalvando(true);
+    await supabase.from("nutrition_plans").insert({
+      client_id: clientId, data_aggiornamento: new Date().toISOString().slice(0, 10),
+      kcal: f.kcal || null, proteine_g: f.proteine_g || null, carboidrati_g: f.carboidrati_g || null,
+      grassi_g: f.grassi_g || null, note: f.note || null,
+    });
+    setSalvando(false);
+    onSalvato();
+  };
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Valori nutrizionali indicativi</p>
+      <div className="grid grid-cols-2 gap-3">
+        {campo("Kcal", "kcal")}
+        {campo("Proteine (g)", "proteine_g")}
+        {campo("Carboidrati (g)", "carboidrati_g")}
+        {campo("Grassi (g)", "grassi_g")}
+      </div>
+      <textarea placeholder="Note per la cliente" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva valori"}</button>
+      {ultimo && <p className="text-slate-400 text-xs">Ultimo aggiornamento: {ultimo.data_aggiornamento}</p>}
+    </Card>
+  );
+}
+
 function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [nutrizione, setNutrizione] = useState(null);
   const [tab, setTab] = useState("dati");
   const [salvando, setSalvando] = useState(false);
+  const [mostraCheckForm, setMostraCheckForm] = useState(false);
+  const [mostraNotaForm, setMostraNotaForm] = useState(false);
 
   const carica = async () => {
     const { data: c } = await supabase.from("clients").select("*").eq("id", clientId).single();
@@ -405,6 +517,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     setCheckins(ck || []);
     const { data: nt } = await supabase.from("notes").select("*").eq("client_id", clientId).order("data", { ascending: false });
     setNotes(nt || []);
+    const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", clientId).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
+    setNutrizione(nu);
   };
   useEffect(() => { carica(); }, [clientId]);
 
@@ -417,7 +531,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   };
 
   if (!client) return <Spinner />;
-  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "note", label: "Note" }];
+  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
 
   return (
     <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5">
@@ -453,22 +567,40 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "check" && (
-        <Card className="p-4">
-          <ul className="space-y-2">
-            {checkins.map((r) => (
-              <li key={r.id} className="flex justify-between items-center text-sm border-b border-slate-100 pb-2">
-                <span className="text-slate-600">{r.data_check}</span>
-                <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
-                <StatoBadge stato={r.stato} />
-              </li>
-            ))}
-            {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
-          </ul>
-        </Card>
+        <div className="space-y-3">
+          {!mostraCheckForm && (
+            <button onClick={() => setMostraCheckForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi check</button>
+          )}
+          {mostraCheckForm && (
+            <NuovoCheckForm clientId={clientId} onAnnulla={() => setMostraCheckForm(false)} onSalvato={() => { setMostraCheckForm(false); carica(); }} />
+          )}
+          <Card className="p-4">
+            <ul className="space-y-2">
+              {checkins.map((r) => (
+                <li key={r.id} className="flex justify-between items-center text-sm border-b border-slate-100 pb-2">
+                  <span className="text-slate-600">{r.data_check}</span>
+                  <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
+                  <StatoBadge stato={r.stato} />
+                </li>
+              ))}
+              {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
+            </ul>
+          </Card>
+        </div>
+      )}
+
+      {tab === "nutrizione" && (
+        <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
       )}
 
       {tab === "note" && (
         <div className="space-y-3">
+          {!mostraNotaForm && (
+            <button onClick={() => setMostraNotaForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Nuova nota</button>
+          )}
+          {mostraNotaForm && (
+            <NuovaNotaForm clientId={clientId} onAnnulla={() => setMostraNotaForm(false)} onSalvato={() => { setMostraNotaForm(false); carica(); }} />
+          )}
           {notes.map((n) => (
             <Card key={n.id} className="p-4">
               <div className="flex justify-between mb-1">
@@ -485,13 +617,81 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   );
 }
 
-function AdminList({ clients, onSelect }) {
+function NuovoClienteForm({ onCreato, onAnnulla }) {
+  const [f, setF] = useState({ codice: "", nome: "", cognome: "", piano: "", data_inizio: "", data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "" });
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const campo = (label, key, type = "text") => (
+    <div>
+      <label className="text-xs text-slate-500">{label}</label>
+      <input type={type} value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })}
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+    </div>
+  );
+
+  const salva = async () => {
+    if (!f.codice || !f.nome) { setErrore("Codice e nome sono obbligatori."); return; }
+    setSalvando(true);
+    setErrore("");
+    const payload = { ...f };
+    for (const k of ["data_inizio", "data_scadenza"]) if (!payload[k]) payload[k] = null;
+    const { error } = await supabase.from("clients").insert(payload);
+    setSalvando(false);
+    if (error) { setErrore("Errore: " + error.message); return; }
+    onCreato();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Nuovo cliente</p>
+      <div className="grid grid-cols-2 gap-3">
+        {campo("Codice (es. c10)", "codice")}
+        {campo("Nome", "nome")}
+        {campo("Cognome", "cognome")}
+        {campo("Piano", "piano")}
+        {campo("Data inizio", "data_inizio", "date")}
+        {campo("Data scadenza", "data_scadenza", "date")}
+      </div>
+      {campo("Link scheda", "link_scheda")}
+      <div>
+        <label className="text-xs text-slate-500">Stato pacchetto</label>
+        <select value={f.stato_pacchetto} onChange={(e) => setF({ ...f, stato_pacchetto: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="attivo">attivo</option>
+          <option value="in scadenza">in scadenza</option>
+          <option value="scaduto">scaduto</option>
+          <option value="in attivazione">in attivazione</option>
+          <option value="gratuito">gratuito</option>
+        </select>
+      </div>
+      {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
+
+function AdminList({ clients, onSelect, onChanged }) {
+  const [mostraForm, setMostraForm] = useState(false);
   const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clients.filter((c) => c.stato_check === "da_compilare");
 
   return (
     <div className="px-6 pt-6 pb-16 space-y-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold text-slate-800">Dashboard coach</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-slate-800">Dashboard coach</h1>
+        {!mostraForm && (
+          <button onClick={() => setMostraForm(true)} className="bg-slate-800 text-white text-sm font-medium rounded-xl px-4 py-2">+ Nuovo cliente</button>
+        )}
+      </div>
+
+      {mostraForm && (
+        <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <Card className="p-4"><p className="text-xs text-slate-500">Check in scadenza</p><p className="text-2xl font-semibold text-amber-600 mt-1">{daFare.length}</p></Card>
         <Card className="p-4"><p className="text-xs text-slate-500">Pacchetti in scadenza</p><p className="text-2xl font-semibold text-rose-600 mt-1">{inScadenza.length}</p></Card>
@@ -542,7 +742,7 @@ function AdminApp() {
       {selectedId ? (
         <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
       ) : (
-        <AdminList clients={clients} onSelect={setSelectedId} />
+        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} />
       )}
     </div>
   );
