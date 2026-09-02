@@ -625,6 +625,44 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
   );
 }
 
+function InvitaClienteForm({ client, onInvitato }) {
+  const [email, setEmail] = useState(client.email || "");
+  const [inviando, setInviando] = useState(false);
+  const [errore, setErrore] = useState("");
+  const [fatto, setFatto] = useState(false);
+
+  const invita = async () => {
+    if (!email) { setErrore("Inserisci un'email."); return; }
+    setInviando(true);
+    setErrore("");
+    const { data: { session } } = await supabase.auth.getSession();
+    const { data, error } = await supabase.functions.invoke("invite-client", {
+      body: { client_id: client.id, email },
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    setInviando(false);
+    if (error || data?.error) { setErrore(data?.error || error.message); return; }
+    setFatto(true);
+    onInvitato();
+  };
+
+  if (fatto) return <p className="text-emerald-600 text-sm">Invito inviato! La cliente riceverà un'email per impostare la password.</p>;
+
+  return (
+    <div className="space-y-2">
+      <label className="text-slate-400 text-xs">Invita questa cliente via email</label>
+      <div className="flex gap-2">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
+          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <button onClick={invita} disabled={inviando} className="bg-sky-500 text-white text-sm font-medium rounded-lg px-4">
+          {inviando ? "Invio..." : "Invita"}
+        </button>
+      </div>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+    </div>
+  );
+}
+
 function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
@@ -730,6 +768,13 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
           {salvando && <p className="text-slate-400 text-xs col-span-2">Salvataggio...</p>}
+          <div className="col-span-2 border-t border-slate-100 pt-4">
+            {client.user_id ? (
+              <p className="text-emerald-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
+            ) : (
+              <InvitaClienteForm client={client} onInvitato={carica} />
+            )}
+          </div>
         </Card>
       )}
 
