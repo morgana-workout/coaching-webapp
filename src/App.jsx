@@ -145,8 +145,8 @@ function ClientHome({ client, goTo }) {
 function ClientCheckin({ client, onInviato }) {
   const [form, setForm] = useState({
     peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "",
-    coscia_dx_cm: "", braccio_dx_cm: "", energia: 3, sonno: 3, aderenza_cibo: 3, aderenza_allenamento: 3,
-    note_cliente: "",
+    coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", energia: 3, sonno: 3, aderenza_cibo: 3, aderenza_allenamento: 3,
+    note_cliente: "", fase_mestruale: "",
   });
   const [inviando, setInviando] = useState(false);
   const [inviato, setInviato] = useState(false);
@@ -173,7 +173,7 @@ function ClientCheckin({ client, onInviato }) {
     setInviando(true);
     setErrore("");
     const payload = { client_id: client.id, data_check: new Date().toISOString().slice(0, 10), stato: "ricevuto" };
-    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm"]) {
+    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = form[k] === "" ? null : Number(form[k]);
     }
     payload.energia = form.energia;
@@ -181,6 +181,7 @@ function ClientCheckin({ client, onInviato }) {
     payload.aderenza_cibo = form.aderenza_cibo;
     payload.aderenza_allenamento = form.aderenza_allenamento;
     payload.note_cliente = form.note_cliente || null;
+    payload.fase_mestruale = form.fase_mestruale || null;
 
     const { error } = await supabase.from("checkins").insert(payload);
     setInviando(false);
@@ -212,7 +213,20 @@ function ClientCheckin({ client, onInviato }) {
           {campo("Sotto ombelico", "sotto_ombelico_cm", "cm")}
           {campo("Coscia dx", "coscia_dx_cm", "cm")}
           {campo("Braccio dx", "braccio_dx_cm", "cm")}
+          {campo("Collo", "collo_cm", "cm")}
+          {campo("Glutei", "glutei_cm", "cm")}
         </div>
+      </Card>
+      <Card className="p-4 space-y-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Ciclo mestruale</p>
+        <select value={form.fase_mestruale} onChange={(e) => setForm({ ...form, fase_mestruale: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">Preferisco non specificare</option>
+          <option value="mestruale">Fase mestruale</option>
+          <option value="follicolare">Fase follicolare</option>
+          <option value="ovulatoria">Fase ovulatoria</option>
+          <option value="luteale">Fase luteale</option>
+        </select>
       </Card>
       <Card className="p-4 space-y-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Come stai andando</p>
@@ -233,7 +247,104 @@ function ClientCheckin({ client, onInviato }) {
   );
 }
 
-function ClientProgress({ checkins }) {
+const CAMPI_MISURA = [
+  { key: "peso_kg", label: "Peso", unit: "kg" },
+  { key: "petto_cm", label: "Petto", unit: "cm" },
+  { key: "sopra_ombelico_cm", label: "Sopra ombelico", unit: "cm" },
+  { key: "ombelico_cm", label: "Ombelico", unit: "cm" },
+  { key: "sotto_ombelico_cm", label: "Sotto ombelico", unit: "cm" },
+  { key: "coscia_dx_cm", label: "Coscia dx", unit: "cm" },
+  { key: "braccio_dx_cm", label: "Braccio dx", unit: "cm" },
+  { key: "collo_cm", label: "Collo", unit: "cm" },
+  { key: "glutei_cm", label: "Glutei", unit: "cm" },
+];
+
+function calcolaBMI(peso, altezzaCm) {
+  if (!peso || !altezzaCm) return null;
+  const h = altezzaCm / 100;
+  return peso / (h * h);
+}
+function calcolaWHtR(ombelico, altezzaCm) {
+  if (!ombelico || !altezzaCm) return null;
+  return ombelico / altezzaCm;
+}
+// Stima Body Fat % — metodo US Navy (misure in cm)
+function calcolaBodyFat(sesso, vita, collo, glutei, altezzaCm) {
+  if (!vita || !collo || !altezzaCm) return null;
+  if (sesso === "M") {
+    const diff = vita - collo;
+    if (diff <= 0) return null;
+    return 495 / (1.0324 - 0.19077 * Math.log10(diff) + 0.15456 * Math.log10(altezzaCm)) - 450;
+  }
+  if (sesso === "F") {
+    if (!glutei) return null;
+    const diff = vita + glutei - collo;
+    if (diff <= 0) return null;
+    return 495 / (1.29579 - 0.35004 * Math.log10(diff) + 0.2210 * Math.log10(altezzaCm)) - 450;
+  }
+  return null;
+}
+
+function HistoryTable({ checkins, altezza, sesso }) {
+  const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const righe = ordinati.map((c, i) => ({ ...c, prev: ordinati[i - 1] || null })).reverse();
+
+  if (righe.length === 0) return <p className="text-slate-400 text-sm px-1">Nessun check ancora registrato.</p>;
+
+  return (
+    <Card className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[960px]">
+        <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <tr>
+            <th className="text-left px-3 py-2 sticky left-0 bg-slate-50">Data</th>
+            {CAMPI_MISURA.map((c) => <th key={c.key} className="text-right px-3 py-2 whitespace-nowrap">{c.label}</th>)}
+            <th className="text-right px-3 py-2 whitespace-nowrap">BMI</th>
+            <th className="text-right px-3 py-2 whitespace-nowrap">WHtR</th>
+            <th className="text-right px-3 py-2 whitespace-nowrap">Body Fat %</th>
+            <th className="text-left px-3 py-2 whitespace-nowrap">Fase ciclo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {righe.map((r) => {
+            const bmi = calcolaBMI(r.peso_kg, altezza);
+            const whtr = calcolaWHtR(r.ombelico_cm ?? r.sopra_ombelico_cm, altezza);
+            const bf = calcolaBodyFat(sesso, r.ombelico_cm ?? r.sopra_ombelico_cm, r.collo_cm, r.glutei_cm, altezza);
+            return (
+              <tr key={r.id} className="border-t border-slate-100">
+                <td className="px-3 py-2 text-slate-600 whitespace-nowrap sticky left-0 bg-white font-medium">{r.data_check}</td>
+                {CAMPI_MISURA.map((c) => {
+                  const val = r[c.key];
+                  const prevVal = r.prev ? r.prev[c.key] : null;
+                  let delta = null;
+                  if (val != null && prevVal != null && Math.abs(val - prevVal) > 0.001) {
+                    const d = val - prevVal;
+                    delta = (d > 0 ? "+" : "") + d.toFixed(1);
+                  }
+                  return (
+                    <td key={c.key} className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">
+                      {val ?? "—"}
+                      {delta && <span className="text-slate-400 text-xs ml-1">({delta})</span>}
+                    </td>
+                  );
+                })}
+                <td className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">{bmi ? bmi.toFixed(1) : "—"}</td>
+                <td className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">{whtr ? whtr.toFixed(2) : "—"}</td>
+                <td className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">{bf ? bf.toFixed(1) + "%" : "—"}</td>
+                <td className="px-3 py-2 text-slate-500 whitespace-nowrap capitalize">{r.fase_mestruale || "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="text-slate-400 text-xs px-3 py-2">
+        Tra parentesi la variazione rispetto al check precedente. BMI/WHtR da peso-ombelico-altezza; Body Fat % (metodo US Navy) richiede anche collo, glutei, sesso e altezza in anagrafica
+        {!altezza && " — inserisci l'altezza nella scheda cliente per vederli"}.
+      </p>
+    </Card>
+  );
+}
+
+function ClientProgress({ checkins, altezza, sesso, titolo = "I tuoi progressi" }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = [
     { key: "peso_kg", label: "Peso" }, { key: "petto_cm", label: "Petto" },
@@ -249,7 +360,7 @@ function ClientProgress({ checkins }) {
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
-      <h1 className="text-xl font-semibold text-slate-800">I tuoi progressi</h1>
+      <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {opzioni.map((o) => (
           <button key={o.key} onClick={() => setMetrica(o.key)}
@@ -269,6 +380,8 @@ function ClientProgress({ checkins }) {
           </LineChart>
         </ResponsiveContainer>
       </Card>
+
+      <HistoryTable checkins={checkins} altezza={altezza} sesso={sesso} />
     </div>
   );
 }
@@ -374,7 +487,7 @@ function ClientApp({ session }) {
       </div>
       {tab === "home" && <ClientHome client={client} />}
       {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
-      {tab === "progressi" && <ClientProgress checkins={checkins} />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} />}
       {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
       {tab === "extra" && <ClientApprofondimenti />}
       <div className="fixed bottom-0 max-w-md w-full bg-white border-t border-slate-200 flex justify-around py-2">
@@ -392,7 +505,7 @@ function ClientApp({ session }) {
 /* AREA ADMIN                                                          */
 /* ------------------------------------------------------------------ */
 function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", note_cliente: "", stato: "revisionato" });
+  const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", note_cliente: "", stato: "revisionato", fase_mestruale: "" });
   const [salvando, setSalvando] = useState(false);
   const campo = (label, key, unit) => (
     <div>
@@ -403,8 +516,8 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
   );
   const salva = async () => {
     setSalvando(true);
-    const payload = { client_id: clientId, data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato };
-    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm"]) {
+    const payload = { client_id: clientId, data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
+    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
     }
     await supabase.from("checkins").insert(payload);
@@ -425,6 +538,18 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
         {campo("Sotto ombelico (cm)", "sotto_ombelico_cm")}
         {campo("Coscia dx (cm)", "coscia_dx_cm")}
         {campo("Braccio dx (cm)", "braccio_dx_cm")}
+        {campo("Collo (cm)", "collo_cm")}
+        {campo("Glutei (cm)", "glutei_cm")}
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Fase ciclo mestruale</label>
+        <select value={f.fase_mestruale} onChange={(e) => setF({ ...f, fase_mestruale: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="">Non specificata</option>
+          <option value="mestruale">Mestruale</option>
+          <option value="follicolare">Follicolare</option>
+          <option value="ovulatoria">Ovulatoria</option>
+          <option value="luteale">Luteale</option>
+        </select>
       </div>
       <textarea placeholder="Note" value={f.note_cliente} onChange={(e) => setF({ ...f, note_cliente: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="flex gap-2">
@@ -531,7 +656,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   };
 
   if (!client) return <Spinner />;
-  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
+  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "progressi", label: "Progressi" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
 
   return (
     <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5">
@@ -548,17 +673,59 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm">
-          <div><p className="text-slate-400 text-xs">Piano</p><p className="text-slate-700">{client.piano || "—"}</p></div>
-          <div><p className="text-slate-400 text-xs">Stato pacchetto</p><p className="text-slate-700 capitalize">{client.stato_pacchetto || "—"}</p></div>
-          <div><p className="text-slate-400 text-xs">Data inizio</p><p className="text-slate-700">{client.data_inizio || "—"}</p></div>
-          <div><p className="text-slate-400 text-xs">Data scadenza</p><p className="text-slate-700">{client.data_scadenza || "—"}</p></div>
-          <div className="col-span-2">
-            <p className="text-slate-400 text-xs">Prossimo check</p>
+          <div>
+            <label className="text-slate-400 text-xs">Piano</label>
+            <select defaultValue={client.piano || ""} onBlur={(e) => salvaCliente({ piano: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">—</option>
+              <option value="Mensile">Mensile</option>
+              <option value="Trimestrale">Trimestrale</option>
+              <option value="Semestrale">Semestrale</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Stato pacchetto</label>
+            <select defaultValue={client.stato_pacchetto || ""} onBlur={(e) => salvaCliente({ stato_pacchetto: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">—</option>
+              <option value="attivo">attivo</option>
+              <option value="in scadenza">in scadenza</option>
+              <option value="scaduto">scaduto</option>
+              <option value="in attivazione">in attivazione</option>
+              <option value="gratuito">gratuito</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Data inizio</label>
+            <input type="date" defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Data scadenza</label>
+            <input type="date" defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Altezza (cm)</label>
+            <input type="number" defaultValue={client.altezza_cm || ""} onBlur={(e) => salvaCliente({ altezza_cm: e.target.value ? Number(e.target.value) : null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Sesso (per Body Fat %)</label>
+            <select defaultValue={client.sesso || ""} onBlur={(e) => salvaCliente({ sesso: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">—</option>
+              <option value="F">F</option>
+              <option value="M">M</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Prossimo check</label>
             <input type="date" defaultValue={client.prossimo_check || ""} onBlur={(e) => salvaCliente({ prossimo_check: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
           <div className="col-span-2">
-            <p className="text-slate-400 text-xs">Link scheda</p>
+            <label className="text-slate-400 text-xs">Link scheda</label>
             <input defaultValue={client.link_scheda || ""} onBlur={(e) => salvaCliente({ link_scheda: e.target.value })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
@@ -589,6 +756,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} titolo="Progressi e storico check" />}
+
       {tab === "nutrizione" && (
         <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
       )}
@@ -618,7 +787,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 }
 
 function NuovoClienteForm({ onCreato, onAnnulla }) {
-  const [f, setF] = useState({ codice: "", nome: "", cognome: "", piano: "", data_inizio: "", data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "" });
+  const [f, setF] = useState({ codice: "", nome: "", cognome: "", piano: "", data_inizio: "", data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "", altezza_cm: "" });
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
 
@@ -635,6 +804,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
     setSalvando(true);
     setErrore("");
     const payload = { ...f };
+    payload.altezza_cm = payload.altezza_cm ? Number(payload.altezza_cm) : null;
     for (const k of ["data_inizio", "data_scadenza"]) if (!payload[k]) payload[k] = null;
     const { error } = await supabase.from("clients").insert(payload);
     setSalvando(false);
@@ -652,6 +822,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
         {campo("Piano", "piano")}
         {campo("Data inizio", "data_inizio", "date")}
         {campo("Data scadenza", "data_scadenza", "date")}
+        {campo("Altezza (cm)", "altezza_cm", "number")}
       </div>
       {campo("Link scheda", "link_scheda")}
       <div>
