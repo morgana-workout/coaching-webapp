@@ -142,12 +142,41 @@ function ClientHome({ client, goTo }) {
   );
 }
 
+async function caricaFotoStorage(file, clientId, dataCheck, slot) {
+  if (!file) return null;
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${clientId}/${dataCheck}-${slot}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from("progress-photos").upload(path, file, { upsert: true });
+  if (error) throw error;
+  return path;
+}
+
+function FotoInputs({ files, setFiles }) {
+  const slot = (label, key) => (
+    <div>
+      <label className="text-xs text-slate-500 block mb-1">{label}</label>
+      <input type="file" accept="image/*" onChange={(e) => setFiles({ ...files, [key]: e.target.files[0] || null })}
+        className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-600" />
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {slot("Frontale", "frontale")}
+      {slot("Laterale", "laterale")}
+      {slot("Posteriore", "posteriore")}
+      {slot("Extra (facoltativa)", "extra")}
+    </div>
+  );
+}
+
 function ClientCheckin({ client, onInviato }) {
   const [form, setForm] = useState({
     peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "",
     coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", energia: 3, sonno: 3, aderenza_cibo: 3, aderenza_allenamento: 3,
-    note_cliente: "", fase_mestruale: "",
+    fase_mestruale: "",
   });
+  const [notaFinale, setNotaFinale] = useState("");
+  const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [inviando, setInviando] = useState(false);
   const [inviato, setInviato] = useState(false);
   const [errore, setErrore] = useState("");
@@ -172,7 +201,8 @@ function ClientCheckin({ client, onInviato }) {
   const invia = async () => {
     setInviando(true);
     setErrore("");
-    const payload = { client_id: client.id, data_check: new Date().toISOString().slice(0, 10), stato: "ricevuto" };
+    const dataCheck = new Date().toISOString().slice(0, 10);
+    const payload = { client_id: client.id, data_check: dataCheck, stato: "ricevuto" };
     for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = form[k] === "" ? null : Number(form[k]);
     }
@@ -180,12 +210,32 @@ function ClientCheckin({ client, onInviato }) {
     payload.sonno = form.sonno;
     payload.aderenza_cibo = form.aderenza_cibo;
     payload.aderenza_allenamento = form.aderenza_allenamento;
-    payload.note_cliente = form.note_cliente || null;
+    payload.note_cliente = notaFinale || null;
     payload.fase_mestruale = form.fase_mestruale || null;
 
-    const { error } = await supabase.from("checkins").insert(payload);
+    try {
+      payload.foto_frontale_path = await caricaFotoStorage(files.frontale, client.id, dataCheck, "frontale");
+      payload.foto_laterale_path = await caricaFotoStorage(files.laterale, client.id, dataCheck, "laterale");
+      payload.foto_posteriore_path = await caricaFotoStorage(files.posteriore, client.id, dataCheck, "posteriore");
+      payload.foto_extra_path = await caricaFotoStorage(files.extra, client.id, dataCheck, "extra");
+    } catch (e) {
+      setInviando(false);
+      setErrore("Errore nel caricamento delle foto: " + e.message);
+      return;
+    }
+
+    const { data: inserito, error } = await supabase.from("checkins").insert(payload).select().single();
     setInviando(false);
     if (error) { setErrore("Non sono riuscita a inviare il check: " + error.message); return; }
+
+    // Notifica il coach via email (non blocca l'invio se fallisce)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      supabase.functions.invoke("notify-checkin", {
+        body: { checkin_id: inserito.id },
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }).catch(() => {});
+    });
+
     setInviato(true);
     onInviato?.();
   };
@@ -234,15 +284,21 @@ function ClientCheckin({ client, onInviato }) {
         {slider("Qualità del sonno", "sonno")}
         {slider("Aderenza all'alimentazione", "aderenza_cibo")}
         {slider("Aderenza all'allenamento", "aderenza_allenamento")}
-        <textarea placeholder="Difficoltà, feedback, note per Morgana..." value={form.note_cliente}
-          onChange={(e) => setForm({ ...form, note_cliente: e.target.value })}
+      </Card>
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi</p>
+        <FotoInputs files={files} setFiles={setFiles} />
+      </Card>
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Nota finale</p>
+        <textarea placeholder="Difficoltà, feedback, tutto quello che vuoi dire a Morgana..." value={notaFinale}
+          onChange={(e) => setNotaFinale(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300" rows={3} />
       </Card>
       {errore && <p className="text-rose-500 text-sm">{errore}</p>}
       <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white font-medium rounded-xl py-3">
         {inviando ? "Invio in corso..." : "Invia check"}
       </button>
-      <p className="text-slate-400 text-xs text-center">Le foto progressi si potranno caricare in un prossimo aggiornamento.</p>
     </div>
   );
 }
@@ -268,7 +324,11 @@ function calcolaWHtR(ombelico, altezzaCm) {
   if (!ombelico || !altezzaCm) return null;
   return ombelico / altezzaCm;
 }
-// Stima Body Fat % — metodo US Navy (misure in cm)
+function calcolaWHR(vita, fianchi) {
+  if (!vita || !fianchi) return null;
+  return vita / fianchi;
+}
+// Stima Body Fat % — metodo US Navy (misure in cm, nessuna plica richiesta)
 function calcolaBodyFat(sesso, vita, collo, glutei, altezzaCm) {
   if (!vita || !collo || !altezzaCm) return null;
   if (sesso === "M") {
@@ -284,8 +344,15 @@ function calcolaBodyFat(sesso, vita, collo, glutei, altezzaCm) {
   }
   return null;
 }
+// BMR — formula Mifflin-St Jeor
+function calcolaBMR(sesso, peso, altezzaCm, eta) {
+  if (!peso || !altezzaCm || !eta || !sesso) return null;
+  const base = 10 * peso + 6.25 * altezzaCm - 5 * eta;
+  return sesso === "M" ? base + 5 : base - 161;
+}
 
-function HistoryTable({ checkins, altezza, sesso }) {
+/* Tabella 1 — solo circonferenze grezze, con variazione dal check precedente */
+function HistoryTable({ checkins }) {
   const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
   const righe = ordinati.map((c, i) => ({ ...c, prev: ordinati[i - 1] || null })).reverse();
 
@@ -293,52 +360,88 @@ function HistoryTable({ checkins, altezza, sesso }) {
 
   return (
     <Card className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[960px]">
+      <table className="w-full text-sm min-w-[820px]">
         <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
           <tr>
             <th className="text-left px-3 py-2 sticky left-0 bg-slate-50">Data</th>
             {CAMPI_MISURA.map((c) => <th key={c.key} className="text-right px-3 py-2 whitespace-nowrap">{c.label}</th>)}
-            <th className="text-right px-3 py-2 whitespace-nowrap">BMI</th>
-            <th className="text-right px-3 py-2 whitespace-nowrap">WHtR</th>
-            <th className="text-right px-3 py-2 whitespace-nowrap">Body Fat %</th>
             <th className="text-left px-3 py-2 whitespace-nowrap">Fase ciclo</th>
           </tr>
         </thead>
         <tbody>
-          {righe.map((r) => {
-            const bmi = calcolaBMI(r.peso_kg, altezza);
-            const whtr = calcolaWHtR(r.ombelico_cm ?? r.sopra_ombelico_cm, altezza);
-            const bf = calcolaBodyFat(sesso, r.ombelico_cm ?? r.sopra_ombelico_cm, r.collo_cm, r.glutei_cm, altezza);
-            return (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-3 py-2 text-slate-600 whitespace-nowrap sticky left-0 bg-white font-medium">{r.data_check}</td>
-                {CAMPI_MISURA.map((c) => {
-                  const val = r[c.key];
-                  const prevVal = r.prev ? r.prev[c.key] : null;
-                  let delta = null;
-                  if (val != null && prevVal != null && Math.abs(val - prevVal) > 0.001) {
-                    const d = val - prevVal;
-                    delta = (d > 0 ? "+" : "") + d.toFixed(1);
-                  }
-                  return (
-                    <td key={c.key} className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">
-                      {val ?? "—"}
-                      {delta && <span className="text-slate-400 text-xs ml-1">({delta})</span>}
-                    </td>
-                  );
-                })}
-                <td className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">{bmi ? bmi.toFixed(1) : "—"}</td>
-                <td className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">{whtr ? whtr.toFixed(2) : "—"}</td>
-                <td className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">{bf ? bf.toFixed(1) + "%" : "—"}</td>
-                <td className="px-3 py-2 text-slate-500 whitespace-nowrap capitalize">{r.fase_mestruale || "—"}</td>
-              </tr>
-            );
-          })}
+          {righe.map((r) => (
+            <tr key={r.id} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-slate-600 whitespace-nowrap sticky left-0 bg-white font-medium">{r.data_check}</td>
+              {CAMPI_MISURA.map((c) => {
+                const val = r[c.key];
+                const prevVal = r.prev ? r.prev[c.key] : null;
+                let delta = null;
+                if (val != null && prevVal != null && Math.abs(val - prevVal) > 0.001) {
+                  const d = val - prevVal;
+                  delta = (d > 0 ? "+" : "") + d.toFixed(1);
+                }
+                return (
+                  <td key={c.key} className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">
+                    {val ?? "—"}
+                    {delta && <span className="text-slate-400 text-xs ml-1">({delta})</span>}
+                  </td>
+                );
+              })}
+              <td className="px-3 py-2 text-slate-500 whitespace-nowrap capitalize">{r.fase_mestruale || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-slate-400 text-xs px-3 py-2">Tra parentesi la variazione rispetto al check precedente.</p>
+    </Card>
+  );
+}
+
+/* Tabella 2 — valori calcolati, righe = indicatori, colonne = date (per confronto rapido) */
+function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
+  const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  if (ordinati.length === 0) return null;
+
+  const righe = [
+    { label: "Peso (kg)", calc: (c) => c.peso_kg },
+    { label: "BMI", calc: (c) => calcolaBMI(c.peso_kg, altezza), dec: 1 },
+    { label: "Circonferenza Vita (cm)", calc: (c) => c.sopra_ombelico_cm },
+    { label: "Circonferenza Fianchi (cm)", calc: (c) => c.glutei_cm },
+    { label: "Circonferenza Addome (cm)", calc: (c) => c.ombelico_cm },
+    { label: "Circonferenza Coscia (cm)", calc: (c) => c.coscia_dx_cm },
+    { label: "Circonferenza Braccio (cm)", calc: (c) => c.braccio_dx_cm },
+    { label: "Rapporto Vita/Fianchi", calc: (c) => calcolaWHR(c.sopra_ombelico_cm, c.glutei_cm), dec: 2 },
+    { label: "Body Fat % (US Navy)", calc: (c) => calcolaBodyFat(sesso, c.ombelico_cm ?? c.sopra_ombelico_cm, c.collo_cm, c.glutei_cm, altezza), dec: 1, suffix: "%" },
+    { label: "BMR (kcal)", calc: (c) => calcolaBMR(sesso, c.peso_kg, altezza, eta), dec: 0 },
+  ];
+
+  return (
+    <Card className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[600px]">
+        <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <tr>
+            <th className="text-left px-3 py-2 sticky left-0 bg-slate-50">Indicatore</th>
+            {ordinati.map((c) => <th key={c.id} className="text-right px-3 py-2 whitespace-nowrap">{c.data_check}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {righe.map((r) => (
+            <tr key={r.label} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-slate-600 whitespace-nowrap sticky left-0 bg-white font-medium">{r.label}</td>
+              {ordinati.map((c) => {
+                const v = r.calc(c);
+                return (
+                  <td key={c.id} className="px-3 py-2 text-right text-slate-700 whitespace-nowrap">
+                    {v != null ? v.toFixed(r.dec ?? 1) + (r.suffix || "") : "—"}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
         </tbody>
       </table>
       <p className="text-slate-400 text-xs px-3 py-2">
-        Tra parentesi la variazione rispetto al check precedente. BMI/WHtR da peso-ombelico-altezza; Body Fat % (metodo US Navy) richiede anche collo, glutei, sesso e altezza in anagrafica
-        {!altezza && " — inserisci l'altezza nella scheda cliente per vederli"}.
+        Valori calcolati da peso/circonferenze/altezza/età/sesso in anagrafica — se mancano, la cella resta vuota.
       </p>
     </Card>
   );
@@ -401,10 +504,10 @@ function ClientNutrizione({ piano }) {
         <h1 className="text-xl font-semibold text-slate-800">Nutrizione</h1>
         <p className="text-slate-500 text-sm mt-1">Valori indicativi, aggiornati il {piano.data_aggiornamento}</p>
       </div>
-      <Card className="p-5 bg-slate-800 border-slate-800">
+      <div className="rounded-2xl border border-slate-700 shadow-sm p-5 bg-slate-800">
         <div className="flex items-center gap-2 text-slate-300 text-xs uppercase tracking-wide font-medium mb-1"><Apple size={14} /> Kcal indicative giornaliere</div>
-        <p className="text-4xl font-semibold text-white">{piano.kcal} <span className="text-lg font-normal text-slate-400">kcal</span></p>
-      </Card>
+        <p className="text-4xl font-semibold text-white">{piano.kcal ?? "—"} <span className="text-lg font-normal text-slate-400">kcal</span></p>
+      </div>
       <Card className="p-4 space-y-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Macros indicativi</p>
         {macro.map((m) => (
@@ -506,7 +609,9 @@ function ClientApp({ session }) {
 /* ------------------------------------------------------------------ */
 function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
   const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", note_cliente: "", stato: "revisionato", fase_mestruale: "" });
+  const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
   const campo = (label, key, unit) => (
     <div>
       <label className="text-xs text-slate-500">{label}</label>
@@ -515,10 +620,22 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
     </div>
   );
   const salva = async () => {
+    if (!f.data_check) { setErrore("Inserisci la data del check."); return; }
     setSalvando(true);
+    setErrore("");
     const payload = { client_id: clientId, data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
     for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
+    }
+    try {
+      payload.foto_frontale_path = await caricaFotoStorage(files.frontale, clientId, f.data_check, "frontale");
+      payload.foto_laterale_path = await caricaFotoStorage(files.laterale, clientId, f.data_check, "laterale");
+      payload.foto_posteriore_path = await caricaFotoStorage(files.posteriore, clientId, f.data_check, "posteriore");
+      payload.foto_extra_path = await caricaFotoStorage(files.extra, clientId, f.data_check, "extra");
+    } catch (e) {
+      setSalvando(false);
+      setErrore("Errore caricamento foto: " + e.message);
+      return;
     }
     await supabase.from("checkins").insert(payload);
     setSalvando(false);
@@ -552,6 +669,11 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
         </select>
       </div>
       <textarea placeholder="Note" value={f.note_cliente} onChange={(e) => setF({ ...f, note_cliente: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div>
+        <label className="text-xs text-slate-500 block mb-1">Foto progressi (facoltative)</label>
+        <FotoInputs files={files} setFiles={setFiles} />
+      </div>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva check"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -789,10 +911,13 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <Card className="p-4">
             <ul className="space-y-2">
               {checkins.map((r) => (
-                <li key={r.id} className="flex justify-between items-center text-sm border-b border-slate-100 pb-2">
-                  <span className="text-slate-600">{r.data_check}</span>
-                  <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
-                  <StatoBadge stato={r.stato} />
+                <li key={r.id} className="border-b border-slate-100 pb-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">{r.data_check}</span>
+                    <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
+                    <StatoBadge stato={r.stato} />
+                  </div>
+                  <FotoCheck checkin={r} />
                 </li>
               ))}
               {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
@@ -890,6 +1015,49 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
   );
 }
 
+function FotoCheck({ checkin }) {
+  const slots = [
+    { key: "foto_frontale_path", label: "Frontale" },
+    { key: "foto_laterale_path", label: "Laterale" },
+    { key: "foto_posteriore_path", label: "Posteriore" },
+    { key: "foto_extra_path", label: "Extra" },
+  ].filter((s) => checkin[s.key]);
+  const [urls, setUrls] = useState(null);
+  const [aperto, setAperto] = useState(false);
+  const [caricando, setCaricando] = useState(false);
+
+  const apri = async () => {
+    if (!aperto && !urls) {
+      setCaricando(true);
+      const risultati = await Promise.all(slots.map(async (s) => {
+        const { data } = await supabase.storage.from("progress-photos").createSignedUrl(checkin[s.key], 3600);
+        return { label: s.label, url: data?.signedUrl };
+      }));
+      setUrls(risultati);
+      setCaricando(false);
+    }
+    setAperto(!aperto);
+  };
+
+  if (slots.length === 0) return null;
+  return (
+    <div className="mt-1">
+      <button onClick={apri} className="text-sky-600 text-xs font-medium flex items-center gap-1">
+        <Camera size={13} /> {caricando ? "Carico..." : aperto ? "Nascondi foto" : `Vedi foto (${slots.length})`}
+      </button>
+      {aperto && urls && (
+        <div className="flex gap-2 mt-2 flex-wrap">
+          {urls.map((u, i) => u.url && (
+            <a key={i} href={u.url} target="_blank" rel="noreferrer" title={u.label}>
+              <img src={u.url} alt={u.label} className="w-16 h-16 object-cover rounded-lg border border-slate-200" />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminList({ clients, onSelect, onChanged }) {
   const [mostraForm, setMostraForm] = useState(false);
   const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
@@ -967,9 +1135,54 @@ function AdminApp() {
 /* ------------------------------------------------------------------ */
 /* ROOT — decide se sei admin o cliente in base al database            */
 /* ------------------------------------------------------------------ */
+function ImpostaPassword({ onFatto }) {
+  const [password, setPassword] = useState("");
+  const [conferma, setConferma] = useState("");
+  const [errore, setErrore] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
+    if (password !== conferma) { setErrore("Le due password non coincidono."); return; }
+    setSalvando(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setSalvando(false);
+    if (error) { setErrore(error.message); return; }
+    window.history.replaceState(null, "", window.location.pathname);
+    onFatto();
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col items-center justify-center px-6">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="w-14 h-14 rounded-2xl bg-slate-700 mx-auto mb-4 flex items-center justify-center"><Dumbbell className="text-sky-300" size={26} /></div>
+          <h1 className="text-white text-xl font-semibold">Benvenuta!</h1>
+          <p className="text-slate-400 text-sm mt-1">Crea una password per accedere da qui in poi con email e password.</p>
+        </div>
+        <form onSubmit={salva} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
+          <input type="password" placeholder="Nuova password" value={password} onChange={(e) => setPassword(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
+          <input type="password" placeholder="Ripeti la password" value={conferma} onChange={(e) => setConferma(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
+          {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+          <button disabled={salvando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
+            {salvando ? "Salvo..." : "Crea password ed entra"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [ruolo, setRuolo] = useState(null); // "admin" | "client" | null
+  const [devImpostarePassword, setDevImpostarePassword] = useState(
+    () => window.location.hash.includes("type=invite") || window.location.hash.includes("type=recovery")
+  );
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -987,6 +1200,7 @@ export default function App() {
 
   if (session === undefined) return <Spinner />;
   if (!session) return <Login />;
+  if (devImpostarePassword) return <ImpostaPassword onFatto={() => setDevImpostarePassword(false)} />;
   if (ruolo === null) return <Spinner />;
 
   return ruolo === "admin" ? <AdminApp /> : <ClientApp session={session} />;
