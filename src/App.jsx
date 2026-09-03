@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -237,6 +237,9 @@ function ClientCheckin({ client, onInviato }) {
     const { data: inserito, error } = await supabase.from("checkins").insert(payload).select().single();
     setInviando(false);
     if (error) { setErrore("Non sono riuscita a inviare il check: " + error.message); return; }
+
+    // Aggiorna in automatico il prossimo check a +4 settimane (tramite funzione sicura)
+    supabase.rpc("aggiorna_prossimo_check", { check_date: dataCheck }).then(() => {});
 
     // Notifica il coach via email (non blocca l'invio se fallisce)
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -550,6 +553,114 @@ function ClientNutrizione({ piano }) {
   );
 }
 
+function DiarioAllenamento({ clientId }) {
+  const [righe, setRighe] = useState([]);
+  const [form, setForm] = useState({ data: new Date().toISOString().slice(0, 10), esercizio: "", serie: "", ripetizioni: "", carico_kg: "", note: "" });
+  const [salvando, setSalvando] = useState(false);
+  const [mostraForm, setMostraForm] = useState(false);
+
+  const carica = async () => {
+    const { data } = await supabase.from("training_log").select("*").eq("client_id", clientId).order("data", { ascending: false });
+    setRighe(data || []);
+  };
+  useEffect(() => { carica(); }, [clientId]);
+
+  const salva = async () => {
+    if (!form.esercizio) return;
+    setSalvando(true);
+    await supabase.from("training_log").insert({
+      client_id: clientId,
+      data: form.data || null,
+      esercizio: form.esercizio,
+      serie: form.serie === "" ? null : Number(form.serie),
+      ripetizioni: form.ripetizioni || null,
+      carico_kg: form.carico_kg === "" ? null : Number(form.carico_kg),
+      note: form.note || null,
+    });
+    setSalvando(false);
+    setForm({ ...form, esercizio: "", serie: "", ripetizioni: "", carico_kg: "", note: "" });
+    carica();
+  };
+
+  const elimina = async (id) => {
+    await supabase.from("training_log").delete().eq("id", id);
+    carica();
+  };
+
+  return (
+    <div className="px-5 pt-6 pb-24 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-800">Diario allenamento</h1>
+          <p className="text-slate-500 text-sm mt-1">Traccia carichi, serie e ripetizioni settimana dopo settimana.</p>
+        </div>
+        {!mostraForm && (
+          <button onClick={() => setMostraForm(true)} className="bg-slate-800 text-white text-xs font-medium rounded-lg px-3 py-2 whitespace-nowrap">+ Aggiungi</button>
+        )}
+      </div>
+
+      {mostraForm && (
+        <Card className="p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs text-slate-500">Data</label>
+              <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+            <div><label className="text-xs text-slate-500">Esercizio</label>
+              <input value={form.esercizio} onChange={(e) => setForm({ ...form, esercizio: e.target.value })} placeholder="Es. Squat" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+            <div><label className="text-xs text-slate-500">Serie</label>
+              <input type="number" value={form.serie} onChange={(e) => setForm({ ...form, serie: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+            <div><label className="text-xs text-slate-500">Ripetizioni</label>
+              <input value={form.ripetizioni} onChange={(e) => setForm({ ...form, ripetizioni: e.target.value })} placeholder="Es. 8-10" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+            <div className="col-span-2"><label className="text-xs text-slate-500">Carico (kg)</label>
+              <input type="number" step="0.5" value={form.carico_kg} onChange={(e) => setForm({ ...form, carico_kg: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+          </div>
+          <textarea placeholder="Note (facoltative)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <div className="flex gap-2">
+            <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva riga"}</button>
+            <button onClick={() => setMostraForm(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
+          </div>
+        </Card>
+      )}
+
+      <Card className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
+          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <tr>
+              <th className="text-left px-3 py-2">Data</th>
+              <th className="text-left px-3 py-2">Esercizio</th>
+              <th className="text-right px-3 py-2">Serie</th>
+              <th className="text-right px-3 py-2">Rip.</th>
+              <th className="text-right px-3 py-2">Carico</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {righe.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100">
+                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{r.data}</td>
+                <td className="px-3 py-2 text-slate-700">{r.esercizio}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{r.serie ?? "—"}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{r.ripetizioni ?? "—"}</td>
+                <td className="px-3 py-2 text-right text-slate-700">{r.carico_kg ? `${r.carico_kg} kg` : "—"}</td>
+                <td className="px-3 py-2 text-right">
+                  <button onClick={() => elimina(r.id)} className="text-slate-300 hover:text-rose-500"><X size={14} /></button>
+                </td>
+              </tr>
+            ))}
+            {righe.length === 0 && (
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Ancora nessuna riga registrata.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
 function ClientApprofondimenti() {
   return (
     <div className="px-5 pt-6 pb-24 space-y-4">
@@ -600,6 +711,7 @@ function ClientApp({ session }) {
   const nav = [
     { key: "home", label: "Home", icon: Home },
     { key: "checkin", label: "Check", icon: ClipboardList },
+    { key: "log", label: "Log", icon: Dumbbell },
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     { key: "nutrizione", label: "Nutrizione", icon: Apple },
     { key: "extra", label: "Extra", icon: BookOpen },
@@ -613,6 +725,7 @@ function ClientApp({ session }) {
       </div>
       {tab === "home" && <ClientHome client={client} />}
       {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
+      {tab === "log" && <DiarioAllenamento clientId={client.id} />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} />}
       {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
       {tab === "extra" && <ClientApprofondimenti />}
@@ -773,6 +886,79 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
   );
 }
 
+function addMesi(dataStr, mesi) {
+  const d = new Date(dataStr + "T00:00:00");
+  d.setMonth(d.getMonth() + mesi);
+  return d.toISOString().slice(0, 10);
+}
+function addGiorni(dataStr, giorni) {
+  const d = new Date(dataStr + "T00:00:00");
+  d.setDate(d.getDate() + giorni);
+  return d.toISOString().slice(0, 10);
+}
+
+function RegistraPagamento({ client, pagamenti, onRegistrato }) {
+  const [tipo, setTipo] = useState("Mensile");
+  const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
+  const [salvando, setSalvando] = useState(false);
+  const [fatto, setFatto] = useState(false);
+  const mesiPerTipo = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
+
+  const registra = async () => {
+    setSalvando(true);
+    setFatto(false);
+    const oggi = new Date().toISOString().slice(0, 10);
+    const base = (client.data_scadenza && client.data_scadenza > oggi) ? client.data_scadenza : dataPagamento;
+    const nuovaScadenza = addMesi(base, mesiPerTipo[tipo]);
+    await supabase.from("payments").insert({ client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo });
+    await supabase.from("clients").update({
+      piano: tipo,
+      data_scadenza: nuovaScadenza,
+      data_inizio: client.data_inizio || dataPagamento,
+      stato_pacchetto: "attivo",
+    }).eq("id", client.id);
+    setSalvando(false);
+    setFatto(true);
+    onRegistrato();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Registra pagamento</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Tipo di rinnovo</label>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="Mensile">Mensile (+1 mese)</option>
+            <option value="Trimestrale">Trimestrale (+3 mesi)</option>
+            <option value="Semestrale">Semestrale (+6 mesi)</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Data pagamento</label>
+          <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
+      <button onClick={registra} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
+        {salvando ? "Registro..." : "Registra e aggiorna scadenza"}
+      </button>
+      {fatto && <p className="text-emerald-600 text-xs">Fatto! Piano e scadenza aggiornati.</p>}
+      {pagamenti.length > 0 && (
+        <div className="pt-2 border-t border-slate-100">
+          <p className="text-slate-400 text-xs mb-1">Storico pagamenti</p>
+          <ul className="space-y-1">
+            {pagamenti.map((p) => (
+              <li key={p.id} className="text-xs text-slate-500 flex justify-between">
+                <span>{p.data_pagamento}</span><span>{p.tipo_piano}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function InvitaClienteForm({ client, onInvitato, riinvia = false }) {
   const [email, setEmail] = useState(client.email || "");
   const [inviando, setInviando] = useState(false);
@@ -872,6 +1058,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [checkins, setCheckins] = useState([]);
   const [notes, setNotes] = useState([]);
   const [nutrizione, setNutrizione] = useState(null);
+  const [pagamenti, setPagamenti] = useState([]);
   const [tab, setTab] = useState("dati");
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
@@ -886,6 +1073,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     setNotes(nt || []);
     const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", clientId).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
     setNutrizione(nu);
+    const { data: pg } = await supabase.from("payments").select("*").eq("client_id", clientId).order("data_pagamento", { ascending: false });
+    setPagamenti(pg || []);
   };
   useEffect(() => { carica(); }, [clientId]);
 
@@ -898,7 +1087,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   };
 
   if (!client) return <Spinner />;
-  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "progressi", label: "Progressi" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
+  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "progressi", label: "Progressi" }, { key: "allenamento", label: "Allenamento" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
 
   return (
     <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5">
@@ -981,6 +1170,9 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <label className="text-slate-400 text-xs">Oppure carica la scheda come PDF</label>
             <SchedaPdfUpload client={client} onCaricato={carica} />
           </div>
+          <div className="col-span-2">
+            <RegistraPagamento client={client} pagamenti={pagamenti} onRegistrato={carica} />
+          </div>
           {salvando && <p className="text-slate-400 text-xs col-span-2">Salvataggio...</p>}
           <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
             {client.user_id && (
@@ -1021,6 +1213,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} titolo="Progressi e storico check" />}
+
+      {tab === "allenamento" && <DiarioAllenamento clientId={clientId} />}
 
       {tab === "nutrizione" && (
         <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
