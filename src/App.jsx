@@ -13,13 +13,13 @@ import {
 /* Approfondimenti — link ai tuoi PDF ospitati su GitHub Pages         */
 /* ------------------------------------------------------------------ */
 const APPROFONDIMENTI_LINKS = [
-  { titolo: "Come leggere la tua scheda di allenamento", descrizione: "Terminologia, RIR/RPE e tecniche speciali.", link: "https://morgana-workout.github.io/morgana-tarquino/leggere_una_scheda.pdf", icon: Dumbbell },
-  { titolo: "Guida alle tecniche di intensità", descrizione: "Top set, back-off, drop set, rest-pause, myo-reps.", link: "https://morgana-workout.github.io/morgana-tarquino/Guida.Tecniche.Bodybuilding.pdf", icon: Flame },
-  { titolo: "Manuale progressioni", descrizione: "Come e quando aumentare carico, ripetizioni o serie.", link: "https://morgana-workout.github.io/morgana-tarquino/Manuale_Progressione_Allenamento.pdf", icon: Flame },
-  { titolo: "Respirazione in palestra", descrizione: "Come respirare correttamente durante le serie.", link: "https://morgana-workout.github.io/morgana-tarquino/guida.respirazione.palestra.pdf", icon: Flame },
-  { titolo: "Ricettario fit", descrizione: "14 ricette con macro indicativi e sostituzioni.", link: "https://morgana-workout.github.io/morgana-tarquino/Ricettario.pdf", icon: ChefHat },
-  { titolo: "Manuale di nutrizione consapevole", descrizione: "Un rapporto più equilibrato con il cibo.", link: "https://morgana-workout.github.io/morgana-tarquino/Manuale_Nutrizione_Consapevole_Clienti.pdf", icon: Droplets },
   { titolo: "Se fai così resti uguale", descrizione: "Progressioni, alimentazione, sgarri, ciclo mestruale.", link: "https://morgana-workout.github.io/morgana-tarquino/SE.FAI.COSI%CC%80.RESTI.UGUALE.pdf", icon: Droplets },
+  { titolo: "Manuale di nutrizione consapevole", descrizione: "Un rapporto più equilibrato con il cibo.", link: "https://morgana-workout.github.io/morgana-tarquino/Manuale_Nutrizione_Consapevole_Clienti.pdf", icon: Droplets },
+  { titolo: "Ricettario fit", descrizione: "14 ricette con macro indicativi e sostituzioni.", link: "https://morgana-workout.github.io/morgana-tarquino/Ricettario.pdf", icon: ChefHat },
+  { titolo: "Respirazione in palestra", descrizione: "Come respirare correttamente durante le serie.", link: "https://morgana-workout.github.io/morgana-tarquino/guida.respirazione.palestra.pdf", icon: Flame },
+  { titolo: "Manuale progressioni", descrizione: "Come e quando aumentare carico, ripetizioni o serie.", link: "https://morgana-workout.github.io/morgana-tarquino/Manuale_Progressione_Allenamento.pdf", icon: Flame },
+  { titolo: "Guida alle tecniche di intensità", descrizione: "Top set, back-off, drop set, rest-pause, myo-reps.", link: "https://morgana-workout.github.io/morgana-tarquino/Guida.Tecniche.Bodybuilding.pdf", icon: Flame },
+  { titolo: "Come leggere la tua scheda di allenamento", descrizione: "Terminologia, RIR/RPE e tecniche speciali.", link: "https://morgana-workout.github.io/morgana-tarquino/leggere_una_scheda.pdf", icon: Dumbbell },
 ];
 
 const CALENDLY_URL = "https://calendly.com/morgana-workout/30min";
@@ -129,10 +129,20 @@ function ClientHome({ client, goTo }) {
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        {client.link_scheda && (
-          <a href={client.link_scheda} target="_blank" rel="noreferrer" className="bg-slate-800 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
+        {(client.scheda_pdf_path || client.link_scheda) && (
+          <button
+            onClick={async () => {
+              if (client.scheda_pdf_path) {
+                const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
+                if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+              } else {
+                window.open(client.link_scheda, "_blank");
+              }
+            }}
+            className="bg-slate-800 text-white rounded-2xl p-4 flex flex-col items-start gap-2"
+          >
             <Dumbbell size={20} /><span className="font-medium text-sm">Scheda</span>
-          </a>
+          </button>
         )}
         <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
           <Phone size={20} /><span className="font-medium text-sm">Prenota call</span>
@@ -171,7 +181,7 @@ function FotoInputs({ files, setFiles }) {
 
 function ClientCheckin({ client, onInviato }) {
   const [form, setForm] = useState({
-    peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "",
+    peso_kg: "", petto_cm: "", spalle_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "",
     coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", energia: 3, sonno: 3, aderenza_cibo: 3, aderenza_allenamento: 3,
     fase_mestruale: "",
   });
@@ -203,7 +213,7 @@ function ClientCheckin({ client, onInviato }) {
     setErrore("");
     const dataCheck = new Date().toISOString().slice(0, 10);
     const payload = { client_id: client.id, data_check: dataCheck, stato: "ricevuto" };
-    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
+    for (const k of ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = form[k] === "" ? null : Number(form[k]);
     }
     payload.energia = form.energia;
@@ -258,6 +268,7 @@ function ClientCheckin({ client, onInviato }) {
         <div className="grid grid-cols-2 gap-3">
           {campo("Peso", "peso_kg", "kg")}
           {campo("Petto", "petto_cm", "cm")}
+          {client.sesso === "M" && campo("Spalle", "spalle_cm", "cm")}
           {campo("Sopra ombelico", "sopra_ombelico_cm", "cm")}
           {campo("Ombelico", "ombelico_cm", "cm")}
           {campo("Sotto ombelico", "sotto_ombelico_cm", "cm")}
@@ -267,17 +278,19 @@ function ClientCheckin({ client, onInviato }) {
           {campo("Glutei", "glutei_cm", "cm")}
         </div>
       </Card>
-      <Card className="p-4 space-y-4">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Ciclo mestruale</p>
-        <select value={form.fase_mestruale} onChange={(e) => setForm({ ...form, fase_mestruale: e.target.value })}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">Preferisco non specificare</option>
-          <option value="mestruale">Fase mestruale</option>
-          <option value="follicolare">Fase follicolare</option>
-          <option value="ovulatoria">Fase ovulatoria</option>
-          <option value="luteale">Fase luteale</option>
-        </select>
-      </Card>
+      {client.sesso !== "M" && (
+        <Card className="p-4 space-y-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Ciclo mestruale</p>
+          <select value={form.fase_mestruale} onChange={(e) => setForm({ ...form, fase_mestruale: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            <option value="">Preferisco non specificare</option>
+            <option value="mestruale">Fase mestruale</option>
+            <option value="follicolare">Fase follicolare</option>
+            <option value="ovulatoria">Fase ovulatoria</option>
+            <option value="luteale">Fase luteale</option>
+          </select>
+        </Card>
+      )}
       <Card className="p-4 space-y-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Come stai andando</p>
         {slider("Livello di energia", "energia")}
@@ -303,17 +316,23 @@ function ClientCheckin({ client, onInviato }) {
   );
 }
 
-const CAMPI_MISURA = [
-  { key: "peso_kg", label: "Peso", unit: "kg" },
-  { key: "petto_cm", label: "Petto", unit: "cm" },
-  { key: "sopra_ombelico_cm", label: "Sopra ombelico", unit: "cm" },
-  { key: "ombelico_cm", label: "Ombelico", unit: "cm" },
-  { key: "sotto_ombelico_cm", label: "Sotto ombelico", unit: "cm" },
-  { key: "coscia_dx_cm", label: "Coscia dx", unit: "cm" },
-  { key: "braccio_dx_cm", label: "Braccio dx", unit: "cm" },
-  { key: "collo_cm", label: "Collo", unit: "cm" },
-  { key: "glutei_cm", label: "Glutei", unit: "cm" },
-];
+function getCampiMisura(sesso) {
+  const base = [
+    { key: "peso_kg", label: "Peso", unit: "kg" },
+    { key: "petto_cm", label: "Petto", unit: "cm" },
+  ];
+  if (sesso === "M") base.push({ key: "spalle_cm", label: "Spalle", unit: "cm" });
+  base.push(
+    { key: "sopra_ombelico_cm", label: "Sopra ombelico", unit: "cm" },
+    { key: "ombelico_cm", label: "Ombelico", unit: "cm" },
+    { key: "sotto_ombelico_cm", label: "Sotto ombelico", unit: "cm" },
+    { key: "coscia_dx_cm", label: "Coscia dx", unit: "cm" },
+    { key: "braccio_dx_cm", label: "Braccio dx", unit: "cm" },
+    { key: "collo_cm", label: "Collo", unit: "cm" },
+    { key: "glutei_cm", label: "Glutei", unit: "cm" }
+  );
+  return base;
+}
 
 function calcolaBMI(peso, altezzaCm) {
   if (!peso || !altezzaCm) return null;
@@ -352,7 +371,8 @@ function calcolaBMR(sesso, peso, altezzaCm, eta) {
 }
 
 /* Tabella 1 — solo circonferenze grezze, con variazione dal check precedente */
-function HistoryTable({ checkins }) {
+function HistoryTable({ checkins, sesso }) {
+  const campi = getCampiMisura(sesso);
   const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
   const righe = ordinati.map((c, i) => ({ ...c, prev: ordinati[i - 1] || null })).reverse();
 
@@ -364,7 +384,7 @@ function HistoryTable({ checkins }) {
         <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
           <tr>
             <th className="text-left px-3 py-2 sticky left-0 bg-slate-50">Data</th>
-            {CAMPI_MISURA.map((c) => <th key={c.key} className="text-right px-3 py-2 whitespace-nowrap">{c.label}</th>)}
+            {campi.map((c) => <th key={c.key} className="text-right px-3 py-2 whitespace-nowrap">{c.label}</th>)}
             <th className="text-left px-3 py-2 whitespace-nowrap">Fase ciclo</th>
           </tr>
         </thead>
@@ -372,7 +392,7 @@ function HistoryTable({ checkins }) {
           {righe.map((r) => (
             <tr key={r.id} className="border-t border-slate-100">
               <td className="px-3 py-2 text-slate-600 whitespace-nowrap sticky left-0 bg-white font-medium">{r.data_check}</td>
-              {CAMPI_MISURA.map((c) => {
+              {campi.map((c) => {
                 const val = r[c.key];
                 const prevVal = r.prev ? r.prev[c.key] : null;
                 let delta = null;
@@ -387,7 +407,7 @@ function HistoryTable({ checkins }) {
                   </td>
                 );
               })}
-              <td className="px-3 py-2 text-slate-500 whitespace-nowrap capitalize">{r.fase_mestruale || "—"}</td>
+              <td className="px-3 py-2 text-slate-500 whitespace-nowrap capitalize">{sesso === "M" ? "—" : (r.fase_mestruale || "—")}</td>
             </tr>
           ))}
         </tbody>
@@ -405,6 +425,7 @@ function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
   const righe = [
     { label: "Peso (kg)", calc: (c) => c.peso_kg },
     { label: "BMI", calc: (c) => calcolaBMI(c.peso_kg, altezza), dec: 1 },
+    ...(sesso === "M" ? [{ label: "Circonferenza Spalle (cm)", calc: (c) => c.spalle_cm }] : []),
     { label: "Circonferenza Vita (cm)", calc: (c) => c.sopra_ombelico_cm },
     { label: "Circonferenza Fianchi (cm)", calc: (c) => c.glutei_cm },
     { label: "Circonferenza Addome (cm)", calc: (c) => c.ombelico_cm },
@@ -447,15 +468,12 @@ function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
   );
 }
 
-function ClientProgress({ checkins, altezza, sesso, titolo = "I tuoi progressi" }) {
+function ClientProgress({ checkins, altezza, sesso, eta, titolo = "I tuoi progressi" }) {
   const [metrica, setMetrica] = useState("peso_kg");
-  const opzioni = [
-    { key: "peso_kg", label: "Peso" }, { key: "petto_cm", label: "Petto" },
-    { key: "sopra_ombelico_cm", label: "Sopra ombelico" }, { key: "ombelico_cm", label: "Ombelico" },
-    { key: "sotto_ombelico_cm", label: "Sotto ombelico" }, { key: "coscia_dx_cm", label: "Coscia dx" },
-    { key: "braccio_dx_cm", label: "Braccio dx" },
-  ];
-  const dati = checkins.map((c) => ({ ...c, dataLabel: c.data_check?.slice(5).split("-").reverse().join("/") }));
+  const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
+  const dati = [...checkins]
+    .sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""))
+    .map((c) => ({ ...c, dataLabel: c.data_check?.slice(5).split("-").reverse().join("/") }));
 
   if (checkins.length === 0) {
     return <div className="px-5 pt-16 text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</div>;
@@ -484,7 +502,12 @@ function ClientProgress({ checkins, altezza, sesso, titolo = "I tuoi progressi" 
         </ResponsiveContainer>
       </Card>
 
-      <HistoryTable checkins={checkins} altezza={altezza} sesso={sesso} />
+      <HistoryTable checkins={checkins} sesso={sesso} />
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Valori estrapolati</p>
+        <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
+      </div>
     </div>
   );
 }
@@ -590,13 +613,13 @@ function ClientApp({ session }) {
       </div>
       {tab === "home" && <ClientHome client={client} />}
       {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} />}
       {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
       {tab === "extra" && <ClientApprofondimenti />}
-      <div className="fixed bottom-0 max-w-md w-full bg-white border-t border-slate-200 flex justify-around py-2">
+      <div className="fixed bottom-0 max-w-md w-full bg-white border-t border-slate-200 flex justify-around py-3">
         {nav.map((n) => (
-          <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1 px-3 py-1 text-xs ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
-            <n.icon size={20} />{n.label}
+          <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
+            <n.icon size={24} />{n.label}
           </button>
         ))}
       </div>
@@ -607,8 +630,8 @@ function ClientApp({ session }) {
 /* ------------------------------------------------------------------ */
 /* AREA ADMIN                                                          */
 /* ------------------------------------------------------------------ */
-function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", note_cliente: "", stato: "revisionato", fase_mestruale: "" });
+function NuovoCheckForm({ clientId, sesso, onSalvato, onAnnulla }) {
+  const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", spalle_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", note_cliente: "", stato: "revisionato", fase_mestruale: "" });
   const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
@@ -624,7 +647,7 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
     setSalvando(true);
     setErrore("");
     const payload = { client_id: clientId, data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
-    for (const k of ["peso_kg", "petto_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
+    for (const k of ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
     }
     try {
@@ -650,6 +673,7 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
       <div className="grid grid-cols-2 gap-3">
         {campo("Peso (kg)", "peso_kg")}
         {campo("Petto (cm)", "petto_cm")}
+        {sesso === "M" && campo("Spalle (cm)", "spalle_cm")}
         {campo("Sopra ombelico (cm)", "sopra_ombelico_cm")}
         {campo("Ombelico (cm)", "ombelico_cm")}
         {campo("Sotto ombelico (cm)", "sotto_ombelico_cm")}
@@ -658,16 +682,18 @@ function NuovoCheckForm({ clientId, onSalvato, onAnnulla }) {
         {campo("Collo (cm)", "collo_cm")}
         {campo("Glutei (cm)", "glutei_cm")}
       </div>
-      <div>
-        <label className="text-xs text-slate-500">Fase ciclo mestruale</label>
-        <select value={f.fase_mestruale} onChange={(e) => setF({ ...f, fase_mestruale: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          <option value="">Non specificata</option>
-          <option value="mestruale">Mestruale</option>
-          <option value="follicolare">Follicolare</option>
-          <option value="ovulatoria">Ovulatoria</option>
-          <option value="luteale">Luteale</option>
-        </select>
-      </div>
+      {sesso !== "M" && (
+        <div>
+          <label className="text-xs text-slate-500">Fase ciclo mestruale</label>
+          <select value={f.fase_mestruale} onChange={(e) => setF({ ...f, fase_mestruale: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">Non specificata</option>
+            <option value="mestruale">Mestruale</option>
+            <option value="follicolare">Follicolare</option>
+            <option value="ovulatoria">Ovulatoria</option>
+            <option value="luteale">Luteale</option>
+          </select>
+        </div>
+      )}
       <textarea placeholder="Note" value={f.note_cliente} onChange={(e) => setF({ ...f, note_cliente: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div>
         <label className="text-xs text-slate-500 block mb-1">Foto progressi (facoltative)</label>
@@ -747,7 +773,7 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
   );
 }
 
-function InvitaClienteForm({ client, onInvitato }) {
+function InvitaClienteForm({ client, onInvitato, riinvia = false }) {
   const [email, setEmail] = useState(client.email || "");
   const [inviando, setInviando] = useState(false);
   const [errore, setErrore] = useState("");
@@ -757,6 +783,7 @@ function InvitaClienteForm({ client, onInvitato }) {
     if (!email) { setErrore("Inserisci un'email."); return; }
     setInviando(true);
     setErrore("");
+    setFatto(false);
     const { data: { session } } = await supabase.auth.getSession();
     const { data, error } = await supabase.functions.invoke("invite-client", {
       body: { client_id: client.id, email },
@@ -768,19 +795,74 @@ function InvitaClienteForm({ client, onInvitato }) {
     onInvitato();
   };
 
-  if (fatto) return <p className="text-emerald-600 text-sm">Invito inviato! La cliente riceverà un'email per impostare la password.</p>;
-
   return (
     <div className="space-y-2">
-      <label className="text-slate-400 text-xs">Invita questa cliente via email</label>
+      <label className="text-slate-400 text-xs">{riinvia ? "Reinvia l'accesso (nuovo link via email)" : "Invita questa cliente via email"}</label>
       <div className="flex gap-2">
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
           className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         <button onClick={invita} disabled={inviando} className="bg-sky-500 text-white text-sm font-medium rounded-lg px-4">
-          {inviando ? "Invio..." : "Invita"}
+          {inviando ? "Invio..." : riinvia ? "Reinvia" : "Invita"}
         </button>
       </div>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {fatto && <p className="text-emerald-600 text-xs">Fatto! Nuovo link inviato via email.</p>}
+    </div>
+  );
+}
+
+function SchedaPdfUpload({ client, onCaricato }) {
+  const [caricando, setCaricando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const carica = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCaricando(true);
+    setErrore("");
+    const path = `${client.id}/scheda.pdf`;
+    const { error: upErr } = await supabase.storage.from("workout-plans").upload(path, file, { upsert: true });
+    if (upErr) { setCaricando(false); setErrore(upErr.message); return; }
+    const { error: updErr } = await supabase.from("clients").update({ scheda_pdf_path: path }).eq("id", client.id);
+    setCaricando(false);
+    if (updErr) { setErrore(updErr.message); return; }
+    onCaricato();
+  };
+
+  return (
+    <div className="space-y-1">
+      <input type="file" accept="application/pdf" onChange={carica} disabled={caricando}
+        className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-600" />
+      {caricando && <p className="text-slate-400 text-xs">Caricamento...</p>}
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {client.scheda_pdf_path && <p className="text-emerald-600 text-xs">PDF caricato ✓ (sostituiscilo caricandone un altro)</p>}
+    </div>
+  );
+}
+
+function EliminaClienteBottone({ client, onEliminato }) {
+  const [confermare, setConfermare] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+
+  const elimina = async () => {
+    setEliminando(true);
+    await supabase.from("clients").delete().eq("id", client.id);
+    setEliminando(false);
+    onEliminato();
+  };
+
+  if (!confermare) {
+    return <button onClick={() => setConfermare(true)} className="text-rose-500 text-sm font-medium">Elimina cliente</button>;
+  }
+  return (
+    <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-2">
+      <p className="text-rose-700 text-sm">Eliminare <strong>{client.nome} {client.cognome}</strong>? Tutti i suoi check, note e dati nutrizionali verranno cancellati per sempre.</p>
+      <div className="flex gap-2">
+        <button onClick={elimina} disabled={eliminando} className="bg-rose-600 text-white text-sm font-medium rounded-lg px-4 py-2">
+          {eliminando ? "Elimino..." : "Sì, elimina definitivamente"}
+        </button>
+        <button onClick={() => setConfermare(false)} className="text-slate-500 text-sm px-3">Annulla</button>
+      </div>
     </div>
   );
 }
@@ -841,6 +923,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <option value="Mensile">Mensile</option>
               <option value="Trimestrale">Trimestrale</option>
               <option value="Semestrale">Semestrale</option>
+              <option value="FRIEND">FRIEND</option>
             </select>
           </div>
           <div>
@@ -880,22 +963,33 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             </select>
           </div>
           <div>
+            <label className="text-slate-400 text-xs">Età</label>
+            <input type="number" defaultValue={client.eta || ""} onBlur={(e) => salvaCliente({ eta: e.target.value ? Number(e.target.value) : null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
             <label className="text-slate-400 text-xs">Prossimo check</label>
             <input type="date" defaultValue={client.prossimo_check || ""} onBlur={(e) => salvaCliente({ prossimo_check: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
           <div className="col-span-2">
-            <label className="text-slate-400 text-xs">Link scheda</label>
+            <label className="text-slate-400 text-xs">Link scheda (esterno, es. Drive)</label>
             <input defaultValue={client.link_scheda || ""} onBlur={(e) => salvaCliente({ link_scheda: e.target.value })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
+          <div className="col-span-2">
+            <label className="text-slate-400 text-xs">Oppure carica la scheda come PDF</label>
+            <SchedaPdfUpload client={client} onCaricato={carica} />
+          </div>
           {salvando && <p className="text-slate-400 text-xs col-span-2">Salvataggio...</p>}
-          <div className="col-span-2 border-t border-slate-100 pt-4">
-            {client.user_id ? (
+          <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
+            {client.user_id && (
               <p className="text-emerald-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
-            ) : (
-              <InvitaClienteForm client={client} onInvitato={carica} />
             )}
+            <InvitaClienteForm client={client} onInvitato={carica} riinvia={!!client.user_id} />
+          </div>
+          <div className="col-span-2 border-t border-slate-100 pt-4">
+            <EliminaClienteBottone client={client} onEliminato={() => { onBack(); onChanged?.(); }} />
           </div>
         </Card>
       )}
@@ -906,7 +1000,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <button onClick={() => setMostraCheckForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi check</button>
           )}
           {mostraCheckForm && (
-            <NuovoCheckForm clientId={clientId} onAnnulla={() => setMostraCheckForm(false)} onSalvato={() => { setMostraCheckForm(false); carica(); }} />
+            <NuovoCheckForm clientId={clientId} sesso={client.sesso} onAnnulla={() => setMostraCheckForm(false)} onSalvato={() => { setMostraCheckForm(false); carica(); }} />
           )}
           <Card className="p-4">
             <ul className="space-y-2">
@@ -926,7 +1020,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} titolo="Progressi e storico check" />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} titolo="Progressi e storico check" />}
 
       {tab === "nutrizione" && (
         <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
