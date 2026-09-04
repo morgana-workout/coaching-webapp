@@ -172,9 +172,9 @@ function FotoInputs({ files, setFiles }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       {slot("Frontale", "frontale")}
-      {slot("Laterale", "laterale")}
+      {slot("Laterale destra", "laterale")}
+      {slot("Laterale sinistra", "extra")}
       {slot("Posteriore", "posteriore")}
-      {slot("Extra (facoltativa)", "extra")}
     </div>
   );
 }
@@ -441,17 +441,17 @@ function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
 
   return (
     <Card className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[600px]">
+      <table className="w-full text-sm min-w-[480px]">
         <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
           <tr>
-            <th className="text-left px-3 py-2 sticky left-0 bg-slate-50">Indicatore</th>
+            <th className="text-left px-2 py-2 sticky left-0 bg-slate-50 w-24 max-w-[6rem]">Indicatore</th>
             {ordinati.map((c) => <th key={c.id} className="text-right px-3 py-2 whitespace-nowrap">{c.data_check}</th>)}
           </tr>
         </thead>
         <tbody>
           {righe.map((r) => (
             <tr key={r.label} className="border-t border-slate-100">
-              <td className="px-3 py-2 text-slate-600 whitespace-nowrap sticky left-0 bg-white font-medium">{r.label}</td>
+              <td className="px-2 py-2 text-slate-600 sticky left-0 bg-white font-medium w-24 max-w-[6rem] leading-tight text-xs">{r.label}</td>
               {ordinati.map((c) => {
                 const v = r.calc(c);
                 return (
@@ -1122,12 +1122,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <option value="gratuito">gratuito</option>
             </select>
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data inizio</label>
             <input type="date" defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data scadenza</label>
             <input type="date" defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
@@ -1151,7 +1151,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <input type="number" defaultValue={client.eta || ""} onBlur={(e) => salvaCliente({ eta: e.target.value ? Number(e.target.value) : null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="text-slate-400 text-xs">Prossimo check</label>
             <input type="date" defaultValue={client.prossimo_check || ""} onBlur={(e) => salvaCliente({ prossimo_check: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
@@ -1312,9 +1312,9 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
 function FotoCheck({ checkin }) {
   const slots = [
     { key: "foto_frontale_path", label: "Frontale" },
-    { key: "foto_laterale_path", label: "Laterale" },
+    { key: "foto_laterale_path", label: "Laterale destra" },
     { key: "foto_posteriore_path", label: "Posteriore" },
-    { key: "foto_extra_path", label: "Extra" },
+    { key: "foto_extra_path", label: "Laterale sinistra" },
   ].filter((s) => checkin[s.key]);
   const [urls, setUrls] = useState(null);
   const [aperto, setAperto] = useState(false);
