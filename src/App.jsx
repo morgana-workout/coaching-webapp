@@ -626,37 +626,22 @@ function DiarioAllenamento({ clientId }) {
         </Card>
       )}
 
-      <Card className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[560px]">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-            <tr>
-              <th className="text-left px-3 py-2">Data</th>
-              <th className="text-left px-3 py-2">Esercizio</th>
-              <th className="text-right px-3 py-2">Serie</th>
-              <th className="text-right px-3 py-2">Rip.</th>
-              <th className="text-right px-3 py-2">Carico</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {righe.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100">
-                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{r.data}</td>
-                <td className="px-3 py-2 text-slate-700">{r.esercizio}</td>
-                <td className="px-3 py-2 text-right text-slate-700">{r.serie ?? "—"}</td>
-                <td className="px-3 py-2 text-right text-slate-700">{r.ripetizioni ?? "—"}</td>
-                <td className="px-3 py-2 text-right text-slate-700">{r.carico_kg ? `${r.carico_kg} kg` : "—"}</td>
-                <td className="px-3 py-2 text-right">
-                  <button onClick={() => elimina(r.id)} className="text-slate-300 hover:text-rose-500"><X size={14} /></button>
-                </td>
-              </tr>
-            ))}
-            {righe.length === 0 && (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Ancora nessuna riga registrata.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+      <div className="space-y-2">
+        {righe.map((r) => (
+          <Card key={r.id} className="p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium text-slate-800 truncate">{r.esercizio}</p>
+              <p className="text-slate-500 text-xs mt-0.5">
+                {r.data} · {r.serie ?? "—"} serie · {r.ripetizioni || "—"} rip. · {r.carico_kg ? `${r.carico_kg} kg` : "—"}
+              </p>
+            </div>
+            <button onClick={() => elimina(r.id)} className="text-slate-300 hover:text-rose-500 flex-shrink-0"><X size={16} /></button>
+          </Card>
+        ))}
+        {righe.length === 0 && (
+          <Card className="p-6 text-center text-slate-400 text-sm">Ancora nessuna riga registrata.</Card>
+        )}
+      </div>
     </div>
   );
 }
@@ -903,20 +888,26 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   const [salvando, setSalvando] = useState(false);
   const [fatto, setFatto] = useState(false);
   const mesiPerTipo = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
+  const isGratuito = tipo === "Gratuito";
 
   const registra = async () => {
     setSalvando(true);
     setFatto(false);
-    const oggi = new Date().toISOString().slice(0, 10);
-    const base = (client.data_scadenza && client.data_scadenza > oggi) ? client.data_scadenza : dataPagamento;
-    const nuovaScadenza = addMesi(base, mesiPerTipo[tipo]);
-    await supabase.from("payments").insert({ client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo });
-    await supabase.from("clients").update({
-      piano: tipo,
-      data_scadenza: nuovaScadenza,
-      data_inizio: client.data_inizio || dataPagamento,
-      stato_pacchetto: "attivo",
-    }).eq("id", client.id);
+
+    if (isGratuito) {
+      await supabase.from("clients").update({ piano: "Gratuito", stato_pacchetto: "gratuito" }).eq("id", client.id);
+    } else {
+      const oggi = new Date().toISOString().slice(0, 10);
+      const base = (client.data_scadenza && client.data_scadenza > oggi) ? client.data_scadenza : dataPagamento;
+      const nuovaScadenza = addMesi(base, mesiPerTipo[tipo]);
+      await supabase.from("payments").insert({ client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo });
+      await supabase.from("clients").update({
+        piano: tipo,
+        data_scadenza: nuovaScadenza,
+        data_inizio: client.data_inizio || dataPagamento,
+        stato_pacchetto: "attivo",
+      }).eq("id", client.id);
+    }
     setSalvando(false);
     setFatto(true);
     onRegistrato();
@@ -925,24 +916,27 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Registra pagamento</p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 [&>div]:min-w-0">
         <div>
           <label className="text-xs text-slate-500">Tipo di rinnovo</label>
           <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
             <option value="Mensile">Mensile (+1 mese)</option>
             <option value="Trimestrale">Trimestrale (+3 mesi)</option>
             <option value="Semestrale">Semestrale (+6 mesi)</option>
+            <option value="Gratuito">Gratuito</option>
           </select>
         </div>
-        <div>
-          <label className="text-xs text-slate-500">Data pagamento</label>
-          <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-        </div>
+        {!isGratuito && (
+          <div>
+            <label className="text-xs text-slate-500">Data pagamento</label>
+            <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+        )}
       </div>
       <button onClick={registra} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
-        {salvando ? "Registro..." : "Registra e aggiorna scadenza"}
+        {salvando ? "Registro..." : isGratuito ? "Imposta come gratuito" : "Registra e aggiorna scadenza"}
       </button>
-      {fatto && <p className="text-emerald-600 text-xs">Fatto! Piano e scadenza aggiornati.</p>}
+      {fatto && <p className="text-emerald-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : "Piano e scadenza aggiornati."}</p>}
       {pagamenti.length > 0 && (
         <div className="pt-2 border-t border-slate-100">
           <p className="text-slate-400 text-xs mb-1">Storico pagamenti</p>
@@ -1096,14 +1090,14 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
         <StatoBadge stato={client.stato_check} />
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-full text-sm ${tab === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{t.label}</button>
+          <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${tab === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{t.label}</button>
         ))}
       </div>
 
       {tab === "dati" && (
-        <Card className="p-4 grid grid-cols-2 gap-4 text-sm">
+        <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
           <div>
             <label className="text-slate-400 text-xs">Piano</label>
             <select defaultValue={client.piano || ""} onBlur={(e) => salvaCliente({ piano: e.target.value || null })}
@@ -1113,6 +1107,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <option value="Trimestrale">Trimestrale</option>
               <option value="Semestrale">Semestrale</option>
               <option value="FRIEND">FRIEND</option>
+              <option value="Gratuito">Gratuito</option>
             </select>
           </div>
           <div>
@@ -1160,6 +1155,17 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <label className="text-slate-400 text-xs">Prossimo check</label>
             <input type="date" defaultValue={client.prossimo_check || ""} onBlur={(e) => salvaCliente({ prossimo_check: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Stato check</label>
+            <select defaultValue={client.stato_check || ""} onBlur={(e) => salvaCliente({ stato_check: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">—</option>
+              <option value="programmato">Programmato</option>
+              <option value="da_compilare">Da compilare</option>
+              <option value="ricevuto">Ricevuto</option>
+              <option value="revisionato">Revisionato</option>
+            </select>
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Link scheda (esterno, es. Drive)</label>
