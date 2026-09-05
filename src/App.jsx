@@ -33,6 +33,41 @@ function Card({ children, className = "" }) {
 function Badge({ children, className = "" }) {
   return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${className}`}>{children}</span>;
 }
+function PullToRefresh({ onRefresh, children }) {
+  const [pullY, setPullY] = useState(0);
+  const [aggiornando, setAggiornando] = useState(false);
+  const startY = React.useRef(null);
+
+  const onTouchStart = (e) => {
+    if (window.scrollY <= 0) startY.current = e.touches[0].clientY;
+  };
+  const onTouchMove = (e) => {
+    if (startY.current === null) return;
+    const delta = e.touches[0].clientY - startY.current;
+    if (delta > 0 && window.scrollY <= 0) setPullY(Math.min(delta, 90));
+  };
+  const onTouchEnd = async () => {
+    if (pullY > 60) {
+      setAggiornando(true);
+      await onRefresh();
+      setAggiornando(false);
+    }
+    setPullY(0);
+    startY.current = null;
+  };
+
+  return (
+    <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+      <div style={{ height: aggiornando ? 50 : pullY, transition: pullY === 0 ? "height 0.2s" : "none" }} className="flex items-center justify-center overflow-hidden">
+        {(pullY > 10 || aggiornando) && (
+          <div className={`w-6 h-6 border-2 border-slate-300 border-t-slate-700 rounded-full ${aggiornando || pullY > 60 ? "animate-spin" : ""}`} />
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function Spinner() {
   return <div className="flex justify-center pt-20"><div className="w-8 h-8 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /></div>;
 }
@@ -553,95 +588,199 @@ function ClientNutrizione({ piano }) {
   );
 }
 
-function DiarioAllenamento({ clientId }) {
-  const [righe, setRighe] = useState([]);
-  const [form, setForm] = useState({ data: new Date().toISOString().slice(0, 10), esercizio: "", serie: "", ripetizioni: "", carico_kg: "", note: "" });
+function CellaKg({ exerciseId, data, clientId, valore, entryId, onSaved }) {
+  const [val, setVal] = useState(valore ?? "");
   const [salvando, setSalvando] = useState(false);
-  const [mostraForm, setMostraForm] = useState(false);
-
-  const carica = async () => {
-    const { data } = await supabase.from("training_log").select("*").eq("client_id", clientId).order("data", { ascending: false });
-    setRighe(data || []);
-  };
-  useEffect(() => { carica(); }, [clientId]);
 
   const salva = async () => {
-    if (!form.esercizio) return;
+    const num = val === "" ? null : Number(val);
+    if (num === (valore ?? null)) return;
     setSalvando(true);
-    await supabase.from("training_log").insert({
-      client_id: clientId,
-      data: form.data || null,
-      esercizio: form.esercizio,
-      serie: form.serie === "" ? null : Number(form.serie),
-      ripetizioni: form.ripetizioni || null,
-      carico_kg: form.carico_kg === "" ? null : Number(form.carico_kg),
-      note: form.note || null,
-    });
+    if (entryId) {
+      await supabase.from("training_entries").update({ kg: num }).eq("id", entryId);
+    } else {
+      await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: exerciseId, data, kg: num });
+    }
     setSalvando(false);
-    setForm({ ...form, esercizio: "", serie: "", ripetizioni: "", carico_kg: "", note: "" });
-    carica();
-  };
-
-  const elimina = async (id) => {
-    await supabase.from("training_log").delete().eq("id", id);
-    carica();
+    onSaved();
   };
 
   return (
-    <div className="px-5 pt-6 pb-24 space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-800">Diario allenamento</h1>
-          <p className="text-slate-500 text-sm mt-1">Traccia carichi, serie e ripetizioni settimana dopo settimana.</p>
-        </div>
-        {!mostraForm && (
-          <button onClick={() => setMostraForm(true)} className="bg-slate-800 text-white text-xs font-medium rounded-lg px-3 py-2 whitespace-nowrap">+ Aggiungi</button>
-        )}
-      </div>
+    <input
+      type="number" step="0.5" value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={salva}
+      disabled={salvando}
+      placeholder="—"
+      className="w-16 text-center border border-slate-200 rounded-lg px-1 py-1.5 text-sm"
+    />
+  );
+}
 
-      {mostraForm && (
-        <Card className="p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-slate-500">Data</label>
-              <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-            </div>
-            <div><label className="text-xs text-slate-500">Esercizio</label>
-              <input value={form.esercizio} onChange={(e) => setForm({ ...form, esercizio: e.target.value })} placeholder="Es. Squat" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-            </div>
-            <div><label className="text-xs text-slate-500">Serie</label>
-              <input type="number" value={form.serie} onChange={(e) => setForm({ ...form, serie: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-            </div>
-            <div><label className="text-xs text-slate-500">Ripetizioni</label>
-              <input value={form.ripetizioni} onChange={(e) => setForm({ ...form, ripetizioni: e.target.value })} placeholder="Es. 8-10" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-            </div>
-            <div className="col-span-2"><label className="text-xs text-slate-500">Carico (kg)</label>
-              <input type="number" step="0.5" value={form.carico_kg} onChange={(e) => setForm({ ...form, carico_kg: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-            </div>
-          </div>
-          <textarea placeholder="Note (facoltative)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          <div className="flex gap-2">
-            <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva riga"}</button>
-            <button onClick={() => setMostraForm(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
-          </div>
+function EsercizioNome({ id, nome, onSaved }) {
+  const [val, setVal] = useState(nome);
+  const salva = async () => {
+    if (val === nome || !val.trim()) { setVal(nome); return; }
+    await supabase.from("training_exercises").update({ nome: val }).eq("id", id);
+    onSaved();
+  };
+  return (
+    <input value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva}
+      className="w-full border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+  );
+}
+
+function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
+  const [esercizi, setEsercizi] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [nuovoEsercizio, setNuovoEsercizio] = useState("");
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data: es } = await supabase.from("training_exercises").select("*").eq("training_day_id", giorno.id).order("ordine");
+    setEsercizi(es || []);
+    if (es && es.length > 0) {
+      const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", es.map((e) => e.id));
+      setEntries(en || []);
+    } else {
+      setEntries([]);
+    }
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [giorno.id]);
+
+  const date = [...new Set(entries.map((e) => e.data))].sort();
+
+  const aggiungiEsercizio = async () => {
+    if (!nuovoEsercizio.trim()) return;
+    await supabase.from("training_exercises").insert({
+      client_id: clientId, training_day_id: giorno.id, nome: nuovoEsercizio, ordine: esercizi.length + 1,
+    });
+    setNuovoEsercizio("");
+    carica();
+  };
+
+  const aggiungiData = async () => {
+    if (esercizi.length === 0) { alert("Aggiungi prima almeno un esercizio."); return; }
+    const nuovaData = prompt("Data del nuovo allenamento (gg/mm/aaaa oppure lascia vuoto per oggi):");
+    let d = new Date().toISOString().slice(0, 10);
+    if (nuovaData) {
+      const parti = nuovaData.split("/");
+      if (parti.length === 3) d = `${parti[2]}-${parti[1].padStart(2, "0")}-${parti[0].padStart(2, "0")}`;
+    }
+    if (date.includes(d)) { alert("Esiste già una colonna per questa data."); return; }
+    await supabase.from("training_entries").insert(
+      esercizi.map((e) => ({ client_id: clientId, exercise_id: e.id, data: d, kg: null }))
+    );
+    carica();
+  };
+
+  const rinominaGiorno = async (e) => {
+    const nuovoNome = e.target.value;
+    if (nuovoNome === giorno.nome || !nuovoNome.trim()) return;
+    await supabase.from("training_days").update({ nome: nuovoNome }).eq("id", giorno.id);
+    onGiornoRinominato();
+  };
+
+  if (caricando) return <p className="text-slate-400 text-sm px-1">Caricamento...</p>;
+
+  return (
+    <div className="space-y-3">
+      <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
+        className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+
+      {esercizi.length === 0 ? (
+        <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
+      ) : (
+        <Card className="overflow-x-auto">
+          <table className="text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+              <tr>
+                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[140px]">Esercizio</th>
+                {date.map((d) => <th key={d} className="text-center px-2 py-2 whitespace-nowrap">{d}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {esercizi.map((es) => (
+                <tr key={es.id} className="border-t border-slate-100">
+                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[140px]">
+                    <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
+                  </td>
+                  {date.map((d) => {
+                    const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
+                    return (
+                      <td key={d} className="px-2 py-2 text-center">
+                        <CellaKg exerciseId={es.id} data={d} clientId={clientId} valore={entry?.kg} entryId={entry?.id} onSaved={carica} />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       )}
 
-      <div className="space-y-2">
-        {righe.map((r) => (
-          <Card key={r.id} className="p-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-medium text-slate-800 truncate">{r.esercizio}</p>
-              <p className="text-slate-500 text-xs mt-0.5">
-                {r.data} · {r.serie ?? "—"} serie · {r.ripetizioni || "—"} rip. · {r.carico_kg ? `${r.carico_kg} kg` : "—"}
-              </p>
-            </div>
-            <button onClick={() => elimina(r.id)} className="text-slate-300 hover:text-rose-500 flex-shrink-0"><X size={16} /></button>
-          </Card>
+      <div className="flex gap-2">
+        <input value={nuovoEsercizio} onChange={(e) => setNuovoEsercizio(e.target.value)} placeholder="Nuovo esercizio (es. Squat)"
+          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <button onClick={aggiungiEsercizio} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
+      </div>
+      <button onClick={aggiungiData} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">+ Nuova data di allenamento</button>
+    </div>
+  );
+}
+
+function DiarioAllenamento({ clientId }) {
+  const [giorni, setGiorni] = useState([]);
+  const [giornoAttivo, setGiornoAttivo] = useState(null);
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data } = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
+    setGiorni(data || []);
+    if (data && data.length > 0 && !giornoAttivo) setGiornoAttivo(data[0].id);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [clientId]);
+
+  const creaGiorno = async () => {
+    if (giorni.length >= 6) return;
+    const { data } = await supabase.from("training_days").insert({
+      client_id: clientId, nome: `Giorno ${giorni.length + 1}`, ordine: giorni.length + 1,
+    }).select().single();
+    await carica();
+    if (data) setGiornoAttivo(data.id);
+  };
+
+  if (caricando) return <Spinner />;
+
+  return (
+    <div className="px-5 pt-6 pb-24 space-y-5">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-800">Diario allenamento</h1>
+        <p className="text-slate-500 text-sm mt-1">Un giorno per ogni allenamento della settimana, con lo storico dei carichi.</p>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {giorni.map((g) => (
+          <button key={g.id} onClick={() => setGiornoAttivo(g.id)}
+            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${giornoAttivo === g.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
+            {g.nome}
+          </button>
         ))}
-        {righe.length === 0 && (
-          <Card className="p-6 text-center text-slate-400 text-sm">Ancora nessuna riga registrata.</Card>
+        {giorni.length < 6 && (
+          <button onClick={creaGiorno} className="px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 border border-dashed border-slate-300 text-slate-500">+ Giorno</button>
         )}
       </div>
+
+      {giorni.length === 0 && (
+        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare.</Card>
+      )}
+
+      {giornoAttivo && (
+        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} />
+      )}
     </div>
   );
 }
@@ -708,12 +847,14 @@ function ClientApp({ session }) {
         <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
       </div>
+      <PullToRefresh onRefresh={carica}>
       {tab === "home" && <ClientHome client={client} />}
       {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
       {tab === "log" && <DiarioAllenamento clientId={client.id} />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} />}
       {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
       {tab === "extra" && <ClientApprofondimenti />}
+      </PullToRefresh>
       <div className="fixed bottom-0 max-w-md w-full bg-white border-t border-slate-200 flex justify-around py-3">
         {nav.map((n) => (
           <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
@@ -1354,8 +1495,42 @@ function FotoCheck({ checkin }) {
 
 function AdminList({ clients, onSelect, onChanged }) {
   const [mostraForm, setMostraForm] = useState(false);
+  const [ricerca, setRicerca] = useState("");
+  const [filtro, setFiltro] = useState("tutti");
+
   const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clients.filter((c) => c.stato_check === "da_compilare");
+  const scaduti = clients.filter((c) => c.stato_pacchetto === "scaduto");
+
+  const spostaOrdine = async (clienteId, direzione) => {
+    const ordinati = [...clients].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+    const idx = ordinati.findIndex((c) => c.id === clienteId);
+    const altroIdx = idx + direzione;
+    if (altroIdx < 0 || altroIdx >= ordinati.length) return;
+    const a = ordinati[idx], b = ordinati[altroIdx];
+    await supabase.from("clients").update({ ordine: b.ordine ?? altroIdx }).eq("id", a.id);
+    await supabase.from("clients").update({ ordine: a.ordine ?? idx }).eq("id", b.id);
+    onChanged();
+  };
+
+  let visibili = [...clients].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+  if (ricerca.trim()) {
+    const q = ricerca.trim().toLowerCase();
+    visibili = visibili.filter((c) => `${c.nome} ${c.cognome} ${c.codice}`.toLowerCase().includes(q));
+  }
+  if (filtro === "da_fare") visibili = visibili.filter((c) => c.stato_check === "da_compilare");
+  if (filtro === "in_scadenza") visibili = visibili.filter((c) => c.stato_pacchetto === "in scadenza");
+  if (filtro === "scaduti") visibili = visibili.filter((c) => c.stato_pacchetto === "scaduto");
+
+  const riordinabile = !ricerca.trim() && filtro === "tutti";
+
+  const filtriBtn = (key, label, count, colore) => (
+    <button onClick={() => setFiltro(filtro === key ? "tutti" : key)}
+      className={`p-4 rounded-2xl border-2 text-left transition-colors ${filtro === key ? `${colore} border-current` : "border-transparent bg-white shadow-sm"}`}>
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className={`text-2xl font-semibold mt-1 ${filtro === key ? "" : colore.replace("bg-", "text-").replace("-50", "-600")}`}>{count}</p>
+    </button>
+  );
 
   return (
     <div className="px-6 pt-6 pb-16 space-y-6 max-w-3xl mx-auto">
@@ -1370,26 +1545,45 @@ function AdminList({ clients, onSelect, onChanged }) {
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <Card className="p-4"><p className="text-xs text-slate-500">Check in scadenza</p><p className="text-2xl font-semibold text-amber-600 mt-1">{daFare.length}</p></Card>
-        <Card className="p-4"><p className="text-xs text-slate-500">Pacchetti in scadenza</p><p className="text-2xl font-semibold text-rose-600 mt-1">{inScadenza.length}</p></Card>
+      <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
+        className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
+
+      <div className="grid grid-cols-3 gap-3">
+        {filtriBtn("da_fare", "Check da fare", daFare.length, "bg-amber-50 text-amber-700")}
+        {filtriBtn("in_scadenza", "In scadenza", inScadenza.length, "bg-rose-50 text-rose-700")}
+        {filtriBtn("scaduti", "Scaduti", scaduti.length, "bg-slate-100 text-slate-600")}
       </div>
+      {filtro !== "tutti" && (
+        <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
+      )}
+
       <Card className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100"><p className="text-sm font-medium text-slate-700">Clienti ({clients.length})</p></div>
+        <div className="px-4 py-3 border-b border-slate-100"><p className="text-sm font-medium text-slate-700">Clienti ({visibili.length})</p></div>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
             <tr><th className="text-left px-4 py-2">Nome</th><th className="text-left px-4 py-2">Piano</th><th className="text-left px-4 py-2">Prossimo check</th><th className="text-left px-4 py-2">Stato</th><th></th></tr>
           </thead>
           <tbody>
-            {clients.map((c) => (
-              <tr key={c.id} onClick={() => onSelect(c.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
-                <td className="px-4 py-3 font-medium text-slate-700">{c.nome} {c.cognome}</td>
-                <td className="px-4 py-3 text-slate-500">{c.piano || "—"}</td>
-                <td className="px-4 py-3 text-slate-500">{c.prossimo_check || "—"}</td>
-                <td className="px-4 py-3"><StatoBadge stato={c.stato_check} /></td>
-                <td className="px-4 py-3 text-slate-300"><ChevronRight size={16} /></td>
+            {visibili.map((c) => (
+              <tr key={c.id} className={`border-t border-slate-100 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50" : ""}`}>
+                <td className="px-2 py-3">
+                  {riordinabile && (
+                    <div className="flex flex-col -my-1">
+                      <button onClick={() => spostaOrdine(c.id, -1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none">▲</button>
+                      <button onClick={() => spostaOrdine(c.id, 1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none">▼</button>
+                    </div>
+                  )}
+                </td>
+                <td onClick={() => onSelect(c.id)} className="px-2 py-3 font-medium text-slate-700 cursor-pointer">{c.nome} {c.cognome}</td>
+                <td onClick={() => onSelect(c.id)} className="px-4 py-3 text-slate-500 cursor-pointer">{c.piano || "—"}</td>
+                <td onClick={() => onSelect(c.id)} className="px-4 py-3 text-slate-500 cursor-pointer">{c.prossimo_check || "—"}</td>
+                <td onClick={() => onSelect(c.id)} className="px-4 py-3 cursor-pointer"><StatoBadge stato={c.stato_check} /></td>
+                <td onClick={() => onSelect(c.id)} className="px-4 py-3 text-slate-300 cursor-pointer"><ChevronRight size={16} /></td>
               </tr>
             ))}
+            {visibili.length === 0 && (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
+            )}
           </tbody>
         </table>
       </Card>
@@ -1403,7 +1597,7 @@ function AdminApp() {
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
-    const { data } = await supabase.from("clients").select("*").order("nome");
+    const { data } = await supabase.from("clients").select("*").order("ordine", { ascending: true, nullsFirst: false });
     setClients(data || []);
     setCaricando(false);
   };
@@ -1412,6 +1606,7 @@ function AdminApp() {
   if (caricando) return <Spinner />;
 
   return (
+    <PullToRefresh onRefresh={carica}>
     <div className="min-h-screen bg-slate-50">
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span>
@@ -1423,6 +1618,7 @@ function AdminApp() {
         <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} />
       )}
     </div>
+    </PullToRefresh>
   );
 }
 
