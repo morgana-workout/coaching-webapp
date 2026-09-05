@@ -869,8 +869,14 @@ function ClientApp({ session }) {
 /* ------------------------------------------------------------------ */
 /* AREA ADMIN                                                          */
 /* ------------------------------------------------------------------ */
-function NuovoCheckForm({ clientId, sesso, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ data_check: "", peso_kg: "", petto_cm: "", spalle_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", note_cliente: "", stato: "revisionato", fase_mestruale: "" });
+function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
+  const [f, setF] = useState(checkin ? {
+    data_check: checkin.data_check || "", peso_kg: checkin.peso_kg ?? "", petto_cm: checkin.petto_cm ?? "",
+    spalle_cm: checkin.spalle_cm ?? "", sopra_ombelico_cm: checkin.sopra_ombelico_cm ?? "", ombelico_cm: checkin.ombelico_cm ?? "",
+    sotto_ombelico_cm: checkin.sotto_ombelico_cm ?? "", coscia_dx_cm: checkin.coscia_dx_cm ?? "", braccio_dx_cm: checkin.braccio_dx_cm ?? "",
+    collo_cm: checkin.collo_cm ?? "", glutei_cm: checkin.glutei_cm ?? "", note_cliente: checkin.note_cliente || "",
+    stato: checkin.stato || "revisionato", fase_mestruale: checkin.fase_mestruale || "",
+  } : { data_check: "", peso_kg: "", petto_cm: "", spalle_cm: "", sopra_ombelico_cm: "", ombelico_cm: "", sotto_ombelico_cm: "", coscia_dx_cm: "", braccio_dx_cm: "", collo_cm: "", glutei_cm: "", note_cliente: "", stato: "revisionato", fase_mestruale: "" });
   const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
@@ -885,27 +891,32 @@ function NuovoCheckForm({ clientId, sesso, onSalvato, onAnnulla }) {
     if (!f.data_check) { setErrore("Inserisci la data del check."); return; }
     setSalvando(true);
     setErrore("");
-    const payload = { client_id: clientId, data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
+    const payload = { data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
+    if (!checkin) payload.client_id = clientId;
     for (const k of ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
     }
     try {
-      payload.foto_frontale_path = await caricaFotoStorage(files.frontale, clientId, f.data_check, "frontale");
-      payload.foto_laterale_path = await caricaFotoStorage(files.laterale, clientId, f.data_check, "laterale");
-      payload.foto_posteriore_path = await caricaFotoStorage(files.posteriore, clientId, f.data_check, "posteriore");
-      payload.foto_extra_path = await caricaFotoStorage(files.extra, clientId, f.data_check, "extra");
+      if (files.frontale) payload.foto_frontale_path = await caricaFotoStorage(files.frontale, clientId, f.data_check, "frontale");
+      if (files.laterale) payload.foto_laterale_path = await caricaFotoStorage(files.laterale, clientId, f.data_check, "laterale");
+      if (files.posteriore) payload.foto_posteriore_path = await caricaFotoStorage(files.posteriore, clientId, f.data_check, "posteriore");
+      if (files.extra) payload.foto_extra_path = await caricaFotoStorage(files.extra, clientId, f.data_check, "extra");
     } catch (e) {
       setSalvando(false);
       setErrore("Errore caricamento foto: " + e.message);
       return;
     }
-    await supabase.from("checkins").insert(payload);
+    if (checkin) {
+      await supabase.from("checkins").update(payload).eq("id", checkin.id);
+    } else {
+      await supabase.from("checkins").insert(payload);
+    }
     setSalvando(false);
     onSalvato();
   };
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Aggiungi check</p>
+      <p className="text-sm font-medium text-slate-700">{checkin ? "Modifica check" : "Aggiungi check"}</p>
       <div><label className="text-xs text-slate-500">Data</label>
         <input type="date" value={f.data_check} onChange={(e) => setF({ ...f, data_check: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
       </div>
@@ -940,7 +951,7 @@ function NuovoCheckForm({ clientId, sesso, onSalvato, onAnnulla }) {
       </div>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
       <div className="flex gap-2">
-        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva check"}</button>
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : checkin ? "Salva modifiche" : "Salva check"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
       </div>
     </Card>
@@ -1197,6 +1208,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [tab, setTab] = useState("dati");
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
+  const [checkInModifica, setCheckInModifica] = useState(null);
   const [mostraNotaForm, setMostraNotaForm] = useState(false);
 
   const carica = async () => {
@@ -1335,27 +1347,33 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
       {tab === "check" && (
         <div className="space-y-3">
-          {!mostraCheckForm && (
+          {!mostraCheckForm && !checkInModifica && (
             <button onClick={() => setMostraCheckForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi check</button>
           )}
           {mostraCheckForm && (
             <NuovoCheckForm clientId={clientId} sesso={client.sesso} onAnnulla={() => setMostraCheckForm(false)} onSalvato={() => { setMostraCheckForm(false); carica(); }} />
           )}
-          <Card className="p-4">
-            <ul className="space-y-2">
-              {checkins.map((r) => (
-                <li key={r.id} className="border-b border-slate-100 pb-2">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">{r.data_check}</span>
-                    <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
-                    <StatoBadge stato={r.stato} />
-                  </div>
-                  <FotoCheck checkin={r} />
-                </li>
-              ))}
-              {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
-            </ul>
-          </Card>
+          {checkInModifica && (
+            <NuovoCheckForm clientId={clientId} sesso={client.sesso} checkin={checkInModifica}
+              onAnnulla={() => setCheckInModifica(null)} onSalvato={() => { setCheckInModifica(null); carica(); }} />
+          )}
+          {!mostraCheckForm && !checkInModifica && (
+            <Card className="p-4">
+              <ul className="space-y-2">
+                {checkins.map((r) => (
+                  <li key={r.id} className="border-b border-slate-100 pb-2">
+                    <button onClick={() => setCheckInModifica(r)} className="flex justify-between items-center text-sm w-full text-left">
+                      <span className="text-slate-600">{r.data_check}</span>
+                      <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
+                      <StatoBadge stato={r.stato} />
+                    </button>
+                    <FotoCheck checkin={r} />
+                  </li>
+                ))}
+                {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
+              </ul>
+            </Card>
+          )}
         </div>
       )}
 
