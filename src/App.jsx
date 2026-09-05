@@ -1057,7 +1057,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Registra pagamento</p>
-      <div className="grid grid-cols-2 gap-3 [&>div]:min-w-0">
+      <div className="space-y-3">
         <div>
           <label className="text-xs text-slate-500">Tipo di rinnovo</label>
           <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
@@ -1225,7 +1225,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "progressi", label: "Progressi" }, { key: "allenamento", label: "Allenamento" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
 
   return (
-    <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5">
+    <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5 overflow-x-hidden">
       <button onClick={onBack} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti i clienti</button>
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
@@ -1557,36 +1557,34 @@ function AdminList({ clients, onSelect, onChanged }) {
         <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
       )}
 
-      <Card className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100"><p className="text-sm font-medium text-slate-700">Clienti ({visibili.length})</p></div>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-            <tr><th className="text-left px-4 py-2">Nome</th><th className="text-left px-4 py-2">Piano</th><th className="text-left px-4 py-2">Prossimo check</th><th className="text-left px-4 py-2">Stato</th><th></th></tr>
-          </thead>
-          <tbody>
-            {visibili.map((c) => (
-              <tr key={c.id} className={`border-t border-slate-100 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50" : ""}`}>
-                <td className="px-2 py-3">
-                  {riordinabile && (
-                    <div className="flex flex-col -my-1">
-                      <button onClick={() => spostaOrdine(c.id, -1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none">▲</button>
-                      <button onClick={() => spostaOrdine(c.id, 1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none">▼</button>
-                    </div>
-                  )}
-                </td>
-                <td onClick={() => onSelect(c.id)} className="px-2 py-3 font-medium text-slate-700 cursor-pointer">{c.nome} {c.cognome}</td>
-                <td onClick={() => onSelect(c.id)} className="px-4 py-3 text-slate-500 cursor-pointer">{c.piano || "—"}</td>
-                <td onClick={() => onSelect(c.id)} className="px-4 py-3 text-slate-500 cursor-pointer">{c.prossimo_check || "—"}</td>
-                <td onClick={() => onSelect(c.id)} className="px-4 py-3 cursor-pointer"><StatoBadge stato={c.stato_check} /></td>
-                <td onClick={() => onSelect(c.id)} className="px-4 py-3 text-slate-300 cursor-pointer"><ChevronRight size={16} /></td>
-              </tr>
-            ))}
-            {visibili.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </Card>
+      <div>
+        <p className="text-sm font-medium text-slate-700 px-1 mb-2">Clienti ({visibili.length})</p>
+        <div className="space-y-2">
+          {visibili.map((c) => (
+            <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50 border-rose-100" : ""}`}>
+              {riordinabile && (
+                <div className="flex flex-col flex-shrink-0">
+                  <button onClick={() => spostaOrdine(c.id, -1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none py-0.5">▲</button>
+                  <button onClick={() => spostaOrdine(c.id, 1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none py-0.5">▼</button>
+                </div>
+              )}
+              <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left">
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
+                  <p className="text-slate-500 text-xs mt-0.5 truncate">{c.piano || "—"} · Prossimo check: {c.prossimo_check || "—"}</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <StatoBadge stato={c.stato_check} />
+                  <ChevronRight size={16} className="text-slate-300" />
+                </div>
+              </button>
+            </Card>
+          ))}
+          {visibili.length === 0 && (
+            <Card className="p-8 text-center text-slate-400">Nessun cliente corrisponde alla ricerca/filtro.</Card>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
