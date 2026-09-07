@@ -97,7 +97,7 @@ function StatoBadge({ stato }) {
 /* ------------------------------------------------------------------ */
 /* LOGIN                                                               */
 /* ------------------------------------------------------------------ */
-function Login() {
+function Login({ erroreLink }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errore, setErrore] = useState("");
@@ -115,6 +115,11 @@ function Login() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
+        {erroreLink && (
+          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-xl px-4 py-3 mb-5">
+            Il link che hai usato non è più valido o è scaduto ({erroreLink}). Chiedi a Morgana di inviartene uno nuovo, poi accedi qui sotto con la password che avevi già impostato.
+          </div>
+        )}
         <div className="text-center mb-10">
           <div className="w-14 h-14 rounded-2xl bg-slate-700 mx-auto mb-4 flex items-center justify-center">
             <Dumbbell className="text-sky-300" size={26} />
@@ -1221,27 +1226,17 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   );
 }
 
-function InvitaClienteForm({ client, onInvitato, riinvia = false }) {
+function InvitaClienteForm({ client, onInvitato }) {
   const [email, setEmail] = useState(client.email || "");
-  const [inviando, setInviando] = useState(false);
+  const [inviando, setInviando] = useState("");
   const [errore, setErrore] = useState("");
-  const [fatto, setFatto] = useState(false);
+  const [fatto, setFatto] = useState("");
 
-  const invita = async () => {
+  const creaPassword = async () => {
     if (!email) { setErrore("Inserisci un'email."); return; }
-    setInviando(true);
+    setInviando("crea");
     setErrore("");
-    setFatto(false);
-
-    if (riinvia) {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-      setInviando(false);
-      if (error) { setErrore(error.message); return; }
-      setFatto(true);
-      onInvitato();
-      return;
-    }
-
+    setFatto("");
     const { data: { session } } = await supabase.auth.getSession();
     const { data, error } = await supabase.functions.invoke("invite-client", {
       body: { client_id: client.id, email },
@@ -1249,30 +1244,48 @@ function InvitaClienteForm({ client, onInvitato, riinvia = false }) {
     });
     if (!error && data?.serve_reset) {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-      setInviando(false);
+      setInviando("");
       if (resetError) { setErrore(resetError.message); return; }
-      setFatto(true);
+      setFatto("Questa email risultava già registrata: le è stato inviato un link per impostare la password.");
       onInvitato();
       return;
     }
-    setInviando(false);
+    setInviando("");
     if (error || data?.error) { setErrore(data?.error || error.message); return; }
-    setFatto(true);
+    setFatto("Link per creare la password inviato!");
+    onInvitato();
+  };
+
+  const reimpostaPassword = async () => {
+    if (!email) { setErrore("Inserisci un'email."); return; }
+    setInviando("reset");
+    setErrore("");
+    setFatto("");
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+    setInviando("");
+    if (error) { setErrore(error.message); return; }
+    setFatto("Link per reimpostare la password inviato!");
     onInvitato();
   };
 
   return (
     <div className="space-y-2">
-      <label className="text-slate-400 text-xs">{riinvia ? "Reinvia l'accesso (nuovo link via email)" : "Invita questa cliente via email"}</label>
-      <div className="flex gap-2">
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
-          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-        <button onClick={invita} disabled={inviando} className="bg-sky-500 text-white text-sm font-medium rounded-lg px-4">
-          {inviando ? "Invio..." : riinvia ? "Reinvia" : "Invita"}
+      <label className="text-slate-400 text-xs">Email di accesso della cliente</label>
+      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div className="grid grid-cols-1 gap-2">
+        <button onClick={creaPassword} disabled={!!inviando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
+          {inviando === "crea" ? "Invio..." : "Invia link per creare account e password"}
+        </button>
+        <button onClick={reimpostaPassword} disabled={!!inviando} className="bg-slate-100 text-slate-700 text-sm font-medium rounded-lg py-2">
+          {inviando === "reset" ? "Invio..." : "Invia link per reimpostare la password"}
         </button>
       </div>
+      <p className="text-slate-400 text-xs">
+        "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso.
+      </p>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-      {fatto && <p className="text-emerald-600 text-xs">Fatto! Nuovo link inviato via email.</p>}
+      {fatto && <p className="text-emerald-600 text-xs">{fatto}</p>}
     </div>
   );
 }
@@ -1491,7 +1504,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             {client.user_id && (
               <p className="text-emerald-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
             )}
-            <InvitaClienteForm client={client} onInvitato={carica} riinvia={!!client.user_id} />
+            <InvitaClienteForm client={client} onInvitato={carica} />
           </div>
           <div className="col-span-2 border-t border-slate-100 pt-4">
             <EliminaClienteBottone client={client} onEliminato={() => { onBack(); onChanged?.(); }} />
@@ -1840,12 +1853,41 @@ function ImpostaPassword({ onFatto }) {
 export default function App() {
   const [session, setSession] = useState(undefined);
   const [ruolo, setRuolo] = useState(null); // "admin" | "client" | null
-  const [devImpostarePassword, setDevImpostarePassword] = useState(
-    () => window.location.hash.includes("type=invite") || window.location.hash.includes("type=recovery")
-  );
+  const [devImpostarePassword, setDevImpostarePassword] = useState(false);
+  const [erroreLink, setErroreLink] = useState("");
 
+  // Gestiamo noi stessi il link ricevuto via email (invito o reset password),
+  // senza affidarci al rilevamento automatico della libreria (che può perdere il segnale).
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    (async () => {
+      const hash = window.location.hash;
+      if (hash.includes("access_token")) {
+        const params = new URLSearchParams(hash.replace(/^#/, ""));
+        const access_token = params.get("access_token");
+        const refresh_token = params.get("refresh_token");
+        const type = params.get("type");
+        const error_description = params.get("error_description");
+
+        window.history.replaceState(null, "", window.location.pathname);
+
+        if (error_description) {
+          setErroreLink(decodeURIComponent(error_description.replace(/\+/g, " ")));
+          setSession(null);
+          return;
+        }
+
+        if (access_token && refresh_token) {
+          const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (error) { setErroreLink(error.message); setSession(null); return; }
+          if (type === "invite" || type === "recovery") setDevImpostarePassword(true);
+          setSession(data.session);
+          return;
+        }
+      }
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+    })();
+
     const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => listener.subscription.unsubscribe();
   }, []);
@@ -1859,7 +1901,7 @@ export default function App() {
   }, [session]);
 
   if (session === undefined) return <Spinner />;
-  if (!session) return <Login />;
+  if (!session) return <Login erroreLink={erroreLink} />;
   if (devImpostarePassword) return <ImpostaPassword onFatto={() => setDevImpostarePassword(false)} />;
   if (ruolo === null) return <Spinner />;
 
