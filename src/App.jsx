@@ -588,32 +588,46 @@ function ClientNutrizione({ piano }) {
   );
 }
 
-function CellaKg({ exerciseId, data, clientId, valore, entryId, onSaved }) {
-  const [val, setVal] = useState(valore ?? "");
+function CellaAllenamento({ exerciseId, data, clientId, entry, onSaved }) {
+  const [kg, setKg] = useState(entry?.kg ?? "");
+  const [serie, setSerie] = useState(entry?.serie ?? "");
+  const [rip, setRip] = useState(entry?.ripetizioni ?? "");
+  const [nota, setNota] = useState(entry?.note ?? "");
+  const [id, setId] = useState(entry?.id ?? null);
   const [salvando, setSalvando] = useState(false);
 
   const salva = async () => {
-    const num = val === "" ? null : Number(val);
-    if (num === (valore ?? null)) return;
     setSalvando(true);
-    if (entryId) {
-      await supabase.from("training_entries").update({ kg: num }).eq("id", entryId);
+    const payload = {
+      kg: kg === "" ? null : Number(kg),
+      serie: serie === "" ? null : Number(serie),
+      ripetizioni: rip || null,
+      note: nota || null,
+    };
+    if (id) {
+      await supabase.from("training_entries").update(payload).eq("id", id);
     } else {
-      await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: exerciseId, data, kg: num });
+      const { data: inserito } = await supabase.from("training_entries")
+        .insert({ client_id: clientId, exercise_id: exerciseId, data, ...payload }).select().single();
+      if (inserito) setId(inserito.id);
     }
     setSalvando(false);
     onSaved();
   };
 
   return (
-    <input
-      type="number" step="0.5" value={val}
-      onChange={(e) => setVal(e.target.value)}
-      onBlur={salva}
-      disabled={salvando}
-      placeholder="—"
-      className="w-16 text-center border border-slate-200 rounded-lg px-1 py-1.5 text-sm"
-    />
+    <div className="flex flex-col gap-1 w-24">
+      <input type="number" step="0.5" value={kg} onChange={(e) => setKg(e.target.value)} onBlur={salva} disabled={salvando}
+        placeholder="kg" className="w-full text-center border border-slate-200 rounded-lg px-1 py-1.5 text-sm" />
+      <div className="flex gap-1">
+        <input type="number" value={serie} onChange={(e) => setSerie(e.target.value)} onBlur={salva} disabled={salvando}
+          placeholder="serie" className="w-1/2 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
+        <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={salva} disabled={salvando}
+          placeholder="rip" className="w-1/2 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
+      </div>
+      <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salva} disabled={salvando}
+        placeholder="note" className="w-full border border-slate-200 rounded px-1 py-1 text-xs" />
+    </div>
   );
 }
 
@@ -721,22 +735,14 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
             <tbody>
               {esercizi.map((es) => (
                 <tr key={es.id} className="border-t border-slate-100 align-top">
-                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[190px]">
+                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[140px]">
                     <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
-                    <div className="flex gap-1 mt-1">
-                      <input defaultValue={es.serie ?? ""} onBlur={(e) => aggiornaEsercizioCampo(es.id, "serie", e.target.value ? Number(e.target.value) : null)}
-                        placeholder="Serie" type="number" className="w-14 border border-slate-200 rounded px-1.5 py-1 text-xs" />
-                      <input defaultValue={es.ripetizioni || ""} onBlur={(e) => aggiornaEsercizioCampo(es.id, "ripetizioni", e.target.value || null)}
-                        placeholder="Rip. (es. 8-10)" className="w-24 border border-slate-200 rounded px-1.5 py-1 text-xs" />
-                    </div>
-                    <input defaultValue={es.note || ""} onBlur={(e) => aggiornaEsercizioCampo(es.id, "note", e.target.value || null)}
-                      placeholder="Note" className="w-full mt-1 border border-slate-200 rounded px-1.5 py-1 text-xs text-slate-500" />
                   </td>
                   {date.map((d) => {
                     const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
                     return (
                       <td key={d} className="px-2 py-2 text-center">
-                        <CellaKg exerciseId={es.id} data={d} clientId={clientId} valore={entry?.kg} entryId={entry?.id} onSaved={carica} />
+                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entry={entry} onSaved={carica} />
                       </td>
                     );
                   })}
