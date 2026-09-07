@@ -1237,6 +1237,14 @@ function InvitaClienteForm({ client, onInvitato, riinvia = false }) {
       body: { client_id: client.id, email },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
+    if (!error && data?.serve_reset) {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      setInviando(false);
+      if (resetError) { setErrore(resetError.message); return; }
+      setFatto(true);
+      onInvitato();
+      return;
+    }
     setInviando(false);
     if (error || data?.error) { setErrore(data?.error || error.message); return; }
     setFatto(true);
