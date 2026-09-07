@@ -1142,6 +1142,16 @@ function InvitaClienteForm({ client, onInvitato, riinvia = false }) {
     setInviando(true);
     setErrore("");
     setFatto(false);
+
+    if (riinvia) {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      setInviando(false);
+      if (error) { setErrore(error.message); return; }
+      setFatto(true);
+      onInvitato();
+      return;
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     const { data, error } = await supabase.functions.invoke("invite-client", {
       body: { client_id: client.id, email },
