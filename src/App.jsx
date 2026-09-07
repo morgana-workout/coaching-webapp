@@ -71,6 +71,15 @@ function PullToRefresh({ onRefresh, children, ownScroll = false, className = "" 
   );
 }
 
+function InputData({ value, defaultValue, onChange, onBlur, className = "" }) {
+  return (
+    <div className={`overflow-hidden rounded-lg border border-slate-200 ${className}`}>
+      <input type="date" value={value} defaultValue={defaultValue} onChange={onChange} onBlur={onBlur}
+        className="w-full border-0 px-3 py-2 text-sm block" style={{ maxWidth: "100%" }} />
+    </div>
+  );
+}
+
 function Spinner() {
   return <div className="flex justify-center pt-20"><div className="w-8 h-8 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /></div>;
 }
@@ -180,8 +189,8 @@ function ProfiloCliente({ client, onAggiornato }) {
       <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Il tuo profilo</p>
       <div>
         <label className="text-xs text-slate-500">Data di nascita</label>
-        <input type="date" value={form.data_nascita} onChange={(e) => setForm({ ...form, data_nascita: e.target.value })}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        <InputData value={form.data_nascita} onChange={(e) => setForm({ ...form, data_nascita: e.target.value })}
+          className="mt-1" />
       </div>
       <div>
         <label className="text-xs text-slate-500">Altezza (cm)</label>
@@ -1025,7 +1034,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">{checkin ? "Modifica check" : "Aggiungi check"}</p>
       <div><label className="text-xs text-slate-500">Data</label>
-        <input type="date" value={f.data_check} onChange={(e) => setF({ ...f, data_check: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        <InputData value={f.data_check} onChange={(e) => setF({ ...f, data_check: e.target.value })} className="mt-1" />
       </div>
       <div className="grid grid-cols-2 gap-3">
         {campo("Peso (kg)", "peso_kg")}
@@ -1188,7 +1197,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
         {!isGratuito && (
           <div>
             <label className="text-xs text-slate-500">Data pagamento</label>
-            <input type="date" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
           </div>
         )}
       </div>
@@ -1402,13 +1411,13 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data inizio</label>
-            <input type="date" defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            <InputData defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
+              className="mt-1" />
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data scadenza</label>
-            <input type="date" defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            <InputData defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
+              className="mt-1" />
           </div>
           <div>
             <label className="text-slate-400 text-xs">Altezza (cm)</label>
@@ -1431,8 +1440,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data di nascita (compilabile anche dalla cliente)</label>
-            <input type="date" defaultValue={client.data_nascita || ""} onBlur={(e) => salvaCliente({ data_nascita: e.target.value || null })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            <InputData defaultValue={client.data_nascita || ""} onBlur={(e) => salvaCliente({ data_nascita: e.target.value || null })}
+              className="mt-1" />
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Tipo di lavoro / attività quotidiana</label>
@@ -1451,8 +1460,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Prossimo check</label>
-            <input type="date" defaultValue={client.prossimo_check || ""} onBlur={(e) => salvaCliente({ prossimo_check: e.target.value || null })}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            <InputData defaultValue={client.prossimo_check || ""} onBlur={(e) => salvaCliente({ prossimo_check: e.target.value || null })}
+              className="mt-1" />
           </div>
           <div>
             <label className="text-slate-400 text-xs">Stato check</label>
