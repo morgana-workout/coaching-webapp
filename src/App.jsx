@@ -134,7 +134,79 @@ function Login() {
 /* ------------------------------------------------------------------ */
 /* AREA CLIENTE                                                        */
 /* ------------------------------------------------------------------ */
-function ClientHome({ client, goTo }) {
+function calcolaEta(dataNascita) {
+  if (!dataNascita) return null;
+  const oggi = new Date();
+  const nascita = new Date(dataNascita);
+  let eta = oggi.getFullYear() - nascita.getFullYear();
+  const m = oggi.getMonth() - nascita.getMonth();
+  if (m < 0 || (m === 0 && oggi.getDate() < nascita.getDate())) eta--;
+  return eta;
+}
+
+const LIVELLI_ATTIVITA = [
+  { value: "sedentario", label: "Sedentario", descrizione: "meno di 5.000 passi/giorno" },
+  { value: "intermedio", label: "Intermedio", descrizione: "circa 8.000 passi/giorno" },
+  { value: "attivo", label: "Attivo", descrizione: "oltre 10.000 passi/giorno" },
+];
+
+function ProfiloCliente({ client, onAggiornato }) {
+  const [form, setForm] = useState({
+    data_nascita: client.data_nascita || "", altezza_cm: client.altezza_cm || "",
+    livello_attivita: client.livello_attivita || "", note_particolari: client.note_particolari || "",
+  });
+  const [salvando, setSalvando] = useState(false);
+  const [fatto, setFatto] = useState(false);
+
+  const salva = async () => {
+    setSalvando(true);
+    setFatto(false);
+    await supabase.rpc("aggiorna_profilo_cliente", {
+      p_data_nascita: form.data_nascita || null,
+      p_altezza_cm: form.altezza_cm ? Number(form.altezza_cm) : null,
+      p_livello_attivita: form.livello_attivita || null,
+      p_note_particolari: form.note_particolari || null,
+    });
+    setSalvando(false);
+    setFatto(true);
+    onAggiornato?.();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Il tuo profilo</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Data di nascita</label>
+          <input type="date" value={form.data_nascita} onChange={(e) => setForm({ ...form, data_nascita: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Altezza (cm)</label>
+          <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Tipo di lavoro / attività quotidiana</label>
+        <select value={form.livello_attivita} onChange={(e) => setForm({ ...form, livello_attivita: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="">Seleziona...</option>
+          {LIVELLI_ATTIVITA.map((l) => <option key={l.value} value={l.value}>{l.label} ({l.descrizione})</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Segni particolari (infortuni, condizioni da segnalare...)</label>
+        <textarea value={form.note_particolari} onChange={(e) => setForm({ ...form, note_particolari: e.target.value })} rows={2}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva profilo"}</button>
+      {fatto && <p className="text-emerald-600 text-xs">Profilo aggiornato!</p>}
+    </Card>
+  );
+}
+
+function ClientHome({ client, onAggiornato }) {
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
@@ -183,6 +255,8 @@ function ClientHome({ client, goTo }) {
           <Phone size={20} /><span className="font-medium text-sm">Prenota call</span>
         </a>
       </div>
+
+      <ProfiloCliente client={client} onAggiornato={onAggiornato} />
     </div>
   );
 }
@@ -880,10 +954,10 @@ function ClientApp({ session }) {
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
       </div>
       <PullToRefresh onRefresh={carica}>
-      {tab === "home" && <ClientHome client={client} />}
+      {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
       {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
       {tab === "log" && <DiarioAllenamento clientId={client.id} />}
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} />}
       {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
       {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
@@ -1342,8 +1416,28 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             </select>
           </div>
           <div>
-            <label className="text-slate-400 text-xs">Età</label>
+            <label className="text-slate-400 text-xs">Età {client.data_nascita && `(calcolata: ${calcolaEta(client.data_nascita)})`}</label>
             <input type="number" defaultValue={client.eta || ""} onBlur={(e) => salvaCliente({ eta: e.target.value ? Number(e.target.value) : null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder={client.data_nascita ? "sovrascrive il calcolo" : ""} />
+          </div>
+          <div className="col-span-2">
+            <label className="text-slate-400 text-xs">Data di nascita (compilabile anche dalla cliente)</label>
+            <input type="date" defaultValue={client.data_nascita || ""} onBlur={(e) => salvaCliente({ data_nascita: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div className="col-span-2">
+            <label className="text-slate-400 text-xs">Tipo di lavoro / attività quotidiana</label>
+            <select defaultValue={client.livello_attivita || ""} onBlur={(e) => salvaCliente({ livello_attivita: e.target.value || null })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">—</option>
+              <option value="sedentario">Sedentario (meno di 5.000 passi/giorno)</option>
+              <option value="intermedio">Intermedio (circa 8.000 passi/giorno)</option>
+              <option value="attivo">Attivo (oltre 10.000 passi/giorno)</option>
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="text-slate-400 text-xs">Segni particolari</label>
+            <textarea defaultValue={client.note_particolari || ""} onBlur={(e) => salvaCliente({ note_particolari: e.target.value || null })} rows={2}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
           </div>
           <div className="col-span-2">
@@ -1419,7 +1513,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={client.eta} titolo="Progressi e storico check" />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} titolo="Progressi e storico check" />}
 
       {tab === "allenamento" && <DiarioAllenamento clientId={clientId} />}
 
