@@ -682,6 +682,19 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
     onGiornoRinominato();
   };
 
+  const rinominaData = async (vecchiaData, nuovaDataStr) => {
+    if (!nuovaDataStr || nuovaDataStr === vecchiaData) return;
+    if (date.includes(nuovaDataStr)) { alert("Esiste già una colonna con questa data."); return; }
+    await supabase.from("training_entries").update({ data: nuovaDataStr })
+      .in("exercise_id", esercizi.map((e) => e.id)).eq("data", vecchiaData);
+    carica();
+  };
+
+  const aggiornaEsercizioCampo = async (id, campo, valore) => {
+    await supabase.from("training_exercises").update({ [campo]: valore }).eq("id", id);
+    carica();
+  };
+
   if (caricando) return <p className="text-slate-400 text-sm px-1">Caricamento...</p>;
 
   return (
@@ -696,15 +709,28 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
           <table className="text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
-                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[140px]">Esercizio</th>
-                {date.map((d) => <th key={d} className="text-center px-2 py-2 whitespace-nowrap">{d}</th>)}
+                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[190px]">Esercizio</th>
+                {date.map((d) => (
+                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap">
+                    <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
+                      className="bg-transparent border-0 text-xs text-slate-500 uppercase text-center w-28 focus:outline-none focus:bg-white rounded" />
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {esercizi.map((es) => (
-                <tr key={es.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[140px]">
+                <tr key={es.id} className="border-t border-slate-100 align-top">
+                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[190px]">
                     <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
+                    <div className="flex gap-1 mt-1">
+                      <input defaultValue={es.serie ?? ""} onBlur={(e) => aggiornaEsercizioCampo(es.id, "serie", e.target.value ? Number(e.target.value) : null)}
+                        placeholder="Serie" type="number" className="w-14 border border-slate-200 rounded px-1.5 py-1 text-xs" />
+                      <input defaultValue={es.ripetizioni || ""} onBlur={(e) => aggiornaEsercizioCampo(es.id, "ripetizioni", e.target.value || null)}
+                        placeholder="Rip. (es. 8-10)" className="w-24 border border-slate-200 rounded px-1.5 py-1 text-xs" />
+                    </div>
+                    <input defaultValue={es.note || ""} onBlur={(e) => aggiornaEsercizioCampo(es.id, "note", e.target.value || null)}
+                      placeholder="Note" className="w-full mt-1 border border-slate-200 rounded px-1.5 py-1 text-xs text-slate-500" />
                   </td>
                   {date.map((d) => {
                     const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
