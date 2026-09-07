@@ -33,18 +33,21 @@ function Card({ children, className = "" }) {
 function Badge({ children, className = "" }) {
   return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${className}`}>{children}</span>;
 }
-function PullToRefresh({ onRefresh, children }) {
+function PullToRefresh({ onRefresh, children, ownScroll = false, className = "" }) {
   const [pullY, setPullY] = useState(0);
   const [aggiornando, setAggiornando] = useState(false);
   const startY = React.useRef(null);
+  const scrollRef = React.useRef(null);
+
+  const inCima = () => (ownScroll ? (scrollRef.current?.scrollTop ?? 0) <= 0 : window.scrollY <= 0);
 
   const onTouchStart = (e) => {
-    if (window.scrollY <= 0) startY.current = e.touches[0].clientY;
+    if (inCima()) startY.current = e.touches[0].clientY;
   };
   const onTouchMove = (e) => {
     if (startY.current === null) return;
     const delta = e.touches[0].clientY - startY.current;
-    if (delta > 0 && window.scrollY <= 0) setPullY(Math.min(delta, 90));
+    if (delta > 0 && inCima()) setPullY(Math.min(delta, 90));
   };
   const onTouchEnd = async () => {
     if (pullY > 60) {
@@ -57,7 +60,7 @@ function PullToRefresh({ onRefresh, children }) {
   };
 
   return (
-    <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+    <div ref={scrollRef} onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} className={`${ownScroll ? "overflow-y-auto" : ""} ${className}`}>
       <div style={{ height: aggiornando ? 50 : pullY, transition: pullY === 0 ? "height 0.2s" : "none" }} className="flex items-center justify-center overflow-hidden">
         {(pullY > 10 || aggiornando) && (
           <div className={`w-6 h-6 border-2 border-slate-300 border-t-slate-700 rounded-full ${aggiornando || pullY > 60 ? "animate-spin" : ""}`} />
@@ -175,17 +178,15 @@ function ProfiloCliente({ client, onAggiornato }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Il tuo profilo</p>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs text-slate-500">Data di nascita</label>
-          <input type="date" value={form.data_nascita} onChange={(e) => setForm({ ...form, data_nascita: e.target.value })}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Altezza (cm)</label>
-          <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
-        </div>
+      <div>
+        <label className="text-xs text-slate-500">Data di nascita</label>
+        <input type="date" value={form.data_nascita} onChange={(e) => setForm({ ...form, data_nascita: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Altezza (cm)</label>
+        <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
       </div>
       <div>
         <label className="text-xs text-slate-500">Tipo di lavoro / attività quotidiana</label>
@@ -948,20 +949,20 @@ function ClientApp({ session }) {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 max-w-md mx-auto relative">
-      <div className="flex items-center justify-between px-5 pt-5">
+    <div className="h-[100dvh] flex flex-col bg-slate-50 max-w-md mx-auto">
+      <div className="flex items-center justify-between px-5 pt-5 flex-shrink-0">
         <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
       </div>
-      <PullToRefresh onRefresh={carica}>
-      {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
-      {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
-      {tab === "log" && <DiarioAllenamento clientId={client.id} />}
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} />}
-      {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
-      {tab === "extra" && <ClientApprofondimenti />}
+      <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
+        {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
+        {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
+        {tab === "log" && <DiarioAllenamento clientId={client.id} />}
+        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} />}
+        {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
+        {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
-      <div className="fixed bottom-0 max-w-md w-full bg-white border-t border-slate-200 flex justify-around py-3">
+      <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         {nav.map((n) => (
           <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
             <n.icon size={24} />{n.label}
