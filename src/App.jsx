@@ -344,7 +344,7 @@ function ClientHome({ client, onAggiornato }) {
 
   useEffect(() => {
     if (!inPresenza) return;
-    supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id)
+    supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
       .then(({ count }) => setLezioniSvolte(count ?? 0));
   }, [client.id, inPresenza]);
 
@@ -386,7 +386,7 @@ function ClientHome({ client, onAggiornato }) {
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        {(client.scheda_pdf_path || client.link_scheda) && (
+        {!inPresenza && (client.scheda_pdf_path || client.link_scheda) && (
           <button
             onClick={async () => {
               if (client.scheda_pdf_path) {
@@ -1060,6 +1060,86 @@ function DiarioAllenamento({ clientId }) {
   );
 }
 
+function LeMieLezioni({ client }) {
+  const [eventi, setEventi] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data } = await supabase.from("calendar_events").select("*").eq("client_id", client.id).eq("tipo", "lezione").order("data", { ascending: false });
+    setEventi(data || []);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+
+  const oraAttuale = new Date();
+  const future = eventi.filter((e) => e.stato !== "annullata" && e.stato !== "persa" && new Date(`${e.data}T${e.ora || "00:00"}`) >= oraAttuale)
+    .sort((a, b) => `${a.data}${a.ora}`.localeCompare(`${b.data}${b.ora}`));
+  const storico = eventi.filter((e) => !future.includes(e));
+
+  const annulla = async (e) => {
+    const dataOra = new Date(`${e.data}T${e.ora || "00:00"}`);
+    const oreAllaLezione = (dataOra - new Date()) / 3600000;
+    const inTempo = oreAllaLezione >= 24;
+    if (!inTempo) {
+      const conferma = confirm("Mancano meno di 24 ore alla lezione: verrà comunque conteggiata come persa. Vuoi annullare comunque?");
+      if (!conferma) return;
+    }
+    await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa" }).eq("id", e.id);
+    carica();
+  };
+
+  const STATO_LEZIONE = {
+    richiesta: { t: "Da confermare", c: "bg-amber-100 text-amber-700" },
+    confermato: { t: "Confermata", c: "bg-emerald-100 text-emerald-700" },
+    annullata: { t: "Annullata", c: "bg-slate-100 text-slate-500" },
+    persa: { t: "Persa", c: "bg-rose-100 text-rose-700" },
+  };
+
+  if (caricando) return <Spinner />;
+
+  return (
+    <div className="px-5 pt-6 pb-24 space-y-5">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-800">Le mie lezioni</h1>
+        <p className="text-slate-500 text-sm mt-1">Puoi annullare gratuitamente fino a 24 ore prima.</p>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Prossime lezioni</p>
+        <div className="space-y-2">
+          {future.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna lezione programmata.</Card>}
+          {future.map((e) => (
+            <Card key={e.id} className="p-3 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-slate-700 text-sm">{e.data.split("-").reverse().join("/")} · {e.ora?.slice(0, 5)}</p>
+                <p className="text-slate-500 text-xs truncate">{e.luogo}</p>
+              </div>
+              <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
+              <button onClick={() => annulla(e)} className="text-rose-500 text-xs font-medium flex-shrink-0">Annulla</button>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico</p>
+        <div className="space-y-2">
+          {storico.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna lezione passata.</Card>}
+          {storico.map((e) => (
+            <Card key={e.id} className="p-3 flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-slate-700 text-sm">{e.data.split("-").reverse().join("/")} · {e.ora?.slice(0, 5)}</p>
+                <p className="text-slate-500 text-xs truncate">{e.luogo}</p>
+              </div>
+              <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientApprofondimenti() {
   return (
     <div className="px-5 pt-6 pb-24 space-y-4">
@@ -1107,10 +1187,12 @@ function ClientApp({ session }) {
   if (caricando) return <Spinner />;
   if (!client) return <div className="px-6 pt-16 text-center text-slate-500 text-sm">Il tuo account non è ancora collegato a una scheda cliente. Contatta Morgana.</div>;
 
+  const inPresenzaNav = client.tipo_servizio === "presenza";
   const nav = [
     { key: "home", label: "Home", icon: Home },
-    ...(client.tipo_servizio !== "presenza" ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
-    { key: "log", label: "Log", icon: Dumbbell },
+    ...(!inPresenzaNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
+    ...(inPresenzaNav ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
+    ...(!inPresenzaNav || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     { key: "nutrizione", label: "Nutrizione", icon: Apple },
     { key: "extra", label: "Extra", icon: BookOpen },
@@ -1125,6 +1207,7 @@ function ClientApp({ session }) {
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
         {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
+        {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} />}
         {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
@@ -1502,56 +1585,56 @@ function EliminaClienteBottone({ client, onEliminato }) {
 
 function LezioniPacchetto({ client }) {
   const [lezioni, setLezioni] = useState([]);
-  const [data, setData] = useState(new Date().toISOString().slice(0, 10));
-  const [nota, setNota] = useState("");
-  const [salvando, setSalvando] = useState(false);
+  const [caricando, setCaricando] = useState(true);
+  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
 
   const carica = async () => {
-    const { data: rows } = await supabase.from("lezioni_svolte").select("*").eq("client_id", client.id).order("data", { ascending: false });
-    setLezioni(rows || []);
+    const { data: rows } = await supabase.from("lezioni_svolte").select("*").eq("client_id", client.id).order("numero");
+    let attuali = rows || [];
+    // Crea gli slot numerati mancanti in base alla dimensione del pacchetto
+    if (incluse > attuali.length) {
+      const mancanti = [];
+      for (let n = attuali.length + 1; n <= incluse; n++) mancanti.push({ client_id: client.id, numero: n, fatta: false });
+      const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
+      attuali = [...attuali, ...(creati || [])].sort((a, b) => a.numero - b.numero);
+    }
+    setLezioni(attuali);
+    setCaricando(false);
   };
-  useEffect(() => { carica(); }, [client.id]);
+  useEffect(() => { carica(); }, [client.id, incluse]);
 
-  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : null;
-
-  const aggiungi = async () => {
-    setSalvando(true);
-    await supabase.from("lezioni_svolte").insert({ client_id: client.id, data, nota: nota || null });
-    setNota("");
-    setSalvando(false);
-    carica();
+  const aggiorna = async (id, campi) => {
+    setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, ...campi } : l)));
+    await supabase.from("lezioni_svolte").update(campi).eq("id", id);
   };
 
-  const elimina = async (id) => {
-    await supabase.from("lezioni_svolte").delete().eq("id", id);
-    carica();
-  };
+  const svolte = lezioni.filter((l) => l.fatta).length;
+
+  if (caricando) return <Spinner />;
+  if (!incluse) return <Card className="p-6 text-center text-slate-400 text-sm">Imposta prima un pacchetto lezioni nel tab Dati.</Card>;
 
   return (
     <div className="space-y-3">
       <Card className="p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Pacchetto</p>
-        <p className="text-2xl font-semibold text-slate-800">{lezioni.length}{incluse ? ` / ${incluse}` : ""} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
-      </Card>
-
-      <Card className="p-4 space-y-3">
-        <p className="text-sm font-medium text-slate-700">Segna lezione svolta</p>
-        <InputData value={data} onChange={(e) => setData(e.target.value)} />
-        <textarea placeholder="Note sulla lezione (facoltative)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-        <button onClick={aggiungi} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "+ Aggiungi lezione svolta"}</button>
+        <p className="text-2xl font-semibold text-slate-800">{svolte} / {incluse} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
       </Card>
 
       <div className="space-y-2">
         {lezioni.map((l) => (
-          <Card key={l.id} className="p-3 flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="font-medium text-slate-700 text-sm">{l.data?.split("-").reverse().join("/")}</p>
-              {l.nota && <p className="text-slate-500 text-xs mt-0.5">{l.nota}</p>}
+          <Card key={l.id} className="p-3 space-y-2">
+            <div className="flex items-center gap-3">
+              <button onClick={() => aggiorna(l.id, { fatta: !l.fatta })}
+                className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${l.fatta ? "bg-emerald-500" : "border-2 border-slate-300"}`}>
+                {l.fatta && <CheckCircle2 size={16} className="text-white" />}
+              </button>
+              <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {l.numero}</p>
+              <InputData defaultValue={l.data || ""} onBlur={(e) => aggiorna(l.id, { data: e.target.value || null })} className="flex-1" />
             </div>
-            <button onClick={() => elimina(l.id)} className="text-slate-300 hover:text-rose-500 flex-shrink-0"><X size={16} /></button>
+            <input defaultValue={l.nota || ""} onBlur={(e) => aggiorna(l.id, { nota: e.target.value || null })} placeholder="Nota sulla lezione"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
           </Card>
         ))}
-        {lezioni.length === 0 && <p className="text-slate-400 text-sm px-1">Ancora nessuna lezione segnata.</p>}
       </div>
     </div>
   );
@@ -1645,8 +1728,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <label className="text-slate-400 text-xs">Tipo di servizio</label>
             <select defaultValue={client.tipo_servizio || "online"} onBlur={(e) => salvaCliente({ tipo_servizio: e.target.value })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-              <option value="online">Online (coaching a distanza)</option>
-              <option value="presenza">Lezioni 1:1 in presenza</option>
+              <option value="online">ONLINE (coaching a distanza)</option>
+              <option value="presenza">BULB (lezioni 1:1 in presenza)</option>
             </select>
           </div>
           {client.tipo_servizio === "presenza" && (
@@ -1671,6 +1754,15 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                 <option value="">—</option>
                 {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
+            </div>
+          )}
+          {client.tipo_servizio === "presenza" && (
+            <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+              <span className="text-sm text-slate-700">Diario allenamento visibile alla cliente</span>
+              <button onClick={() => salvaCliente({ log_visibile_cliente: !client.log_visibile_cliente })}
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.log_visibile_cliente ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                <span className="w-5 h-5 bg-white rounded-full block" />
+              </button>
             </div>
           )}
           <div className="col-span-2">
@@ -2176,11 +2268,11 @@ function AdminList({ clients, onSelect, onChanged }) {
       <div className="flex gap-2">
         <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
-          Online ({clients.filter((c) => c.tipo_servizio !== "presenza").length})
+          ONLINE ({clients.filter((c) => c.tipo_servizio !== "presenza").length})
         </button>
         <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
-          Presenza ({clients.filter((c) => c.tipo_servizio === "presenza").length})
+          BULB ({clients.filter((c) => c.tipo_servizio === "presenza").length})
         </button>
       </div>
       {filtro !== "tutti" && (
@@ -2203,7 +2295,7 @@ function AdminList({ clients, onSelect, onChanged }) {
                   <div className="flex items-center gap-1.5">
                     <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
                     <Badge className={c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700 flex-shrink-0" : "bg-sky-100 text-sky-700 flex-shrink-0"}>
-                      {c.tipo_servizio === "presenza" ? "Presenza" : "Online"}
+                      {c.tipo_servizio === "presenza" ? "BULB" : "ONLINE"}
                     </Badge>
                   </div>
                   <p className="text-slate-500 text-xs mt-0.5 truncate">
