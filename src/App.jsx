@@ -294,10 +294,11 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   const invia = async () => {
     if (!data) return;
     setInviando(true);
-    await supabase.from("calendar_events").insert({
+    const { data: creato } = await supabase.from("calendar_events").insert({
       client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
       stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
-    });
+    }).select().single();
+    if (creato && !extra) await collegaLezionePacchetto(client.id, creato);
     setInviando(false);
     onFatto();
   };
@@ -339,14 +340,16 @@ function ClientHome({ client, onAggiornato }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
-  const inPresenza = client.tipo_servizio === "presenza";
+  const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
+  const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
+  const isSoloOnline = client.tipo_servizio === "online";
   const lezioniIncluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : null;
 
   useEffect(() => {
-    if (!inPresenza) return;
+    if (!isBulb) return;
     supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
       .then(({ count }) => setLezioniSvolte(count ?? 0));
-  }, [client.id, inPresenza]);
+  }, [client.id, isBulb]);
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
@@ -355,14 +358,7 @@ function ClientHome({ client, onAggiornato }) {
         <p className="text-slate-500 text-sm mt-1">Costanza batte perfezione, sempre.</p>
       </div>
 
-      {inPresenza ? (
-        <Card className="p-5">
-          <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
-          <p className="text-3xl font-semibold text-slate-800 mt-2">
-            {lezioniSvolte ?? 0}{lezioniIncluse ? ` / ${lezioniIncluse}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
-          </p>
-        </Card>
-      ) : (
+      {isOnline && (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-3">
             <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossimo check</span>
@@ -378,6 +374,15 @@ function ClientHome({ client, onAggiornato }) {
         </Card>
       )}
 
+      {isBulb && (
+        <Card className="p-5">
+          <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
+          <p className="text-3xl font-semibold text-slate-800 mt-2">
+            {lezioniSvolte ?? 0}{lezioniIncluse ? ` / ${lezioniIncluse}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
+          </p>
+        </Card>
+      )}
+
       {client.stato_pacchetto === "in scadenza" && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 text-sm">
           <AlertCircle size={18} />
@@ -386,7 +391,7 @@ function ClientHome({ client, onAggiornato }) {
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        {!inPresenza && (client.scheda_pdf_path || client.link_scheda) && (
+        {isOnline && (client.scheda_pdf_path || client.link_scheda) && (
           <button
             onClick={async () => {
               if (client.scheda_pdf_path) {
@@ -401,25 +406,26 @@ function ClientHome({ client, onAggiornato }) {
             <Dumbbell size={20} /><span className="font-medium text-sm">Scheda</span>
           </button>
         )}
-        {inPresenza ? (
+        {isBulb && (
           <button onClick={() => setPrenotaAperto(true)} className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
             <Phone size={20} /><span className="font-medium text-sm">Prenota lezione</span>
           </button>
-        ) : (
+        )}
+        {isSoloOnline && (
           <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
             <Phone size={20} /><span className="font-medium text-sm">Prenota call</span>
           </a>
         )}
       </div>
 
-      {!inPresenza && (
+      {isSoloOnline && (
         <button onClick={() => setPrenotaAperto(true)} className="w-full border border-dashed border-slate-300 text-slate-600 rounded-2xl p-3 text-sm font-medium">
           Prenota lezione in presenza
         </button>
       )}
 
       {prenotaAperto && !inviata && (
-        <PrenotaLezioneForm client={client} extra={!inPresenza} onFatto={() => setInviata(true)} />
+        <PrenotaLezioneForm client={client} extra={isSoloOnline} onFatto={() => setInviata(true)} />
       )}
       {inviata && (
         <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
@@ -1187,12 +1193,13 @@ function ClientApp({ session }) {
   if (caricando) return <Spinner />;
   if (!client) return <div className="px-6 pt-16 text-center text-slate-500 text-sm">Il tuo account non è ancora collegato a una scheda cliente. Contatta Morgana.</div>;
 
-  const inPresenzaNav = client.tipo_servizio === "presenza";
+  const isBulbNav = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
+  const isOnlineNav = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const nav = [
     { key: "home", label: "Home", icon: Home },
-    ...(!inPresenzaNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
-    ...(inPresenzaNav ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
-    ...(!inPresenzaNav || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
+    ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
+    ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
+    ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     { key: "nutrizione", label: "Nutrizione", icon: Apple },
     { key: "extra", label: "Extra", icon: BookOpen },
@@ -1213,9 +1220,9 @@ function ClientApp({ session }) {
         {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
-      <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+      <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around overflow-x-auto py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         {nav.map((n) => (
-          <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
+          <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] flex-shrink-0 ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
             <n.icon size={24} />{n.label}
           </button>
         ))}
@@ -1603,7 +1610,26 @@ function LezioniPacchetto({ client }) {
     await supabase.from("lezioni_svolte").update(campi).eq("id", id);
   };
 
+  const cambiaData = async (l, nuovaData) => {
+    if (!nuovaData) { aggiorna(l.id, { data: null }); return; }
+    aggiorna(l.id, { data: nuovaData });
+    if (l.calendar_event_id) {
+      await supabase.from("calendar_events").update({ data: nuovaData }).eq("id", l.calendar_event_id);
+    } else {
+      const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
+        client_id: client.id, tipo: "lezione", data: nuovaData, luogo: client.sede_abituale || null, stato: "confermato",
+      }).select().single();
+      if (nuovoEvento) aggiorna(l.id, { calendar_event_id: nuovoEvento.id });
+    }
+  };
+
   const svolte = lezioni.filter((l) => l.fatta).length;
+  const ordinate = [...lezioni].sort((a, b) => {
+    if (a.data && b.data) return a.data.localeCompare(b.data);
+    if (a.data) return -1;
+    if (b.data) return 1;
+    return a.numero - b.numero;
+  });
 
   if (caricando) return <Spinner />;
   if (!incluse) return <Card className="p-6 text-center text-slate-400 text-sm">Imposta prima un pacchetto lezioni nel tab Dati.</Card>;
@@ -1616,7 +1642,7 @@ function LezioniPacchetto({ client }) {
       </Card>
 
       <div className="space-y-2">
-        {lezioni.map((l) => (
+        {ordinate.map((l) => (
           <Card key={l.id} className="p-3 space-y-2">
             <div className="flex items-center gap-3">
               <button onClick={() => aggiorna(l.id, { fatta: !l.fatta })}
@@ -1624,15 +1650,24 @@ function LezioniPacchetto({ client }) {
                 {l.fatta && <CheckCircle2 size={16} className="text-white" />}
               </button>
               <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {l.numero}</p>
-              <InputData defaultValue={l.data || ""} onBlur={(e) => aggiorna(l.id, { data: e.target.value || null })} className="flex-1" />
+              <InputData defaultValue={l.data || ""} onBlur={(e) => cambiaData(l, e.target.value)} className="flex-1" />
             </div>
             <input defaultValue={l.nota || ""} onBlur={(e) => aggiorna(l.id, { nota: e.target.value || null })} placeholder="Nota sulla lezione"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
           </Card>
         ))}
       </div>
+      <p className="text-slate-400 text-xs px-1">Impostando una data qui, la lezione compare in automatico anche nel calendario coach.</p>
     </div>
   );
+}
+
+async function collegaLezionePacchetto(clientId, evento) {
+  const { data: libera } = await supabase.from("lezioni_svolte")
+    .select("id").eq("client_id", clientId).is("calendar_event_id", null).order("numero").limit(1).maybeSingle();
+  if (libera) {
+    await supabase.from("lezioni_svolte").update({ data: evento.data, calendar_event_id: evento.id }).eq("id", libera.id);
+  }
 }
 
 function AdminClientDetail({ clientId, onBack, onChanged }) {
@@ -1670,10 +1705,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   };
 
   if (!client) return <Spinner />;
-  const inPresenza = client.tipo_servizio === "presenza";
+  const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
+  const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const tabs = [
     { key: "dati", label: "Dati" },
-    ...(inPresenza ? [{ key: "lezioni", label: "Lezioni" }] : [{ key: "check", label: "Check" }]),
+    ...(isOnline ? [{ key: "check", label: "Check" }] : []),
+    ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
     { key: "progressi", label: "Progressi" },
     { key: "allenamento", label: "Allenamento" },
     { key: "nutrizione", label: "Nutrizione" },
@@ -1725,9 +1762,10 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
               <option value="online">ONLINE (coaching a distanza)</option>
               <option value="presenza">BULB (lezioni 1:1 in presenza)</option>
+              <option value="ibrido">IBRIDO (online + BULB)</option>
             </select>
           </div>
-          {client.tipo_servizio === "presenza" && (
+          {(client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido") && (
             <div className="col-span-2">
               <label className="text-slate-400 text-xs">Pacchetto lezioni</label>
               <select defaultValue={client.pacchetto_lezioni || ""} onBlur={(e) => salvaCliente({ pacchetto_lezioni: e.target.value || null })}
@@ -1741,7 +1779,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               </select>
             </div>
           )}
-          {client.tipo_servizio === "presenza" && (
+          {(client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido") && (
             <div className="col-span-2">
               <label className="text-slate-400 text-xs">Sede abituale</label>
               <select defaultValue={client.sede_abituale || ""} onBlur={(e) => salvaCliente({ sede_abituale: e.target.value || null })}
@@ -1951,9 +1989,10 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
         <select value={f.tipo_servizio} onChange={(e) => setF({ ...f, tipo_servizio: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
           <option value="online">ONLINE (coaching a distanza)</option>
           <option value="presenza">BULB (lezioni 1:1 in presenza)</option>
+          <option value="ibrido">IBRIDO (online + BULB)</option>
         </select>
       </div>
-      {f.tipo_servizio === "presenza" && (
+      {(f.tipo_servizio === "presenza" || f.tipo_servizio === "ibrido") && (
         <div>
           <label className="text-xs text-slate-500">Pacchetto lezioni</label>
           <select value={f.pacchetto_lezioni} onChange={(e) => setF({ ...f, pacchetto_lezioni: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
@@ -1970,12 +2009,12 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
         {campo("Codice (es. c10)", "codice")}
         {campo("Nome", "nome")}
         {campo("Cognome", "cognome")}
-        {f.tipo_servizio === "online" && campo("Piano", "piano")}
+        {(f.tipo_servizio === "online" || f.tipo_servizio === "ibrido") && campo("Piano", "piano")}
         {campo("Data inizio", "data_inizio", "date")}
         {campo("Data scadenza", "data_scadenza", "date")}
         {campo("Altezza (cm)", "altezza_cm", "number")}
       </div>
-      {f.tipo_servizio === "online" && campo("Link scheda", "link_scheda")}
+      {(f.tipo_servizio === "online" || f.tipo_servizio === "ibrido") && campo("Link scheda", "link_scheda")}
       <div>
         <label className="text-xs text-slate-500">Stato pacchetto</label>
         <select value={f.stato_pacchetto} onChange={(e) => setF({ ...f, stato_pacchetto: e.target.value })}
@@ -2050,7 +2089,8 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
     if (!f.client_id) return;
     setSalvando(true);
     const payload = { ...f, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
-    await supabase.from("calendar_events").insert(payload);
+    const { data: creato } = await supabase.from("calendar_events").insert(payload).select().single();
+    if (creato && f.tipo === "lezione") await collegaLezionePacchetto(f.client_id, creato);
     setSalvando(false);
     onSalvato();
   };
@@ -2238,8 +2278,8 @@ function AdminList({ clients, onSelect, onChanged }) {
   if (filtro === "da_fare") visibili = visibili.filter((c) => c.stato_check === "da_compilare");
   if (filtro === "in_scadenza") visibili = visibili.filter((c) => c.stato_pacchetto === "in scadenza");
   if (filtro === "scaduti") visibili = visibili.filter((c) => c.stato_pacchetto === "scaduto");
-  if (filtro === "online") visibili = visibili.filter((c) => c.tipo_servizio !== "presenza");
-  if (filtro === "presenza") visibili = visibili.filter((c) => c.tipo_servizio === "presenza");
+  if (filtro === "online") visibili = visibili.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido");
+  if (filtro === "presenza") visibili = visibili.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido");
 
   const riordinabile = !ricerca.trim() && filtro === "tutti";
 
@@ -2284,11 +2324,11 @@ function AdminList({ clients, onSelect, onChanged }) {
       <div className="flex gap-2">
         <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
-          ONLINE ({clients.filter((c) => c.tipo_servizio !== "presenza").length})
+          ONLINE ({clients.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
         </button>
         <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
-          BULB ({clients.filter((c) => c.tipo_servizio === "presenza").length})
+          BULB ({clients.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
         </button>
       </div>
       {filtro !== "tutti" && (
@@ -2310,8 +2350,8 @@ function AdminList({ clients, onSelect, onChanged }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
-                    <Badge className={c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700 flex-shrink-0" : "bg-sky-100 text-sky-700 flex-shrink-0"}>
-                      {c.tipo_servizio === "presenza" ? "BULB" : "ONLINE"}
+                    <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
+                      {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
                   </div>
                   <p className="text-slate-500 text-xs mt-0.5 truncate">
