@@ -209,16 +209,16 @@ const LIVELLI_ATTIVITA = [
 ];
 
 function ProfiloCliente({ client, onAggiornato }) {
+  const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari);
+  const [modifica, setModifica] = useState(!profiloGiaCompilato);
   const [form, setForm] = useState({
     data_nascita: client.data_nascita || "", altezza_cm: client.altezza_cm || "",
     livello_attivita: client.livello_attivita || "", note_particolari: client.note_particolari || "",
   });
   const [salvando, setSalvando] = useState(false);
-  const [fatto, setFatto] = useState(false);
 
   const salva = async () => {
     setSalvando(true);
-    setFatto(false);
     await supabase.rpc("aggiorna_profilo_cliente", {
       p_data_nascita: form.data_nascita || null,
       p_altezza_cm: form.altezza_cm ? Number(form.altezza_cm) : null,
@@ -226,9 +226,27 @@ function ProfiloCliente({ client, onAggiornato }) {
       p_note_particolari: form.note_particolari || null,
     });
     setSalvando(false);
-    setFatto(true);
+    setModifica(false);
     onAggiornato?.();
   };
+
+  if (!modifica) {
+    const livello = LIVELLI_ATTIVITA.find((l) => l.value === client.livello_attivita);
+    return (
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Il tuo profilo</p>
+          <button onClick={() => setModifica(true)} className="text-sky-600 text-xs font-medium">Modifica</button>
+        </div>
+        <div className="text-sm text-slate-700 space-y-1">
+          {client.data_nascita && <p>Data di nascita: {client.data_nascita.split("-").reverse().join("/")}</p>}
+          {client.altezza_cm && <p>Altezza: {client.altezza_cm} cm</p>}
+          {livello && <p>Attività quotidiana: {livello.label}</p>}
+          {client.note_particolari && <p className="text-slate-500">Segni particolari: {client.note_particolari}</p>}
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4 space-y-3">
@@ -256,8 +274,10 @@ function ProfiloCliente({ client, onAggiornato }) {
         <textarea value={form.note_particolari} onChange={(e) => setForm({ ...form, note_particolari: e.target.value })} rows={2}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
       </div>
-      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva profilo"}</button>
-      {fatto && <p className="text-emerald-600 text-xs">Profilo aggiornato!</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva profilo"}</button>
+        {profiloGiaCompilato && <button onClick={() => setModifica(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>}
+      </div>
     </Card>
   );
 }
@@ -284,7 +304,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min){extra && " — extra +30€"}</p>
+      <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min)</p>
       <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
       {extra && (
         <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 text-xs">
@@ -394,7 +414,7 @@ function ClientHome({ client, onAggiornato }) {
 
       {!inPresenza && (
         <button onClick={() => setPrenotaAperto(true)} className="w-full border border-dashed border-slate-300 text-slate-600 rounded-2xl p-3 text-sm font-medium">
-          Prenota lezione in presenza (+30€)
+          Prenota lezione in presenza
         </button>
       )}
 
