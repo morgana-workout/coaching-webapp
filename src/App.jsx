@@ -24,6 +24,47 @@ const APPROFONDIMENTI_LINKS = [
 
 const CALENDLY_URL = "https://calendly.com/morgana-workout/30min";
 
+const LUOGHI = ["Via San Secondo 39, Torino", "Via Fratelli Calandra 6, Torino"];
+
+function fasceOrarie() {
+  const slots = [];
+  for (let h = 7; h <= 19; h++) {
+    slots.push(`${String(h).padStart(2, "0")}:00`);
+    slots.push(`${String(h).padStart(2, "0")}:30`);
+  }
+  return slots;
+}
+const SLOT_ORARI = fasceOrarie().filter((s) => s <= "19:00");
+
+function pasquaDiPasqua(anno) {
+  const a = anno % 19, b = Math.floor(anno / 100), c = anno % 100;
+  const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mese = Math.floor((h + l - 7 * m + 114) / 31);
+  const giorno = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(anno, mese - 1, giorno);
+}
+
+function festivitaItaliane(anno) {
+  const fisse = ["01-01", "01-06", "04-25", "05-01", "06-02", "08-15", "11-01", "12-08", "12-25", "12-26"];
+  const pasqua = pasquaDiPasqua(anno);
+  const pasquetta = new Date(pasqua); pasquetta.setDate(pasqua.getDate() + 1);
+  const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return new Set([...fisse, fmt(pasqua), fmt(pasquetta)]);
+}
+
+function giornoDisponibile(dataStr) {
+  if (!dataStr) return true;
+  const d = new Date(dataStr + "T00:00:00");
+  const weekday = d.getDay();
+  if (weekday === 0 || weekday === 6) return false;
+  const mm_dd = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  if (festivitaItaliane(d.getFullYear()).has(mm_dd)) return false;
+  return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* UI helpers                                                          */
 /* ------------------------------------------------------------------ */
@@ -221,26 +262,53 @@ function ProfiloCliente({ client, onAggiornato }) {
   );
 }
 
-function PrenotaLezioneForm({ client, onFatto }) {
+function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   const [data, setData] = useState("");
-  const [ora, setOra] = useState("10:00");
+  const [ora, setOra] = useState(SLOT_ORARI[6]);
+  const [luogo, setLuogo] = useState(client.sede_abituale || LUOGHI[0]);
   const [nota, setNota] = useState("");
   const [inviando, setInviando] = useState(false);
+
+  const disponibile = giornoDisponibile(data);
 
   const invia = async () => {
     if (!data) return;
     setInviando(true);
-    await supabase.from("calendar_events").insert({ client_id: client.id, tipo: "lezione", data, ora, nota, stato: "richiesta" });
+    await supabase.from("calendar_events").insert({
+      client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
+      stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
+    });
     setInviando(false);
     onFatto();
   };
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min)</p>
+      <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min){extra && " — extra +30€"}</p>
       <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
+      {extra && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 text-xs">
+          Questa lezione in presenza ha un costo aggiuntivo di 30€, da saldare direttamente con Morgana.
+        </div>
+      )}
       <InputData value={data} onChange={(e) => setData(e.target.value)} />
-      <input type="time" value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      {data && !disponibile && (
+        <div className="bg-slate-50 border border-slate-200 text-slate-600 rounded-lg px-3 py-2 text-xs">
+          Questo giorno è normalmente non disponibile (weekend o festivo). Puoi comunque inviare la richiesta come eccezione: Morgana valuterà se può confermarla.
+        </div>
+      )}
+      <div>
+        <label className="text-xs text-slate-500">Orario (durata 60 minuti)</label>
+        <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Sede</label>
+        <select value={luogo} onChange={(e) => setLuogo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      </div>
       <textarea placeholder="Nota (facoltativa)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{inviando ? "Invio..." : "Invia richiesta"}</button>
     </Card>
@@ -324,8 +392,14 @@ function ClientHome({ client, onAggiornato }) {
         )}
       </div>
 
-      {inPresenza && prenotaAperto && !inviata && (
-        <PrenotaLezioneForm client={client} onFatto={() => setInviata(true)} />
+      {!inPresenza && (
+        <button onClick={() => setPrenotaAperto(true)} className="w-full border border-dashed border-slate-300 text-slate-600 rounded-2xl p-3 text-sm font-medium">
+          Prenota lezione in presenza (+30€)
+        </button>
+      )}
+
+      {prenotaAperto && !inviata && (
+        <PrenotaLezioneForm client={client} extra={!inPresenza} onFatto={() => setInviata(true)} />
       )}
       {inviata && (
         <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
@@ -1569,6 +1643,16 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               </select>
             </div>
           )}
+          {client.tipo_servizio === "presenza" && (
+            <div className="col-span-2">
+              <label className="text-slate-400 text-xs">Sede abituale</label>
+              <select defaultValue={client.sede_abituale || ""} onBlur={(e) => salvaCliente({ sede_abituale: e.target.value || null })}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="">—</option>
+                {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+          )}
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data inizio</label>
             <InputData defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
@@ -1831,13 +1915,14 @@ const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Lug
 const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500" };
 
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10), ora: "10:00", nota: "" });
+  const [f, setF] = useState({ client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
   const [salvando, setSalvando] = useState(false);
 
   const salva = async () => {
     if (!f.client_id) return;
     setSalvando(true);
-    await supabase.from("calendar_events").insert({ ...f, stato: "confermato" });
+    const payload = { ...f, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
+    await supabase.from("calendar_events").insert(payload);
     setSalvando(false);
     onSalvato();
   };
@@ -1857,8 +1942,18 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
-        <div><input type="time" value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
+        <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
+      {f.tipo === "lezione" && (
+        <div>
+          <label className="text-xs text-slate-500">Sede</label>
+          <select value={f.luogo} onChange={(e) => setF({ ...f, luogo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+      )}
       <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva evento"}</button>
@@ -1889,11 +1984,13 @@ function CalendarioAgenda({ clients, onSelect }) {
   });
   eventiCalendario.forEach((e) => {
     const nomeCliente = e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente";
-    eventi.push({
-      data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente,
-      label: (e.tipo === "lezione" ? "Lezione 1:1" : "Call") + (e.stato === "richiesta" ? " (richiesta)" : "") + (e.nota ? ` — ${e.nota}` : ""),
-      clientId: e.client_id,
-    });
+    const pezzi = [e.tipo === "lezione" ? "Lezione 1:1" : "Call"];
+    if (e.luogo) pezzi.push(e.luogo);
+    if (e.stato === "richiesta") pezzi.push("da confermare");
+    if (e.fuori_disponibilita) pezzi.push("eccezione (fuori orario standard)");
+    if (e.extra_euro) pezzi.push(`+${e.extra_euro}€ da riscuotere`);
+    if (e.nota) pezzi.push(e.nota);
+    eventi.push({ data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
   });
 
   const primoDelMese = new Date(anno, mese, 1);
@@ -2013,6 +2110,8 @@ function AdminList({ clients, onSelect, onChanged }) {
   if (filtro === "da_fare") visibili = visibili.filter((c) => c.stato_check === "da_compilare");
   if (filtro === "in_scadenza") visibili = visibili.filter((c) => c.stato_pacchetto === "in scadenza");
   if (filtro === "scaduti") visibili = visibili.filter((c) => c.stato_pacchetto === "scaduto");
+  if (filtro === "online") visibili = visibili.filter((c) => c.tipo_servizio !== "presenza");
+  if (filtro === "presenza") visibili = visibili.filter((c) => c.tipo_servizio === "presenza");
 
   const riordinabile = !ricerca.trim() && filtro === "tutti";
 
@@ -2054,6 +2153,16 @@ function AdminList({ clients, onSelect, onChanged }) {
         {filtriBtn("in_scadenza", "In scadenza", inScadenza.length, "bg-rose-50 text-rose-700")}
         {filtriBtn("scaduti", "Scaduti", scaduti.length, "bg-slate-100 text-slate-600")}
       </div>
+      <div className="flex gap-2">
+        <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
+          className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
+          Online ({clients.filter((c) => c.tipo_servizio !== "presenza").length})
+        </button>
+        <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
+          className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
+          Presenza ({clients.filter((c) => c.tipo_servizio === "presenza").length})
+        </button>
+      </div>
       {filtro !== "tutti" && (
         <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
       )}
@@ -2071,8 +2180,17 @@ function AdminList({ clients, onSelect, onChanged }) {
               )}
               <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left">
                 <div className="min-w-0">
-                  <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
-                  <p className="text-slate-500 text-xs mt-0.5 truncate">{c.piano || "—"} · Prossimo check: {c.prossimo_check || "—"}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
+                    <Badge className={c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700 flex-shrink-0" : "bg-sky-100 text-sky-700 flex-shrink-0"}>
+                      {c.tipo_servizio === "presenza" ? "Presenza" : "Online"}
+                    </Badge>
+                  </div>
+                  <p className="text-slate-500 text-xs mt-0.5 truncate">
+                    {c.tipo_servizio === "presenza"
+                      ? `${c.piano || "—"} · ${c.pacchetto_lezioni ? c.pacchetto_lezioni + " lezioni" : "pacchetto non impostato"}`
+                      : `${c.piano || "—"} · Prossimo check: ${c.prossimo_check || "—"}`}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <StatoBadge stato={c.stato_check} />
