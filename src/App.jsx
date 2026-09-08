@@ -221,7 +221,45 @@ function ProfiloCliente({ client, onAggiornato }) {
   );
 }
 
+function PrenotaLezioneForm({ client, onFatto }) {
+  const [data, setData] = useState("");
+  const [ora, setOra] = useState("10:00");
+  const [nota, setNota] = useState("");
+  const [inviando, setInviando] = useState(false);
+
+  const invia = async () => {
+    if (!data) return;
+    setInviando(true);
+    await supabase.from("calendar_events").insert({ client_id: client.id, tipo: "lezione", data, ora, nota, stato: "richiesta" });
+    setInviando(false);
+    onFatto();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min)</p>
+      <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
+      <InputData value={data} onChange={(e) => setData(e.target.value)} />
+      <input type="time" value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <textarea placeholder="Nota (facoltativa)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{inviando ? "Invio..." : "Invia richiesta"}</button>
+    </Card>
+  );
+}
+
 function ClientHome({ client, onAggiornato }) {
+  const [prenotaAperto, setPrenotaAperto] = useState(false);
+  const [inviata, setInviata] = useState(false);
+  const [lezioniSvolte, setLezioniSvolte] = useState(null);
+  const inPresenza = client.tipo_servizio === "presenza";
+  const lezioniIncluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : null;
+
+  useEffect(() => {
+    if (!inPresenza) return;
+    supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id)
+      .then(({ count }) => setLezioniSvolte(count ?? 0));
+  }, [client.id, inPresenza]);
+
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
@@ -229,19 +267,28 @@ function ClientHome({ client, onAggiornato }) {
         <p className="text-slate-500 text-sm mt-1">Costanza batte perfezione, sempre.</p>
       </div>
 
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossimo check</span>
-          <StatoBadge stato={client.stato_check} />
-        </div>
-        <div className="flex items-end justify-between">
-          <div>
-            <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check || "—"}</p>
-            <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check || "—"}</p>
+      {inPresenza ? (
+        <Card className="p-5">
+          <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
+          <p className="text-3xl font-semibold text-slate-800 mt-2">
+            {lezioniSvolte ?? 0}{lezioniIncluse ? ` / ${lezioniIncluse}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
+          </p>
+        </Card>
+      ) : (
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossimo check</span>
+            <StatoBadge stato={client.stato_check} />
           </div>
-          <Clock className="text-sky-500" size={32} />
-        </div>
-      </Card>
+          <div className="flex items-end justify-between">
+            <div>
+              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check || "—"}</p>
+              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check || "—"}</p>
+            </div>
+            <Clock className="text-sky-500" size={32} />
+          </div>
+        </Card>
+      )}
 
       {client.stato_pacchetto === "in scadenza" && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 text-sm">
@@ -266,10 +313,23 @@ function ClientHome({ client, onAggiornato }) {
             <Dumbbell size={20} /><span className="font-medium text-sm">Scheda</span>
           </button>
         )}
-        <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
-          <Phone size={20} /><span className="font-medium text-sm">Prenota call</span>
-        </a>
+        {inPresenza ? (
+          <button onClick={() => setPrenotaAperto(true)} className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
+            <Phone size={20} /><span className="font-medium text-sm">Prenota lezione</span>
+          </button>
+        ) : (
+          <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
+            <Phone size={20} /><span className="font-medium text-sm">Prenota call</span>
+          </a>
+        )}
       </div>
+
+      {inPresenza && prenotaAperto && !inviata && (
+        <PrenotaLezioneForm client={client} onFatto={() => setInviata(true)} />
+      )}
+      {inviata && (
+        <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
+      )}
 
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
     </div>
@@ -955,7 +1015,7 @@ function ClientApp({ session }) {
 
   const nav = [
     { key: "home", label: "Home", icon: Home },
-    { key: "checkin", label: "Check", icon: ClipboardList },
+    ...(client.tipo_servizio !== "presenza" ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     { key: "log", label: "Log", icon: Dumbbell },
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     { key: "nutrizione", label: "Nutrizione", icon: Apple },
@@ -1346,6 +1406,63 @@ function EliminaClienteBottone({ client, onEliminato }) {
   );
 }
 
+function LezioniPacchetto({ client }) {
+  const [lezioni, setLezioni] = useState([]);
+  const [data, setData] = useState(new Date().toISOString().slice(0, 10));
+  const [nota, setNota] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const carica = async () => {
+    const { data: rows } = await supabase.from("lezioni_svolte").select("*").eq("client_id", client.id).order("data", { ascending: false });
+    setLezioni(rows || []);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+
+  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : null;
+
+  const aggiungi = async () => {
+    setSalvando(true);
+    await supabase.from("lezioni_svolte").insert({ client_id: client.id, data, nota: nota || null });
+    setNota("");
+    setSalvando(false);
+    carica();
+  };
+
+  const elimina = async (id) => {
+    await supabase.from("lezioni_svolte").delete().eq("id", id);
+    carica();
+  };
+
+  return (
+    <div className="space-y-3">
+      <Card className="p-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Pacchetto</p>
+        <p className="text-2xl font-semibold text-slate-800">{lezioni.length}{incluse ? ` / ${incluse}` : ""} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
+      </Card>
+
+      <Card className="p-4 space-y-3">
+        <p className="text-sm font-medium text-slate-700">Segna lezione svolta</p>
+        <InputData value={data} onChange={(e) => setData(e.target.value)} />
+        <textarea placeholder="Note sulla lezione (facoltative)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <button onClick={aggiungi} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "+ Aggiungi lezione svolta"}</button>
+      </Card>
+
+      <div className="space-y-2">
+        {lezioni.map((l) => (
+          <Card key={l.id} className="p-3 flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-medium text-slate-700 text-sm">{l.data?.split("-").reverse().join("/")}</p>
+              {l.nota && <p className="text-slate-500 text-xs mt-0.5">{l.nota}</p>}
+            </div>
+            <button onClick={() => elimina(l.id)} className="text-slate-300 hover:text-rose-500 flex-shrink-0"><X size={16} /></button>
+          </Card>
+        ))}
+        {lezioni.length === 0 && <p className="text-slate-400 text-sm px-1">Ancora nessuna lezione segnata.</p>}
+      </div>
+    </div>
+  );
+}
+
 function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
@@ -1381,7 +1498,15 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   };
 
   if (!client) return <Spinner />;
-  const tabs = [{ key: "dati", label: "Dati" }, { key: "check", label: "Check" }, { key: "progressi", label: "Progressi" }, { key: "allenamento", label: "Allenamento" }, { key: "nutrizione", label: "Nutrizione" }, { key: "note", label: "Note" }];
+  const inPresenza = client.tipo_servizio === "presenza";
+  const tabs = [
+    { key: "dati", label: "Dati" },
+    ...(inPresenza ? [{ key: "lezioni", label: "Lezioni" }] : [{ key: "check", label: "Check" }]),
+    { key: "progressi", label: "Progressi" },
+    { key: "allenamento", label: "Allenamento" },
+    { key: "nutrizione", label: "Nutrizione" },
+    { key: "note", label: "Note" },
+  ];
 
   return (
     <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5 overflow-x-hidden">
@@ -1422,6 +1547,28 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <option value="gratuito">gratuito</option>
             </select>
           </div>
+          <div className="col-span-2">
+            <label className="text-slate-400 text-xs">Tipo di servizio</label>
+            <select defaultValue={client.tipo_servizio || "online"} onBlur={(e) => salvaCliente({ tipo_servizio: e.target.value })}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="online">Online (coaching a distanza)</option>
+              <option value="presenza">Lezioni 1:1 in presenza</option>
+            </select>
+          </div>
+          {client.tipo_servizio === "presenza" && (
+            <div className="col-span-2">
+              <label className="text-slate-400 text-xs">Pacchetto lezioni</label>
+              <select defaultValue={client.pacchetto_lezioni || ""} onBlur={(e) => salvaCliente({ pacchetto_lezioni: e.target.value || null })}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="">—</option>
+                <option value="1">1 lezione</option>
+                <option value="4">4 lezioni (1 al mese)</option>
+                <option value="8">8 lezioni (2 al mese)</option>
+                <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
+                <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
+              </select>
+            </div>
+          )}
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data inizio</label>
             <InputData defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
@@ -1511,6 +1658,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           </div>
         </Card>
       )}
+
+      {tab === "lezioni" && <LezioniPacchetto client={client} />}
 
       {tab === "check" && (
         <div className="space-y-3">
@@ -1679,22 +1828,77 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500" };
+
+function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
+  const [f, setF] = useState({ client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10), ora: "10:00", nota: "" });
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async () => {
+    if (!f.client_id) return;
+    setSalvando(true);
+    await supabase.from("calendar_events").insert({ ...f, stato: "confermato" });
+    setSalvando(false);
+    onSalvato();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Nuovo evento</p>
+      <div>
+        <label className="text-xs text-slate-500">Cliente</label>
+        <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+        </select>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => setF({ ...f, tipo: "lezione" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "lezione" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Lezione 1:1</button>
+        <button onClick={() => setF({ ...f, tipo: "call" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "call" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600"}`}>Call</button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
+        <div><input type="time" value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
+      </div>
+      <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva evento"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
 
 function CalendarioAgenda({ clients, onSelect }) {
   const oggi = new Date();
   const [mese, setMese] = useState(oggi.getMonth());
   const [anno, setAnno] = useState(oggi.getFullYear());
   const [giornoFiltro, setGiornoFiltro] = useState(null);
+  const [eventiCalendario, setEventiCalendario] = useState([]);
+  const [mostraForm, setMostraForm] = useState(false);
+
+  const caricaEventi = async () => {
+    const { data } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").order("data");
+    setEventiCalendario(data || []);
+  };
+  useEffect(() => { caricaEventi(); }, []);
 
   const eventi = [];
   clients.forEach((c) => {
-    if (c.prossimo_check) eventi.push({ data: c.prossimo_check, tipo: "check", nome: `${c.nome} ${c.cognome}`, label: "Check da fare", clientId: c.id });
-    if (c.data_scadenza && c.stato_pacchetto !== "scaduto") eventi.push({ data: c.data_scadenza, tipo: "scadenza", nome: `${c.nome} ${c.cognome}`, label: "Pacchetto in scadenza", clientId: c.id });
+    if (c.tipo_servizio !== "presenza" && c.prossimo_check) eventi.push({ data: c.prossimo_check, ora: null, tipo: "check", nome: `${c.nome} ${c.cognome}`, label: "Check da fare", clientId: c.id });
+    if (c.data_scadenza && c.stato_pacchetto !== "scaduto") eventi.push({ data: c.data_scadenza, ora: null, tipo: "scadenza", nome: `${c.nome} ${c.cognome}`, label: "Pacchetto in scadenza", clientId: c.id });
+  });
+  eventiCalendario.forEach((e) => {
+    const nomeCliente = e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente";
+    eventi.push({
+      data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente,
+      label: (e.tipo === "lezione" ? "Lezione 1:1" : "Call") + (e.stato === "richiesta" ? " (richiesta)" : "") + (e.nota ? ` — ${e.nota}` : ""),
+      clientId: e.client_id,
+    });
   });
 
   const primoDelMese = new Date(anno, mese, 1);
   const giorniNelMese = new Date(anno, mese + 1, 0).getDate();
-  const offset = (primoDelMese.getDay() + 6) % 7; // lunedì = 0
+  const offset = (primoDelMese.getDay() + 6) % 7;
 
   const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
   const eventiDelGiorno = (g) => eventi.filter((e) => e.data === dataStr(g));
@@ -1706,12 +1910,23 @@ function CalendarioAgenda({ clients, onSelect }) {
     setGiornoFiltro(null);
   };
 
+  const ordinaGiornoSingolo = (lista) => {
+    const senzaOrario = lista.filter((e) => !e.ora);
+    const conOrario = lista.filter((e) => e.ora).sort((a, b) => a.ora.localeCompare(b.ora));
+    return [...senzaOrario, ...conOrario];
+  };
+
   const eventiVisibili = giornoFiltro
-    ? eventiDelGiorno(giornoFiltro)
-    : eventi.filter((e) => e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 15);
+    ? ordinaGiornoSingolo(eventiDelGiorno(giornoFiltro))
+    : eventi.filter((e) => e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data) || (a.ora || "").localeCompare(b.ora || "")).slice(0, 15);
 
   return (
     <div className="space-y-3">
+      {!mostraForm && (
+        <button onClick={() => setMostraForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi lezione o call</button>
+      )}
+      {mostraForm && <NuovoEventoForm clients={clients} onAnnulla={() => setMostraForm(false)} onSalvato={() => { setMostraForm(false); caricaEventi(); }} />}
+
       <div className="flex items-center justify-between">
         <button onClick={() => cambiaMese(-1)} className="text-slate-400 px-2">‹</button>
         <p className="text-sm font-medium text-slate-700">{MESI[mese]} {anno}</p>
@@ -1731,14 +1946,19 @@ function CalendarioAgenda({ clients, onSelect }) {
               <span>{g}</span>
               {evs.length > 0 && (
                 <span className="flex gap-0.5">
-                  {evs.slice(0, 3).map((e, idx) => (
-                    <span key={idx} className={`w-1.5 h-1.5 rounded-full ${e.tipo === "check" ? "bg-sky-500" : "bg-amber-500"}`} />
-                  ))}
+                  {evs.slice(0, 3).map((e, idx) => <span key={idx} className={`w-1.5 h-1.5 rounded-full ${COLORE_TIPO[e.tipo]}`} />)}
                 </span>
               )}
             </button>
           );
         })}
+      </div>
+
+      <div className="flex flex-wrap gap-3 px-1 text-xs text-slate-500">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Check</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Scadenza</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" /> Lezione 1:1</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
       </div>
 
       <div className="space-y-2 pt-2">
@@ -1749,10 +1969,11 @@ function CalendarioAgenda({ clients, onSelect }) {
         {eventiVisibili.map((e, i) => (
           <button key={i} onClick={() => onSelect(e.clientId)} className="w-full text-left">
             <Card className="p-3 flex items-center gap-3">
-              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${e.tipo === "check" ? "bg-sky-500" : "bg-amber-500"}`} />
+              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+              {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-700 truncate">{e.nome}</p>
-                <p className="text-slate-500 text-xs">{e.data.split("-").reverse().join("/")} — {e.label}</p>
+                <p className="text-slate-500 text-xs truncate">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
               </div>
               <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
             </Card>
