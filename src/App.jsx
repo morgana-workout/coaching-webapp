@@ -1678,10 +1678,96 @@ function FotoCheck({ checkin }) {
   );
 }
 
+const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+
+function CalendarioAgenda({ clients, onSelect }) {
+  const oggi = new Date();
+  const [mese, setMese] = useState(oggi.getMonth());
+  const [anno, setAnno] = useState(oggi.getFullYear());
+  const [giornoFiltro, setGiornoFiltro] = useState(null);
+
+  const eventi = [];
+  clients.forEach((c) => {
+    if (c.prossimo_check) eventi.push({ data: c.prossimo_check, tipo: "check", nome: `${c.nome} ${c.cognome}`, label: "Check da fare", clientId: c.id });
+    if (c.data_scadenza && c.stato_pacchetto !== "scaduto") eventi.push({ data: c.data_scadenza, tipo: "scadenza", nome: `${c.nome} ${c.cognome}`, label: "Pacchetto in scadenza", clientId: c.id });
+  });
+
+  const primoDelMese = new Date(anno, mese, 1);
+  const giorniNelMese = new Date(anno, mese + 1, 0).getDate();
+  const offset = (primoDelMese.getDay() + 6) % 7; // lunedì = 0
+
+  const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
+  const eventiDelGiorno = (g) => eventi.filter((e) => e.data === dataStr(g));
+
+  const cambiaMese = (delta) => {
+    let m = mese + delta, a = anno;
+    if (m < 0) { m = 11; a--; } else if (m > 11) { m = 0; a++; }
+    setMese(m); setAnno(a);
+    setGiornoFiltro(null);
+  };
+
+  const eventiVisibili = giornoFiltro
+    ? eventiDelGiorno(giornoFiltro)
+    : eventi.filter((e) => e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data)).slice(0, 15);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button onClick={() => cambiaMese(-1)} className="text-slate-400 px-2">‹</button>
+        <p className="text-sm font-medium text-slate-700">{MESI[mese]} {anno}</p>
+        <button onClick={() => cambiaMese(1)} className="text-slate-400 px-2">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {["L", "M", "M", "G", "V", "S", "D"].map((d, i) => <div key={i} className="text-center text-[10px] text-slate-400">{d}</div>)}
+        {Array.from({ length: offset }).map((_, i) => <div key={"pad" + i} />)}
+        {Array.from({ length: giorniNelMese }).map((_, i) => {
+          const g = i + 1;
+          const evs = eventiDelGiorno(g);
+          const isOggi = dataStr(g) === oggi.toISOString().slice(0, 10);
+          const attivo = giornoFiltro === g;
+          return (
+            <button key={g} onClick={() => setGiornoFiltro(attivo ? null : g)}
+              className={`aspect-square rounded-lg text-xs flex flex-col items-center justify-center gap-0.5 ${attivo ? "bg-slate-800 text-white" : isOggi ? "border border-sky-400 text-slate-700" : "text-slate-700"}`}>
+              <span>{g}</span>
+              {evs.length > 0 && (
+                <span className="flex gap-0.5">
+                  {evs.slice(0, 3).map((e, idx) => (
+                    <span key={idx} className={`w-1.5 h-1.5 rounded-full ${e.tipo === "check" ? "bg-sky-500" : "bg-amber-500"}`} />
+                  ))}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-2 pt-2">
+        {giornoFiltro && (
+          <button onClick={() => setGiornoFiltro(null)} className="text-sky-600 text-xs font-medium">← Vedi tutte le prossime scadenze</button>
+        )}
+        {eventiVisibili.length === 0 && <p className="text-slate-400 text-sm px-1">Nessun evento {giornoFiltro ? "in questo giorno" : "in programma"}.</p>}
+        {eventiVisibili.map((e, i) => (
+          <button key={i} onClick={() => onSelect(e.clientId)} className="w-full text-left">
+            <Card className="p-3 flex items-center gap-3">
+              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${e.tipo === "check" ? "bg-sky-500" : "bg-amber-500"}`} />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-slate-700 truncate">{e.nome}</p>
+                <p className="text-slate-500 text-xs">{e.data.split("-").reverse().join("/")} — {e.label}</p>
+              </div>
+              <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+            </Card>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminList({ clients, onSelect, onChanged }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
+  const [vista, setVista] = useState("lista");
 
   const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clients.filter((c) => c.stato_check === "da_compilare");
@@ -1730,6 +1816,15 @@ function AdminList({ clients, onSelect, onChanged }) {
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
+      <div className="flex gap-2">
+        <button onClick={() => setVista("lista")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
+        <button onClick={() => setVista("calendario")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
+      </div>
+
+      {vista === "calendario" ? (
+        <CalendarioAgenda clients={clients} onSelect={onSelect} />
+      ) : (
+        <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
         className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
 
@@ -1770,6 +1865,8 @@ function AdminList({ clients, onSelect, onChanged }) {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
