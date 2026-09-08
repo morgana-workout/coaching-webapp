@@ -1922,7 +1922,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 }
 
 function NuovoClienteForm({ onCreato, onAnnulla }) {
-  const [f, setF] = useState({ codice: "", nome: "", cognome: "", piano: "", data_inizio: "", data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "", altezza_cm: "" });
+  const [f, setF] = useState({ codice: "", nome: "", cognome: "", tipo_servizio: "online", pacchetto_lezioni: "", piano: "", data_inizio: "", data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "", altezza_cm: "" });
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
 
@@ -1940,6 +1940,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
     setErrore("");
     const payload = { ...f };
     payload.altezza_cm = payload.altezza_cm ? Number(payload.altezza_cm) : null;
+    payload.pacchetto_lezioni = payload.pacchetto_lezioni || null;
     for (const k of ["data_inizio", "data_scadenza"]) if (!payload[k]) payload[k] = null;
     const { error } = await supabase.from("clients").insert(payload);
     setSalvando(false);
@@ -1950,16 +1951,36 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">Nuovo cliente</p>
+      <div>
+        <label className="text-xs text-slate-500">Tipo di servizio</label>
+        <select value={f.tipo_servizio} onChange={(e) => setF({ ...f, tipo_servizio: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="online">ONLINE (coaching a distanza)</option>
+          <option value="presenza">BULB (lezioni 1:1 in presenza)</option>
+        </select>
+      </div>
+      {f.tipo_servizio === "presenza" && (
+        <div>
+          <label className="text-xs text-slate-500">Pacchetto lezioni</label>
+          <select value={f.pacchetto_lezioni} onChange={(e) => setF({ ...f, pacchetto_lezioni: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">— (lo imposti dopo)</option>
+            <option value="1">1 lezione</option>
+            <option value="4">4 lezioni (1 al mese)</option>
+            <option value="8">8 lezioni (2 al mese)</option>
+            <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
+            <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
+          </select>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         {campo("Codice (es. c10)", "codice")}
         {campo("Nome", "nome")}
         {campo("Cognome", "cognome")}
-        {campo("Piano", "piano")}
+        {f.tipo_servizio === "online" && campo("Piano", "piano")}
         {campo("Data inizio", "data_inizio", "date")}
         {campo("Data scadenza", "data_scadenza", "date")}
         {campo("Altezza (cm)", "altezza_cm", "number")}
       </div>
-      {campo("Link scheda", "link_scheda")}
+      {f.tipo_servizio === "online" && campo("Link scheda", "link_scheda")}
       <div>
         <label className="text-xs text-slate-500">Stato pacchetto</label>
         <select value={f.stato_pacchetto} onChange={(e) => setF({ ...f, stato_pacchetto: e.target.value })}
