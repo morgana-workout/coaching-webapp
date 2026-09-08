@@ -1465,44 +1465,31 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
 
 function InvitaClienteForm({ client, onInvitato }) {
   const [email, setEmail] = useState(client.email || "");
-  const [inviando, setInviando] = useState("");
+  const [generando, setGenerando] = useState("");
   const [errore, setErrore] = useState("");
-  const [fatto, setFatto] = useState("");
+  const [link, setLink] = useState("");
+  const [copiato, setCopiato] = useState(false);
 
-  const creaPassword = async () => {
+  const generaLink = async (azione) => {
     if (!email) { setErrore("Inserisci un'email."); return; }
-    setInviando("crea");
+    setGenerando(azione);
     setErrore("");
-    setFatto("");
+    setLink("");
+    setCopiato(false);
     const { data: { session } } = await supabase.auth.getSession();
     const { data, error } = await supabase.functions.invoke("invite-client", {
-      body: { client_id: client.id, email },
+      body: { client_id: client.id, email, azione },
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
-    if (!error && data?.serve_reset) {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-      setInviando("");
-      if (resetError) { setErrore(resetError.message); return; }
-      setFatto("Questa email risultava già registrata: le è stato inviato un link per impostare la password.");
-      onInvitato();
-      return;
-    }
-    setInviando("");
+    setGenerando("");
     if (error || data?.error) { setErrore(data?.error || error.message); return; }
-    setFatto("Link per creare la password inviato!");
+    setLink(data.link);
     onInvitato();
   };
 
-  const reimpostaPassword = async () => {
-    if (!email) { setErrore("Inserisci un'email."); return; }
-    setInviando("reset");
-    setErrore("");
-    setFatto("");
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-    setInviando("");
-    if (error) { setErrore(error.message); return; }
-    setFatto("Link per reimpostare la password inviato!");
-    onInvitato();
+  const copia = async () => {
+    await navigator.clipboard.writeText(link);
+    setCopiato(true);
   };
 
   return (
@@ -1511,18 +1498,26 @@ function InvitaClienteForm({ client, onInvitato }) {
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="grid grid-cols-1 gap-2">
-        <button onClick={creaPassword} disabled={!!inviando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
-          {inviando === "crea" ? "Invio..." : "Invia link per creare account e password"}
+        <button onClick={() => generaLink("crea")} disabled={!!generando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
+          {generando === "crea" ? "Genero..." : "Genera link per creare account e password"}
         </button>
-        <button onClick={reimpostaPassword} disabled={!!inviando} className="bg-slate-100 text-slate-700 text-sm font-medium rounded-lg py-2">
-          {inviando === "reset" ? "Invio..." : "Invia link per reimpostare la password"}
+        <button onClick={() => generaLink("reset")} disabled={!!generando} className="bg-slate-100 text-slate-700 text-sm font-medium rounded-lg py-2">
+          {generando === "reset" ? "Genero..." : "Genera link per reimpostare la password"}
         </button>
       </div>
       <p className="text-slate-400 text-xs">
-        "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso.
+        "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
       </p>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-      {fatto && <p className="text-emerald-600 text-xs">{fatto}</p>}
+      {link && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+          <p className="text-emerald-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
+          <p className="text-slate-600 text-xs break-all bg-white border border-slate-200 rounded-lg p-2">{link}</p>
+          <button onClick={copia} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
+            {copiato ? "Copiato ✓" : "Copia link"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
