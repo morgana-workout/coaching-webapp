@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -340,16 +340,25 @@ function ClientHome({ client, onAggiornato }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
+  const [prossimaLezione, setProssimaLezione] = useState(undefined);
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const isSoloOnline = client.tipo_servizio === "online";
   const lezioniIncluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : null;
+  const pacchettoSingolo = client.pacchetto_lezioni === "1";
 
   useEffect(() => {
     if (!isBulb) return;
-    supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
-      .then(({ count }) => setLezioniSvolte(count ?? 0));
-  }, [client.id, isBulb]);
+    if (pacchettoSingolo) {
+      const oggi = new Date().toISOString().slice(0, 10);
+      supabase.from("calendar_events").select("*").eq("client_id", client.id).eq("tipo", "lezione")
+        .neq("stato", "annullata").neq("stato", "persa").gte("data", oggi).order("data").limit(1).maybeSingle()
+        .then(({ data }) => setProssimaLezione(data || null));
+    } else {
+      supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
+        .then(({ count }) => setLezioniSvolte(count ?? 0));
+    }
+  }, [client.id, isBulb, pacchettoSingolo]);
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
@@ -374,7 +383,23 @@ function ClientHome({ client, onAggiornato }) {
         </Card>
       )}
 
-      {isBulb && (
+      {isBulb && pacchettoSingolo && (
+        <Card className="p-5">
+          <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione</span>
+          {prossimaLezione === undefined ? (
+            <p className="text-slate-400 text-sm mt-2">Caricamento...</p>
+          ) : prossimaLezione ? (
+            <p className="text-2xl font-semibold text-slate-800 mt-2">
+              {prossimaLezione.data.split("-").reverse().join("/")}{prossimaLezione.ora ? ` · ${prossimaLezione.ora.slice(0, 5)}` : ""}
+              {prossimaLezione.stato === "richiesta" && <span className="block text-amber-600 text-sm font-normal mt-1">Da confermare</span>}
+            </p>
+          ) : (
+            <p className="text-slate-500 text-sm mt-2">Nessuna lezione ancora programmata.</p>
+          )}
+        </Card>
+      )}
+
+      {isBulb && !pacchettoSingolo && (
         <Card className="p-5">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
           <p className="text-3xl font-semibold text-slate-800 mt-2">
@@ -1066,6 +1091,67 @@ function DiarioAllenamento({ clientId }) {
   );
 }
 
+function NotificheCliente({ client }) {
+  const [notifiche, setNotifiche] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data } = await supabase.from("notifiche").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
+    setNotifiche(data || []);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+
+  const accetta = async (n) => {
+    if (n.calendar_event_id) {
+      await supabase.from("calendar_events").update({ data: n.proposta_data, ora: n.proposta_ora, luogo: n.proposta_luogo, stato: "confermato" }).eq("id", n.calendar_event_id);
+    }
+    await supabase.from("notifiche").update({ stato: "accettata" }).eq("id", n.id);
+    carica();
+  };
+  const rifiuta = async (n) => {
+    await supabase.from("notifiche").update({ stato: "rifiutata" }).eq("id", n.id);
+    carica();
+  };
+
+  if (caricando) return <Spinner />;
+
+  return (
+    <div className="px-5 pt-6 pb-24 space-y-3">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-800">Notifiche</h1>
+        <p className="text-slate-500 text-sm mt-1">Proposte di orario e note da Morgana.</p>
+      </div>
+      {notifiche.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Nessuna notifica.</Card>}
+      {notifiche.map((n) => (
+        <Card key={n.id} className="p-4 space-y-2">
+          {n.tipo === "proposta_lezione" ? (
+            <>
+              <p className="font-medium text-slate-700 text-sm">Nuova proposta di orario</p>
+              <p className="text-slate-600 text-sm">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>
+              {n.messaggio && <p className="text-slate-500 text-xs">{n.messaggio}</p>}
+              {n.stato === "inviata" ? (
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => accetta(n)} className="flex-1 bg-emerald-500 text-white text-xs font-medium rounded-lg py-2">Accetta</button>
+                  <button onClick={() => rifiuta(n)} className="flex-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                </div>
+              ) : (
+                <Badge className={n.stato === "accettata" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}>{n.stato === "accettata" ? "Accettata" : "Rifiutata"}</Badge>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="font-medium text-slate-700 text-sm">Nota da Morgana</p>
+              <p className="text-slate-600 text-sm">{n.messaggio}</p>
+            </>
+          )}
+          <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}</p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 function LeMieLezioni({ client }) {
   const [eventi, setEventi] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -1174,6 +1260,7 @@ function ClientApp({ session }) {
   const [checkins, setCheckins] = useState([]);
   const [piano, setPiano] = useState(null);
   const [caricando, setCaricando] = useState(true);
+  const [nonLette, setNonLette] = useState(0);
 
   const carica = async () => {
     setCaricando(true);
@@ -1184,6 +1271,8 @@ function ClientApp({ session }) {
       setCheckins(ck || []);
       const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
       setPiano(nu);
+      const { count } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("stato", "inviata");
+      setNonLette(count || 0);
     }
     setCaricando(false);
   };
@@ -1199,6 +1288,7 @@ function ClientApp({ session }) {
     { key: "home", label: "Home", icon: Home },
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
+    { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     { key: "nutrizione", label: "Nutrizione", icon: Apple },
@@ -1215,6 +1305,7 @@ function ClientApp({ session }) {
         {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
+        {tab === "notifiche" && <NotificheCliente client={client} />}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} />}
         {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
@@ -1222,8 +1313,12 @@ function ClientApp({ session }) {
       </PullToRefresh>
       <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around overflow-x-auto py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         {nav.map((n) => (
-          <button key={n.key} onClick={() => setTab(n.key)} className={`flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] flex-shrink-0 ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
-            <n.icon size={24} />{n.label}
+          <button key={n.key} onClick={() => setTab(n.key)} className={`relative flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] flex-shrink-0 ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
+            <span className="relative">
+              <n.icon size={24} />
+              {!!n.badge && <span className="absolute -top-1 -right-1.5 bg-rose-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{n.badge}</span>}
+            </span>
+            {n.label}
           </button>
         ))}
       </div>
@@ -1585,7 +1680,7 @@ function EliminaClienteBottone({ client, onEliminato }) {
   );
 }
 
-function LezioniPacchetto({ client }) {
+function LezioniPacchetto({ client, onCompletato }) {
   const [lezioni, setLezioni] = useState([]);
   const [caricando, setCaricando] = useState(true);
   const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
@@ -1606,8 +1701,17 @@ function LezioniPacchetto({ client }) {
   useEffect(() => { carica(); }, [client.id, incluse]);
 
   const aggiorna = async (id, campi) => {
-    setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, ...campi } : l)));
+    const nuoveLezioni = lezioni.map((l) => (l.id === id ? { ...l, ...campi } : l));
+    setLezioni(nuoveLezioni);
     await supabase.from("lezioni_svolte").update(campi).eq("id", id);
+
+    if ("fatta" in campi && incluse > 0) {
+      const tutteFatte = nuoveLezioni.filter((l) => l.fatta).length === incluse;
+      if (tutteFatte && client.stato_pacchetto !== "scaduto") {
+        await supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", client.id);
+        onCompletato?.();
+      }
+    }
   };
 
   const cambiaData = async (l, nuovaData) => {
@@ -1617,10 +1721,15 @@ function LezioniPacchetto({ client }) {
       await supabase.from("calendar_events").update({ data: nuovaData }).eq("id", l.calendar_event_id);
     } else {
       const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
-        client_id: client.id, tipo: "lezione", data: nuovaData, luogo: client.sede_abituale || null, stato: "confermato",
+        client_id: client.id, tipo: "lezione", data: nuovaData, ora: l.ora || null, luogo: client.sede_abituale || null, stato: "confermato",
       }).select().single();
       if (nuovoEvento) aggiorna(l.id, { calendar_event_id: nuovoEvento.id });
     }
+  };
+
+  const cambiaOra = async (l, nuovaOra) => {
+    aggiorna(l.id, { ora: nuovaOra || null });
+    if (l.calendar_event_id) await supabase.from("calendar_events").update({ ora: nuovaOra || null }).eq("id", l.calendar_event_id);
   };
 
   const svolte = lezioni.filter((l) => l.fatta).length;
@@ -1639,6 +1748,7 @@ function LezioniPacchetto({ client }) {
       <Card className="p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Pacchetto</p>
         <p className="text-2xl font-semibold text-slate-800">{svolte} / {incluse} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
+        {svolte === incluse && <p className="text-amber-600 text-xs mt-1">Pacchetto completo — stato impostato automaticamente su "scaduto".</p>}
       </Card>
 
       <div className="space-y-2">
@@ -1651,6 +1761,10 @@ function LezioniPacchetto({ client }) {
               </button>
               <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {l.numero}</p>
               <InputData defaultValue={l.data || ""} onBlur={(e) => cambiaData(l, e.target.value)} className="flex-1" />
+              <select defaultValue={l.ora || ""} onBlur={(e) => cambiaOra(l, e.target.value)} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
+                <option value="">--:--</option>
+                {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
             </div>
             <input defaultValue={l.nota || ""} onBlur={(e) => aggiorna(l.id, { nota: e.target.value || null })} placeholder="Nota sulla lezione"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
@@ -1888,7 +2002,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </Card>
       )}
 
-      {tab === "lezioni" && <LezioniPacchetto client={client} />}
+      {tab === "lezioni" && <LezioniPacchetto client={client} onCompletato={carica} />}
 
       {tab === "check" && (
         <div className="space-y-3">
@@ -2131,6 +2245,55 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
   );
 }
 
+function EditEventoForm({ evento, onSalvato, onAnnulla }) {
+  const [f, setF] = useState({ data: evento.data, ora: evento.ora ? evento.ora.slice(0, 5) : "", luogo: evento.luogo || "", stato: evento.stato });
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async () => {
+    setSalvando(true);
+    await supabase.from("calendar_events").update({ data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato }).eq("id", evento.id);
+    setSalvando(false);
+    onSalvato();
+  };
+  const elimina = async () => {
+    if (!confirm("Eliminare definitivamente questo evento?")) return;
+    setSalvando(true);
+    await supabase.from("calendar_events").delete().eq("id", evento.id);
+    setSalvando(false);
+    onSalvato();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : "Call"})</p>
+      <div className="grid grid-cols-2 gap-3">
+        <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
+        <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">--:--</option>
+          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      {evento.tipo === "lezione" && (
+        <select value={f.luogo} onChange={(e) => setF({ ...f, luogo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">— sede —</option>
+          {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+        </select>
+      )}
+      <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        <option value="richiesta">Da confermare</option>
+        <option value="confermato">Confermato</option>
+        <option value="annullata">Annullato</option>
+        <option value="persa">Persa</option>
+      </select>
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva modifiche"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
+      </div>
+      <button onClick={elimina} className="w-full text-rose-500 text-xs font-medium">Elimina evento</button>
+    </Card>
+  );
+}
+
 function CalendarioAgenda({ clients, onSelect }) {
   const oggi = new Date();
   const [mese, setMese] = useState(oggi.getMonth());
@@ -2138,6 +2301,7 @@ function CalendarioAgenda({ clients, onSelect }) {
   const [giornoFiltro, setGiornoFiltro] = useState(null);
   const [eventiCalendario, setEventiCalendario] = useState([]);
   const [mostraForm, setMostraForm] = useState(false);
+  const [eventoInModifica, setEventoInModifica] = useState(null);
 
   const caricaEventi = async () => {
     const { data } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").order("data");
@@ -2155,10 +2319,12 @@ function CalendarioAgenda({ clients, onSelect }) {
     const pezzi = [e.tipo === "lezione" ? "Lezione 1:1" : "Call"];
     if (e.luogo) pezzi.push(e.luogo);
     if (e.stato === "richiesta") pezzi.push("da confermare");
+    if (e.stato === "annullata") pezzi.push("annullata");
+    if (e.stato === "persa") pezzi.push("persa");
     if (e.fuori_disponibilita) pezzi.push("eccezione (fuori orario standard)");
     if (e.extra_euro) pezzi.push(`+${e.extra_euro}€ da riscuotere`);
     if (e.nota) pezzi.push(e.nota);
-    eventi.push({ data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
+    eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
   });
 
   const primoDelMese = new Date(anno, mese, 1);
@@ -2230,23 +2396,199 @@ function CalendarioAgenda({ clients, onSelect }) {
         {giornoFiltro && (
           <button onClick={() => setGiornoFiltro(null)} className="text-sky-600 text-xs font-medium">← Vedi tutte le prossime scadenze</button>
         )}
+        {eventoInModifica && (
+          <EditEventoForm evento={eventoInModifica} onAnnulla={() => setEventoInModifica(null)}
+            onSalvato={() => { setEventoInModifica(null); caricaEventi(); }} />
+        )}
         {eventiVisibili.length === 0 && <p className="text-slate-400 text-sm px-1">Nessun evento {giornoFiltro ? "in questo giorno" : "in programma"}.</p>}
         {eventiVisibili.map((e, i) => (
-          <button key={i} onClick={() => onSelect(e.clientId)} className="w-full text-left">
-            <Card className="p-3 flex items-center gap-3">
+          <Card key={i} className="p-3 flex items-center gap-3">
+            <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
               <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
               {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-700 truncate">{e.nome}</p>
                 <p className="text-slate-500 text-xs truncate">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
               </div>
-              <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
-            </Card>
-          </button>
+            </button>
+            {e.id && (
+              <button onClick={() => setEventoInModifica(e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
+            )}
+            <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+          </Card>
         ))}
       </div>
     </div>
   );
+}
+
+function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
+  const [data, setData] = useState(evento.data);
+  const [ora, setOra] = useState(SLOT_ORARI[6]);
+  const [luogo, setLuogo] = useState(evento.luogo || LUOGHI[0]);
+  const [messaggio, setMessaggio] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const invia = async () => {
+    setSalvando(true);
+    await supabase.from("notifiche").insert({
+      client_id: evento.client_id, tipo: "proposta_lezione", calendar_event_id: evento.id,
+      proposta_data: data, proposta_ora: ora, proposta_luogo: luogo, messaggio: messaggio || null, stato: "inviata",
+    });
+    setSalvando(false);
+    onFatto();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Proponi un altro orario</p>
+      <div className="grid grid-cols-2 gap-3">
+        <InputData value={data} onChange={(e) => setData(e.target.value)} />
+        <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <select value={luogo} onChange={(e) => setLuogo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+      </select>
+      <textarea placeholder="Messaggio (facoltativo)" value={messaggio} onChange={(e) => setMessaggio(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div className="flex gap-2">
+        <button onClick={invia} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia proposta"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
+
+function InviaNotaForm({ clients, onFatto }) {
+  const [clientId, setClientId] = useState(clients[0]?.id || "");
+  const [messaggio, setMessaggio] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [fatto, setFatto] = useState(false);
+
+  const invia = async () => {
+    if (!clientId || !messaggio.trim()) return;
+    setSalvando(true);
+    await supabase.from("notifiche").insert({ client_id: clientId, tipo: "nota", messaggio, stato: "inviata" });
+    setSalvando(false);
+    setMessaggio("");
+    setFatto(true);
+    onFatto();
+  };
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Invia una nota a una cliente</p>
+      <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+      </select>
+      <textarea placeholder="Scrivi la nota..." value={messaggio} onChange={(e) => { setMessaggio(e.target.value); setFatto(false); }} rows={3} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <button onClick={invia} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia nota"}</button>
+      {fatto && <p className="text-emerald-600 text-xs">Nota inviata!</p>}
+    </Card>
+  );
+}
+
+function CentroNotificheCoach({ clients, onSelect }) {
+  const [richieste, setRichieste] = useState([]);
+  const [checkDaRivedere, setCheckDaRivedere] = useState([]);
+  const [proponiPer, setProponiPer] = useState(null);
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data: r } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("data");
+    setRichieste(r || []);
+    const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
+    setCheckDaRivedere(c || []);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); carica(); };
+  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); carica(); };
+  const segnaRevisionato = async (id) => { await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id); carica(); };
+
+  if (caricando) return <Spinner />;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Richieste lezione/call ({richieste.length})</p>
+        <div className="space-y-2">
+          {richieste.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
+          {richieste.map((r) => (
+            <Card key={r.id} className="p-3 space-y-2">
+              <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
+                <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
+                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? ` — +${r.extra_euro}€` : ""}</p>
+              </button>
+              {proponiPer === r.id ? (
+                <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
+              ) : (
+                <div className="flex gap-2">
+                  <button onClick={() => approva(r.id)} className="flex-1 bg-emerald-500 text-white text-xs font-medium rounded-lg py-2">Approva</button>
+                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-amber-500 text-white text-xs font-medium rounded-lg py-2">Proponi altro</button>
+                  <button onClick={() => rifiuta(r.id)} className="flex-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Check da rivedere ({checkDaRivedere.length})</p>
+        <div className="space-y-2">
+          {checkDaRivedere.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun check da rivedere.</Card>}
+          {checkDaRivedere.map((c) => (
+            <Card key={c.id} className="p-3 flex items-center gap-3">
+              <button onClick={() => onSelect(c.client_id)} className="flex-1 min-w-0 text-left">
+                <p className="font-medium text-slate-700 text-sm">{c.clients?.nome} {c.clients?.cognome}</p>
+                <p className="text-slate-500 text-xs">{c.data_check?.split("-").reverse().join("/")} — {c.peso_kg ? `${c.peso_kg} kg` : "check inviato"}</p>
+              </button>
+              <button onClick={() => segnaRevisionato(c.id)} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna rivisto</button>
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
+        <InviaNotaForm clients={clients} onFatto={() => {}} />
+      </div>
+    </div>
+  );
+}
+
+function scaricaCsv(nomeFile, righe) {
+  const escapeCsv = (v) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csv = righe.map((riga) => riga.map(escapeCsv).join(";")).join("\n");
+  const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nomeFile;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function esportaClientiCsv(clients) {
+  const intestazione = ["Codice", "Nome", "Cognome", "Email", "Tipo servizio", "Piano", "Pacchetto lezioni", "Stato pacchetto", "Data inizio", "Data scadenza"];
+  const righe = clients.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, c.data_inizio, c.data_scadenza]);
+  scaricaCsv(`clienti_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
+}
+
+async function esportaCheckCsv() {
+  const { data } = await supabase.from("checkins").select("*, clients(nome, cognome, codice)").order("data_check");
+  const intestazione = ["Cliente", "Codice", "Data check", "Peso", "Petto", "Spalle", "Sopra ombelico", "Ombelico", "Sotto ombelico", "Coscia dx", "Braccio dx", "Collo", "Glutei", "Stato", "Note cliente"];
+  const righe = (data || []).map((c) => [
+    c.clients ? `${c.clients.nome} ${c.clients.cognome}` : "", c.clients?.codice, c.data_check, c.peso_kg, c.petto_cm, c.spalle_cm,
+    c.sopra_ombelico_cm, c.ombelico_cm, c.sotto_ombelico_cm, c.coscia_dx_cm, c.braccio_dx_cm, c.collo_cm, c.glutei_cm, c.stato, c.note_cliente,
+  ]);
+  scaricaCsv(`storico_check_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
 function AdminList({ clients, onSelect, onChanged }) {
@@ -2254,6 +2596,14 @@ function AdminList({ clients, onSelect, onChanged }) {
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
   const [vista, setVista] = useState("lista");
+  const [nonLetteCoach, setNonLetteCoach] = useState(0);
+
+  const caricaNonLetteCoach = async () => {
+    const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
+    const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
+    setNonLetteCoach((r || 0) + (c || 0));
+  };
+  useEffect(() => { caricaNonLetteCoach(); }, [vista]);
 
   const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clients.filter((c) => c.stato_check === "da_compilare");
@@ -2305,13 +2655,24 @@ function AdminList({ clients, onSelect, onChanged }) {
       )}
 
       <div className="flex gap-2">
-        <button onClick={() => setVista("lista")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
-        <button onClick={() => setVista("calendario")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
+        <button onClick={() => esportaClientiCsv(clients)} className="flex-1 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
+        <button onClick={() => esportaCheckCsv()} className="flex-1 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
       </div>
 
-      {vista === "calendario" ? (
-        <CalendarioAgenda clients={clients} onSelect={onSelect} />
-      ) : (
+      <div className="flex gap-2">
+        <button onClick={() => setVista("lista")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
+        <button onClick={() => setVista("calendario")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
+        <button onClick={() => setVista("notifiche")} className={`relative flex-1 py-2 rounded-xl text-sm font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Notifiche
+          {nonLetteCoach > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach}</span>
+          )}
+        </button>
+      </div>
+
+      {vista === "calendario" && <CalendarioAgenda clients={clients} onSelect={onSelect} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clients} onSelect={onSelect} />}
+      {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
         className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
