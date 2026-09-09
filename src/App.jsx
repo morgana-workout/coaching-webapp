@@ -1784,13 +1784,83 @@ async function collegaLezionePacchetto(clientId, evento) {
   }
 }
 
+function RigaStato({ label, valore, presente }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
+      <span className="text-slate-500 text-sm">{label}</span>
+      <span className={`text-sm font-medium flex items-center gap-1.5 ${presente ? "text-slate-700" : "text-amber-600"}`}>
+        {presente ? valore : "Mancante"}
+        {presente ? <CheckCircle2 size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-amber-500" />}
+      </span>
+    </div>
+  );
+}
+
+function RiepilogoCliente({ client, checkins, onVaiADati }) {
+  const [lezioniInfo, setLezioniInfo] = useState(null);
+  const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
+  const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
+  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
+
+  useEffect(() => {
+    if (!isBulb || !incluse) { setLezioniInfo(null); return; }
+    supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
+      .then(({ count }) => setLezioniInfo(count ?? 0));
+  }, [client.id, isBulb, incluse]);
+
+  const livello = LIVELLI_ATTIVITA.find((l) => l.value === client.livello_attivita);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Anagrafica</p>
+        <button onClick={onVaiADati} className="text-sky-600 text-xs font-medium">Modifica in Dati →</button>
+      </div>
+      <Card className="p-4">
+        <RigaStato label="Email" valore={client.email} presente={!!client.email} />
+        <RigaStato label="Sesso" valore={client.sesso} presente={!!client.sesso} />
+        <RigaStato label="Data di nascita" valore={client.data_nascita?.split("-").reverse().join("/")} presente={!!client.data_nascita} />
+        <RigaStato label="Altezza" valore={client.altezza_cm ? `${client.altezza_cm} cm` : null} presente={!!client.altezza_cm} />
+        <RigaStato label="Tipo di lavoro/attività" valore={livello?.label} presente={!!livello} />
+        <RigaStato label="Segni particolari" valore={client.note_particolari} presente={!!client.note_particolari} />
+        <RigaStato label="Accesso app" valore={client.user_id ? "Attivo" : null} presente={!!client.user_id} />
+      </Card>
+
+      {isOnline && (
+        <>
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Percorso online</p>
+          <Card className="p-4">
+            <RigaStato label="Piano" valore={client.piano} presente={!!client.piano} />
+            <RigaStato label="Data inizio" valore={client.data_inizio?.split("-").reverse().join("/")} presente={!!client.data_inizio} />
+            <RigaStato label="Data scadenza" valore={client.data_scadenza?.split("-").reverse().join("/")} presente={!!client.data_scadenza} />
+            <RigaStato label="Scheda" valore={client.scheda_pdf_path ? "PDF caricato" : client.link_scheda ? "Link impostato" : null} presente={!!(client.scheda_pdf_path || client.link_scheda)} />
+            <RigaStato label="Check registrati" valore={checkins.length} presente={checkins.length > 0} />
+            <RigaStato label="Prossimo check" valore={client.prossimo_check?.split("-").reverse().join("/")} presente={!!client.prossimo_check} />
+          </Card>
+        </>
+      )}
+
+      {isBulb && (
+        <>
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Percorso BULB</p>
+          <Card className="p-4">
+            <RigaStato label="Pacchetto lezioni" valore={incluse ? `${incluse} lezioni` : null} presente={!!incluse} />
+            <RigaStato label="Sede abituale" valore={client.sede_abituale} presente={!!client.sede_abituale} />
+            <RigaStato label="Lezioni svolte" valore={incluse ? `${lezioniInfo ?? 0} / ${incluse}` : null} presente={!!incluse} />
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
   const [notes, setNotes] = useState([]);
   const [nutrizione, setNutrizione] = useState(null);
   const [pagamenti, setPagamenti] = useState([]);
-  const [tab, setTab] = useState("dati");
+  const [tab, setTab] = useState("riepilogo");
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
   const [checkInModifica, setCheckInModifica] = useState(null);
@@ -1822,6 +1892,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const tabs = [
+    { key: "riepilogo", label: "Riepilogo" },
     { key: "dati", label: "Dati" },
     ...(isOnline ? [{ key: "check", label: "Check" }] : []),
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
@@ -1843,6 +1914,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${tab === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{t.label}</button>
         ))}
       </div>
+
+      {tab === "riepilogo" && <RiepilogoCliente client={client} checkins={checkins} onVaiADati={() => setTab("dati")} />}
 
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
