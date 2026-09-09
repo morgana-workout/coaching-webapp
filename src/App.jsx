@@ -2664,6 +2664,18 @@ async function esportaCheckCsv() {
   scaricaCsv(`storico_check_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
+async function esportaCarichiCsv() {
+  const { data } = await supabase.from("training_entries")
+    .select("*, training_exercises(nome, training_days(nome)), clients(nome, cognome, codice)")
+    .order("data");
+  const intestazione = ["Cliente", "Codice", "Giorno", "Esercizio", "Data", "Kg", "Serie", "Ripetizioni", "Note"];
+  const righe = (data || []).map((r) => [
+    r.clients ? `${r.clients.nome} ${r.clients.cognome}` : "", r.clients?.codice,
+    r.training_exercises?.training_days?.nome, r.training_exercises?.nome, r.data, r.kg, r.serie, r.ripetizioni, r.note,
+  ]);
+  scaricaCsv(`carichi_allenamento_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
+}
+
 function AdminList({ clients, onSelect, onChanged }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
@@ -2727,9 +2739,10 @@ function AdminList({ clients, onSelect, onChanged }) {
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="flex gap-2">
-        <button onClick={() => esportaClientiCsv(clients)} className="flex-1 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
-        <button onClick={() => esportaCheckCsv()} className="flex-1 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
+        <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
+        <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
       </div>
 
       <div className="flex gap-2">
