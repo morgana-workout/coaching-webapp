@@ -1682,11 +1682,11 @@ function EliminaClienteBottone({ client, onEliminato }) {
 
 function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
   const [data, setData] = useState(lezione.data || "");
-  const [ora, setOra] = useState(lezione.ora || "");
+  const [ora, setOra] = useState((lezione.ora || "").slice(0, 5));
   const [nota, setNota] = useState(lezione.nota || "");
   const [salvando, setSalvando] = useState(false);
   const [salvato, setSalvato] = useState(false);
-  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "") || nota !== (lezione.nota || "");
+  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "").slice(0, 5) || nota !== (lezione.nota || "");
 
   const salva = async () => {
     setSalvando(true);
@@ -1694,7 +1694,10 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
     const campi = { data: data || null, ora: ora || null, nota: nota || null };
     await supabase.from("lezioni_svolte").update(campi).eq("id", lezione.id);
 
-    let calendarEventId = lezione.calendar_event_id;
+    // Rileggiamo dal database lo stato reale del collegamento, invece di fidarci
+    // di un valore potenzialmente non aggiornato, per evitare eventi duplicati o mancanti.
+    const { data: rigaAttuale } = await supabase.from("lezioni_svolte").select("calendar_event_id").eq("id", lezione.id).single();
+    let calendarEventId = rigaAttuale?.calendar_event_id || null;
     if (data) {
       if (calendarEventId) {
         await supabase.from("calendar_events").update({ data, ora: ora || null }).eq("id", calendarEventId);
@@ -1832,6 +1835,40 @@ const TAG_FEEDBACK = [
 const PAROLE_ATTENZIONE = ["stanca", "stress", "affatic", "ciclo", "dolore", "male", "pesant", "difficile", "non dormo", "poco sonno", "gonfia", "gonfiore", "vacanz", "malat", "influenza", "ritenzione"];
 const CAMPI_MISURA_CHECK = ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"];
 
+const CONDIZIONI_SALUTE = [
+  { value: "ipertensione", label: "Ipertensione", pattern_evitati: [], avviso: "Evitare isometrie prolungate e sforzi in apnea (Valsalva) su carichi vicini al massimale." },
+  { value: "pavimento_pelvico", label: "Pavimento pelvico", pattern_evitati: [], avviso: "Evitare Valsalva e picchi di pressione intra-addominale; espirare nello sforzo, carichi moderati." },
+  { value: "ginocchia", label: "Ginocchia doloranti / scarsa mobilità", pattern_evitati: ["Squat monopodalico", "Isometria squat"], avviso: "Evitare affondi profondi e squat a ROM completo; preferire leg press/leg extension a range controllato." },
+  { value: "lombare", label: "Zona lombare dolorante", pattern_evitati: ["Hip Hinge"], avviso: "Evitare hip hinge a carichi elevati e hyperextension aggressive; privilegiare varianti supportate/corpo libero." },
+  { value: "spalle", label: "Spalle dolorose / scarsa mobilità", pattern_evitati: ["Push Verticale"], avviso: "Evitare push verticale a ROM ampio e alzate laterali pesanti." },
+  { value: "anche", label: "Anche dolorose / scarsa mobilità", pattern_evitati: ["Squat", "Squat laterale"], avviso: "Evitare squat profondi e affondi laterali ampi." },
+  { value: "caviglie", label: "Caviglie (dolore/mobilità)", pattern_evitati: ["Isometria caviglia"], avviso: "Attenzione al ROM in dorsiflessione; calf raise controllati, evitare squat molto profondi." },
+];
+
+function adattoAlLivello(es, livello) {
+  if (livello === "base") return (es.attrezzo || "").toLowerCase().includes("corpo libero");
+  return true;
+}
+function decidiRipetizioni(es, livello) {
+  if (es.unilaterale) return "8-10";
+  if (livello === "avanzata" && PATTERN_COMPOUND.includes(es.pattern)) return "5-7";
+  return "10-12";
+}
+function decidiRecupero(es) {
+  return PATTERN_COMPOUND.includes(es.pattern) ? "90-120 sec" : "60-90 sec";
+}
+function scegliEserciziPerGruppo(gruppo, serieTotali, libreria, livello, escludiPattern) {
+  const candidati = libreria
+    .filter((e) => (e.gruppo === gruppo || e.gruppo_secondario === gruppo) && adattoAlLivello(e, livello) && !escludiPattern.includes(e.pattern))
+    .sort((a, b) => (PATTERN_COMPOUND.includes(a.pattern) ? 0 : 1) - (PATTERN_COMPOUND.includes(b.pattern) ? 0 : 1));
+  if (candidati.length === 0 || serieTotali <= 0) return [];
+  const numeroEsercizi = Math.max(1, Math.min(4, candidati.length, Math.round(serieTotali / 3)));
+  const scelti = candidati.slice(0, numeroEsercizi);
+  const base = Math.floor(serieTotali / scelti.length);
+  const resto = serieTotali % scelti.length;
+  return scelti.map((es, i) => ({ esercizio: es, serie: base + (i < resto ? 1 : 0) }));
+}
+
 function normalizzaNomeEsercizio(testo) {
   if (!testo) return "";
   return testo.replace(/\s*\d+\s*[xX×]\s*\d+(-\d+)?\s*$/, "").trim();
@@ -1852,6 +1889,7 @@ function risolviEsercizio(nomeGrezzo, lookup) {
 }
 
 function assegnaTecnicheGiorno(esercizi, fase, livello) {
+  if (livello !== "avanzata") return esercizi.map(() => "");
   if (!fase) return esercizi.map(() => "");
   if (fase === 1) return esercizi.map(() => "Focus tecnica esecutiva, tempo controllato (2-0-2-0)");
   if (fase === 2) return esercizi.map((e) => (PATTERN_COMPOUND.includes(e.pattern) ? 'Tempo sotto tensione: eccentrica 3", isometria 1-2" in contrazione' : ""));
@@ -2096,7 +2134,6 @@ function VistaStampaScheda({ client, scheda, trend, segnaliCheck, feedback, onCh
           <h3 className="font-semibold mb-2">Note del Coach</h3>
           {nessunDatoCarico && <p className="text-sm mb-2">Nessun dato di carico disponibile: valutare una progressione per VOLUME (+1 serie), DENSITÀ (-10% recupero) o TEMPO SOTTO TENSIONE (fermo di 2") invece che sul carico.</p>}
           {trendConProblemi.map((t, i) => <p key={i} className="text-sm mb-1">{t.nome}: {t.msg}</p>)}
-          {segnaliCheck && <p className="text-sm mb-1 mt-2">Segnale check: {segnaliCheck.segnale}{segnaliCheck.avvisoDistanza ? ` — ${segnaliCheck.avvisoDistanza}` : ""}</p>}
           {ultimoFeedback && (
             <p className="text-sm mt-2">Ultimo feedback ({ultimoFeedback.data?.split("-").reverse().join("/")}): {suggerimentiFeedback(ultimoFeedback.tags || [], client.obiettivo_attuale).join(" ") || "nessuna azione suggerita"}</p>
           )}
@@ -2173,6 +2210,11 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   const [vistaStampa, setVistaStampa] = useState(false);
   const [tagSelezionati, setTagSelezionati] = useState([]);
   const [notaFeedback, setNotaFeedback] = useState("");
+  const [mostraGeneratore, setMostraGeneratore] = useState(false);
+  const [giorniGenerator, setGiorniGenerator] = useState([{ nome: "Giorno A", gruppi: [] }]);
+  const [serieGruppi, setSerieGruppi] = useState({});
+  const [generando, setGenerando] = useState(false);
+  const [condizioniAltroTesto, setCondizioniAltroTesto] = useState(client.problematiche_salute_note || "");
 
   const caricaGiorni = async (schedaId) => {
     const { data: giorniData } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", schedaId).order("ordine");
@@ -2275,6 +2317,55 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
     carica();
   };
 
+  const toggleCondizione = (value) => {
+    const attuali = client.problematiche_salute || [];
+    const nuove = attuali.includes(value) ? attuali.filter((v) => v !== value) : [...attuali, value];
+    salvaCliente({ problematiche_salute: nuove });
+  };
+  const salvaCondizioniAltro = () => salvaCliente({ problematiche_salute_note: condizioniAltroTesto || null });
+
+  const gruppiDisponibili = [...new Set(libreria.map((e) => e.gruppo).filter(Boolean))].sort();
+
+  const aggiungiGiornoGenerator = () => setGiorniGenerator((prev) => [...prev, { nome: `Giorno ${String.fromCharCode(65 + prev.length)}`, gruppi: [] }]);
+  const rimuoviGiornoGenerator = (idx) => setGiorniGenerator((prev) => prev.filter((_, i) => i !== idx));
+  const rinominaGiornoGenerator = (idx, nome) => setGiorniGenerator((prev) => prev.map((g, i) => (i === idx ? { ...g, nome } : g)));
+  const toggleGruppoGiorno = (idx, gruppo) => setGiorniGenerator((prev) => prev.map((g, i) => {
+    if (i !== idx) return g;
+    const gruppi = g.gruppi.includes(gruppo) ? g.gruppi.filter((x) => x !== gruppo) : [...g.gruppi, gruppo];
+    return { ...g, gruppi };
+  }));
+  const gruppiUsatiNelGeneratore = [...new Set(giorniGenerator.flatMap((g) => g.gruppi))];
+
+  const generaSchedaAutomatica = async () => {
+    setGenerando(true);
+    const esclusioniPattern = CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).flatMap((c) => c.pattern_evitati);
+    const { data: nuova } = await supabase.from("schede").insert({ client_id: client.id, stato: "bozza" }).select().single();
+    if (!nuova) { setGenerando(false); return; }
+
+    for (let gi = 0; gi < giorniGenerator.length; gi++) {
+      const giornoDef = giorniGenerator[gi];
+      const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: nuova.id, nome: giornoDef.nome, ordine: gi }).select().single();
+      if (!nuovoGiorno) continue;
+      const righe = [];
+      for (const gruppo of giornoDef.gruppi) {
+        const serieTotali = Number(serieGruppi[gruppo] || 0);
+        righe.push(...scegliEserciziPerGruppo(gruppo, serieTotali, libreria, client.livello_allenamento, esclusioniPattern));
+      }
+      const tecniche = assegnaTecnicheGiorno(righe.map((r) => ({ pattern: r.esercizio.pattern })), client.fase_allenamento, client.livello_allenamento);
+      for (let i = 0; i < righe.length; i++) {
+        const { esercizio, serie } = righe[i];
+        await supabase.from("scheda_esercizi").insert({
+          giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: i,
+          serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, client.livello_allenamento),
+          recupero: decidiRecupero(esercizio), tecnica: tecniche[i] || "", tecnica_auto: true,
+        });
+      }
+    }
+    setGenerando(false);
+    setMostraGeneratore(false);
+    await carica();
+  };
+
   if (caricando) return <Spinner />;
 
   const checkOrdinati = [...checkins].sort((a, b) => b.data_check.localeCompare(a.data_check));
@@ -2298,15 +2389,91 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         </select>
       </Card>
 
-      {!schedaCorrente && (
-        <button onClick={() => creaNuovaBozza(null)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-3">+ Crea prima scheda</button>
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Problematiche articolari/salute da tenere conto</p>
+        <div className="flex flex-wrap gap-2">
+          {CONDIZIONI_SALUTE.map((c) => (
+            <button key={c.value} onClick={() => toggleCondizione(c.value)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${(client.problematiche_salute || []).includes(c.value) ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <textarea value={condizioniAltroTesto} onChange={(e) => setCondizioniAltroTesto(e.target.value)} onBlur={salvaCondizioniAltro}
+          placeholder="Altro (testo libero)..." rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        {(client.problematiche_salute || []).length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+            {CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).map((c) => (
+              <p key={c.value} className="text-amber-700 text-xs"><strong>{c.label}:</strong> {c.avviso}</p>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {!schedaCorrente && !mostraGeneratore && (
+        <div className="flex gap-2">
+          <button onClick={() => creaNuovaBozza(null)} className="flex-1 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-3">+ Scheda vuota (manuale)</button>
+          <button onClick={() => setMostraGeneratore(true)} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-3">✨ Genera automaticamente</button>
+        </div>
+      )}
+
+      {mostraGeneratore && (
+        <Card className="p-4 space-y-4">
+          <p className="text-sm font-medium text-slate-700">Genera scheda automatica</p>
+          <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {client.obiettivo_attuale || "—"}</p>
+
+          <div className="space-y-3">
+            {giorniGenerator.map((g, idx) => (
+              <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input value={g.nome} onChange={(e) => rinominaGiornoGenerator(idx, e.target.value)} className="flex-1 border-0 bg-transparent font-medium text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+                  {giorniGenerator.length > 1 && <button onClick={() => rimuoviGiornoGenerator(idx)} className="text-slate-300 hover:text-rose-500"><X size={16} /></button>}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {gruppiDisponibili.map((gr) => (
+                    <button key={gr} onClick={() => toggleGruppoGiorno(idx, gr)}
+                      className={`px-2.5 py-1 rounded-full text-xs ${g.gruppi.includes(gr) ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>
+                      {gr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={aggiungiGiornoGenerator} className="w-full border border-dashed border-slate-300 text-slate-500 text-xs font-medium rounded-lg py-2">+ Giorno</button>
+
+          {gruppiUsatiNelGeneratore.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Serie settimanali totali per gruppo</p>
+              {gruppiUsatiNelGeneratore.map((gr) => (
+                <div key={gr} className="flex items-center gap-2">
+                  <span className="flex-1 text-sm text-slate-600">{gr}</span>
+                  <input type="number" value={serieGruppi[gr] || ""} onChange={(e) => setSerieGruppi((prev) => ({ ...prev, [gr]: e.target.value }))}
+                    placeholder="serie" className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={generaSchedaAutomatica} disabled={generando || gruppiUsatiNelGeneratore.length === 0} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2 disabled:opacity-50">
+              {generando ? "Genero..." : "Genera bozza"}
+            </button>
+            <button onClick={() => setMostraGeneratore(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+          </div>
+        </Card>
       )}
 
       {schedaCorrente && (
         <>
           <div className="flex items-center justify-between">
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isBozza ? "Bozza in corso" : "Scheda attuale (finale)"}</p>
-            {!isBozza && <button onClick={() => creaNuovaBozza(schedaCorrente)} className="text-sky-600 text-xs font-medium">Crea nuova versione →</button>}
+            {!isBozza && (
+              <div className="flex gap-3">
+                <button onClick={() => setMostraGeneratore(true)} className="text-emerald-600 text-xs font-medium">✨ Genera fase successiva</button>
+                <button onClick={() => creaNuovaBozza(schedaCorrente)} className="text-sky-600 text-xs font-medium">Duplica e modifica →</button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">
