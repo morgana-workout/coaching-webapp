@@ -1839,31 +1839,66 @@ const CONDIZIONI_SALUTE = [
   { value: "ipertensione", label: "Ipertensione", pattern_evitati: [], avviso: "Evitare isometrie prolungate e sforzi in apnea (Valsalva) su carichi vicini al massimale." },
   { value: "pavimento_pelvico", label: "Pavimento pelvico", pattern_evitati: [], avviso: "Evitare Valsalva e picchi di pressione intra-addominale; espirare nello sforzo, carichi moderati." },
   { value: "ginocchia", label: "Ginocchia doloranti / scarsa mobilità", pattern_evitati: ["Squat monopodalico", "Isometria squat"], avviso: "Evitare affondi profondi e squat a ROM completo; preferire leg press/leg extension a range controllato." },
-  { value: "lombare", label: "Zona lombare dolorante", pattern_evitati: ["Hip Hinge"], avviso: "Evitare hip hinge a carichi elevati e hyperextension aggressive; privilegiare varianti supportate/corpo libero." },
-  { value: "spalle", label: "Spalle dolorose / scarsa mobilità", pattern_evitati: ["Push Verticale"], avviso: "Evitare push verticale a ROM ampio e alzate laterali pesanti." },
-  { value: "anche", label: "Anche dolorose / scarsa mobilità", pattern_evitati: ["Squat", "Squat laterale"], avviso: "Evitare squat profondi e affondi laterali ampi." },
-  { value: "caviglie", label: "Caviglie (dolore/mobilità)", pattern_evitati: ["Isometria caviglia"], avviso: "Attenzione al ROM in dorsiflessione; calf raise controllati, evitare squat molto profondi." },
+  { value: "lombare", label: "Zona lombare / iperlordosi", pattern_evitati: [], esclusioni_nome: ["Romanian Deadlift Bilanciere"], avviso: "Evitare stacchi da terra pesanti; preferire Hip Thrust guidato/con stop e RDL con manubri a controllo del bacino." },
+  { value: "spalle", label: "Spalle / cifosi / anteposizione", pattern_evitati: [], avviso: "Aumentare il volume di tirata orizzontale (rapporto tirata/spinta 2:1), privilegiare estensioni toraciche ed evitare push verticale pesante a ROM ampio." },
+  { value: "anche", label: "Anche bloccate / dolorose", pattern_evitati: ["Squat", "Squat laterale"], avviso: "Evitare squat profondi e affondi laterali ampi; privilegiare hip hinge e ROM parziale controllato." },
+  { value: "caviglie", label: "Caviglia rigida / scarsa mobilità", pattern_evitati: ["Isometria caviglia"], esclusioni_nome: ["Squat Corpo Libero", "Goblet Squat"], avviso: "Sostituire lo squat libero con Leg Press a piedi bassi o squat con rialzo sotto i talloni." },
+  { value: "valgismo", label: "Valgismo ginocchia", pattern_evitati: [], avviso: "Curare l'allineamento ginocchio-piede in ogni esercizio di spinta per le gambe; evitare carichi che favoriscono il collasso verso l'interno." },
 ];
+
+const TECNICHE_BLOCCO2 = ["Top Set (RIR 1) + 2 Back-off (-15%)", 'TUT eccentrica 3-4", RIR 1-2', "Cluster set: 2x(3+3), rec. 20\" interno"];
+const TECNICHE_BLOCCO3 = ["Drop set: -30/40% carico, a cedimento tecnico", 'Rest-pause: cedimento + 15" + AMRAP', "Tensione continua, no lockout in uscita"];
+
+const RISCALDAMENTO_STANDARD = [
+  "Foam rolling (SMR): 30 sec per distretto target della seduta",
+  "Mobilità dinamica anche (es. 90/90, affondi con rotazione)",
+  "Mobilità rachide toracico (open book, cat-cow modificato)",
+  "Attivazione neuromuscolare specifica sul primo esercizio (serie leggera di avvicinamento)",
+];
+
+function targetPassiGiornalieri(livelloAttivita) {
+  if (livelloAttivita === "sedentario") return "8.000 - 10.000 passi/giorno";
+  if (livelloAttivita === "intermedio") return "10.000 - 12.000 passi/giorno";
+  return "12.000+ passi/giorno";
+}
 
 function adattoAlLivello(es, livello) {
   if (livello === "base") return (es.attrezzo || "").toLowerCase().includes("corpo libero");
   return true;
 }
-function decidiRipetizioni(es, livello) {
-  if (es.unilaterale) return "8-10";
-  if (livello === "avanzata" && PATTERN_COMPOUND.includes(es.pattern)) return "5-7";
+
+// BLOCCO 2 = complessi fondamentali (1-2 multiarticolari primari) · BLOCCO 3 = accessori/isolamento (3-5 esercizi)
+function decidiRipetizioni(es, livello, blocco) {
+  if (blocco === 2) return livello === "avanzata" ? "5-7" : "6-8";
+  // blocco 3: multiarticolari secondari (unilaterali/monopodalici) 8-10, isolamento puro 10-12
+  if (es.unilaterale || PATTERN_COMPOUND.includes(es.pattern)) return "8-10";
   return "10-12";
 }
-function decidiRecupero(es) {
-  return PATTERN_COMPOUND.includes(es.pattern) ? "90-120 sec" : "60-90 sec";
+function decidiRecupero(blocco) {
+  return blocco === 2 ? "120-180 sec" : "60-90 sec";
 }
-function scegliEserciziPerGruppo(gruppo, serieTotali, libreria, livello, escludiPattern) {
-  const candidati = libreria
-    .filter((e) => (e.gruppo === gruppo || e.gruppo_secondario === gruppo) && adattoAlLivello(e, livello) && !escludiPattern.includes(e.pattern))
-    .sort((a, b) => (PATTERN_COMPOUND.includes(a.pattern) ? 0 : 1) - (PATTERN_COMPOUND.includes(b.pattern) ? 0 : 1));
+
+function esercizioEscluso(es, escluse) {
+  if (escluse.pattern.includes(es.pattern)) return true;
+  if (escluse.nomi.includes(es.nome)) return true;
+  return false;
+}
+
+function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse, blocco, giaScelti }) {
+  let candidati = libreria.filter((e) =>
+    (e.gruppo === gruppo || e.gruppo_secondario === gruppo) &&
+    adattoAlLivello(e, livello) &&
+    !esercizioEscluso(e, escluse) &&
+    !giaScelti.includes(e.id)
+  );
+  // Blocco 2: solo esercizi compound (forza meccanica); Blocco 3: tutto il resto (accessori/isolamento)
+  candidati = candidati.filter((e) => (blocco === 2 ? PATTERN_COMPOUND.includes(e.pattern) : true));
   if (serieTotali <= 0) return [];
   if (candidati.length === 0) return [{ esercizio: null, gruppoMancante: gruppo, serie: serieTotali }];
-  const numeroEsercizi = Math.max(1, Math.min(4, candidati.length, Math.round(serieTotali / 3)));
+
+  const numeroEsercizi = blocco === 2
+    ? Math.min(2, candidati.length)
+    : Math.max(1, Math.min(5, candidati.length, Math.round(serieTotali / 3)));
   const scelti = candidati.slice(0, numeroEsercizi);
   const base = Math.floor(serieTotali / scelti.length);
   const resto = serieTotali % scelti.length;
@@ -1890,22 +1925,17 @@ function risolviEsercizio(nomeGrezzo, lookup) {
 }
 
 function assegnaTecnicheGiorno(esercizi, fase, livello) {
-  if (livello !== "avanzata") return esercizi.map(() => "");
-  if (!fase) return esercizi.map(() => "");
-  if (fase === 1) return esercizi.map(() => "Focus tecnica esecutiva, tempo controllato (2-0-2-0)");
-  if (fase === 2) return esercizi.map((e) => (PATTERN_COMPOUND.includes(e.pattern) ? 'Tempo sotto tensione: eccentrica 3", isometria 1-2" in contrazione' : ""));
-  if (fase >= 3) {
-    if (livello === "base") return esercizi.map(() => "Tempo controllato: consolidare prima di introdurre top set/back-off");
-    const primoCompoundIdx = esercizi.findIndex((e) => PATTERN_COMPOUND.includes(e.pattern));
-    let ultimoIsolamentoIdx = -1;
-    esercizi.forEach((e, i) => { if (PATTERN_ISOLAMENTO.includes(e.pattern)) ultimoIsolamentoIdx = i; });
-    return esercizi.map((e, i) => {
-      if (i === primoCompoundIdx) return "Top Set (RIR 1) + 2 Back-off (-15%)";
-      if (i === ultimoIsolamentoIdx) return "Drop set: -30/40% carico, a cedimento tecnico";
-      return "";
-    });
-  }
-  return esercizi.map(() => "");
+  if (livello !== "avanzata" || !fase || fase < 3) return esercizi.map(() => "");
+  const primoCompoundIdx = esercizi.findIndex((e) => PATTERN_COMPOUND.includes(e.pattern));
+  let ultimoIsolamentoIdx = -1;
+  esercizi.forEach((e, i) => { if (PATTERN_ISOLAMENTO.includes(e.pattern)) ultimoIsolamentoIdx = i; });
+  const tecBlocco2 = TECNICHE_BLOCCO2[(fase - 3) % TECNICHE_BLOCCO2.length];
+  const tecBlocco3 = TECNICHE_BLOCCO3[(fase - 3) % TECNICHE_BLOCCO3.length];
+  return esercizi.map((e, i) => {
+    if (i === primoCompoundIdx) return tecBlocco2;
+    if (i === ultimoIsolamentoIdx) return tecBlocco3;
+    return "";
+  });
 }
 
 function analizzaTrendCarico(kgValori, livello) {
@@ -1934,6 +1964,23 @@ function analizzaSegnaliCheck(ultimo, precedente) {
   const giorni = Math.round((new Date(ultimo.data_check) - new Date(precedente.data_check)) / 86400000);
   const avvisoDistanza = giorni > 45 ? `Confronto tra check distanti ${giorni} giorni: interpretare come trend di lungo periodo, non come stallo settimanale.` : null;
   return { segnale, avvisoDistanza };
+}
+
+function calibrazioneCheck(ultimo, precedente) {
+  if (!ultimo || !precedente) return [];
+  const consigli = ["Riferimento proteico: 1.8-2.2 g/kg, ciclicizzando carboidrati/grassi in base all'aderenza."];
+  const giorni = Math.round((new Date(ultimo.data_check) - new Date(precedente.data_check)) / 86400000);
+  if (ultimo.peso_kg != null && precedente.peso_kg != null && giorni > 0) {
+    const caloPercentuale = (precedente.peso_kg - ultimo.peso_kg) / precedente.peso_kg;
+    if (caloPercentuale > 0.02) consigli.push("Il peso scende rapidamente: se anche i carichi stanno calando, valutare +carboidrati peri-workout.");
+  }
+  const confrontabili = CAMPI_MISURA_CHECK.filter((c) => c !== "peso_kg" && ultimo[c] != null && precedente[c] != null);
+  const invariate = confrontabili.filter((c) => Math.abs(ultimo[c] - precedente[c]) < 0.5).length;
+  if (confrontabili.length > 0 && invariate / confrontabili.length >= 0.7) {
+    consigli.push("Misure quasi invariate: ricalibra il target passi (+1.500/die) oppure scala 100-150 kcal da carboidrati/grassi.");
+  }
+  consigli.push("Progressione scheda: mantieni l'ossatura degli esercizi fondamentali cambiando lo stimolo (da volume a intensità, o pause isometriche); ruota gli accessori nel range 8-12 reps.");
+  return consigli;
 }
 
 function suggerimentiFeedback(tags, obiettivoAttuale) {
@@ -2096,22 +2143,34 @@ function apriStampaScheda(client, scheda, trend, feedback) {
   const ultimoFeedback = feedback[0];
   const suggerimentiUltimo = ultimoFeedback ? suggerimentiFeedback(ultimoFeedback.tags || [], client.obiettivo_attuale).join(" ") : "";
 
-  const righeGiorni = scheda.giorni.map((g) => `
-    <h2>${esc(g.nome)}</h2>
-    <table>
-      <thead><tr><th>Esercizio</th><th>Serie x Rip</th><th>Carico</th><th>Recupero</th><th>Tecnica</th><th>Note</th></tr></thead>
-      <tbody>
-        ${g.esercizi.map((es) => `
-          <tr>
-            <td>${esc(es.esercizi_libreria?.nome || es.nome_libero)}</td>
-            <td>${esc(es.serie)}${es.ripetizioni ? " x " + esc(es.ripetizioni) : ""}</td>
-            <td>${esc(es.carico)}</td>
-            <td>${esc(es.recupero)}</td>
-            <td>${esc(es.tecnica)}</td>
-            <td>${esc(es.note)}</td>
-          </tr>`).join("")}
-      </tbody>
-    </table>`).join("");
+  const rigaEsercizio = (es) => `
+    <tr>
+      <td>${esc(es.esercizi_libreria?.nome || es.nome_libero)}</td>
+      <td>${esc(es.serie)}${es.ripetizioni ? " x " + esc(es.ripetizioni) : ""}</td>
+      <td>${esc(es.carico) || "—"}</td>
+      <td>${esc(es.recupero)}</td>
+      <td>${esc(es.tecnica) || "—"}</td>
+    </tr>`;
+
+  const righeGiorni = scheda.giorni.map((g, idx) => {
+    const bloccoForza = g.esercizi.filter((es) => es.note === "Blocco forza (complesso fondamentale)");
+    const bloccoAccessorio = g.esercizi.filter((es) => es.note === "Blocco accessorio");
+    const altri = g.esercizi.filter((es) => es.note !== "Blocco forza (complesso fondamentale)" && es.note !== "Blocco accessorio");
+    const tabellaBlocco = (titolo, righe) => righe.length === 0 ? "" : `
+      <p class="blocco-label">${titolo}</p>
+      <table>
+        <thead><tr><th>Esercizio</th><th>Serie x Rip</th><th>Carico</th><th>Recupero</th><th>Tecnica</th></tr></thead>
+        <tbody>${righe.map(rigaEsercizio).join("")}</tbody>
+      </table>`;
+    return `
+    <div class="giorno" style="${idx > 0 ? "page-break-before: always;" : ""}">
+      <div class="giorno-header">${esc(g.nome)}</div>
+      <p class="riscaldamento"><strong>Riscaldamento (5-10 min):</strong> ${RISCALDAMENTO_STANDARD.join(" · ")}</p>
+      ${tabellaBlocco("Blocco forza — complessi fondamentali", bloccoForza)}
+      ${tabellaBlocco("Blocco accessori — ipertrofia mirata", bloccoAccessorio)}
+      ${tabellaBlocco("Esercizi", altri)}
+    </div>`;
+  }).join("");
 
   const noteCoach = `
     <div class="note-coach">
@@ -2119,6 +2178,7 @@ function apriStampaScheda(client, scheda, trend, feedback) {
       ${nessunDatoCarico ? '<p>Nessun dato di carico disponibile: valutare una progressione per VOLUME (+1 serie), DENSITÀ (-10% recupero) o TEMPO SOTTO TENSIONE (fermo di 2") invece che sul carico.</p>' : ""}
       ${trendConProblemi.map((t) => `<p>${esc(t.nome)}: ${esc(t.msg)}</p>`).join("")}
       ${ultimoFeedback ? `<p>Ultimo feedback (${esc(ultimoFeedback.data?.split("-").reverse().join("/"))}): ${esc(suggerimentiUltimo || "nessuna azione suggerita")}</p>` : ""}
+      <p><strong>NEAT — target giornaliero:</strong> ${esc(targetPassiGiornalieri(client.livello_attivita))}</p>
     </div>`;
 
   const html = `<!DOCTYPE html>
@@ -2131,11 +2191,14 @@ function apriStampaScheda(client, scheda, trend, feedback) {
   h1 { font-size: 22px; margin: 0; }
   .sottotitolo { color: #64748b; font-size: 13px; margin-top: 4px; }
   .intestazione { border-bottom: 2px solid #334155; padding-bottom: 16px; margin-bottom: 24px; }
-  h2 { font-size: 16px; margin: 24px 0 8px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
+  .giorno { margin-bottom: 32px; }
+  .giorno-header { background: #334155; color: white; font-size: 16px; font-weight: 600; padding: 10px 14px; border-radius: 6px; margin-bottom: 10px; }
+  .riscaldamento { font-size: 11px; color: #64748b; margin: 0 0 14px; font-style: italic; }
+  .blocco-label { font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.03em; margin: 14px 0 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
   th { text-align: left; border-bottom: 2px solid #cbd5e1; padding: 4px 6px 4px 0; color: #475569; }
   td { border-bottom: 1px solid #e2e8f0; padding: 6px 6px 6px 0; }
-  .note-coach { margin-top: 32px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; background: #f8fafc; }
+  .note-coach { margin-top: 24px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; background: #f8fafc; page-break-before: always; }
   .note-coach h3 { margin-top: 0; font-size: 14px; }
   .note-coach p { font-size: 13px; margin: 4px 0; }
   @media print { body { padding: 0; } }
@@ -2367,7 +2430,8 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
   const generaSchedaAutomatica = async () => {
     setGenerando(true);
-    const esclusioniPattern = CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).flatMap((c) => c.pattern_evitati);
+    const condizioniAttive = CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value));
+    const escluse = { pattern: condizioniAttive.flatMap((c) => c.pattern_evitati), nomi: condizioniAttive.flatMap((c) => c.esclusioni_nome || []) };
 
     // Il volume settimanale per gruppo va diviso tra tutte le sessioni in cui quel gruppo compare
     const occorrenzeGruppo = {};
@@ -2383,30 +2447,61 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
       schedaIdTarget = nuova.id;
     }
 
+    const livello = client.livello_allenamento;
+    const fase = client.fase_allenamento;
+    const isAvanzataFaseAlta = livello === "avanzata" && fase >= 3;
+    const tecBlocco2 = isAvanzataFaseAlta ? TECNICHE_BLOCCO2[(fase - 3) % TECNICHE_BLOCCO2.length] : "";
+    const tecBlocco3 = isAvanzataFaseAlta ? TECNICHE_BLOCCO3[(fase - 3) % TECNICHE_BLOCCO3.length] : "";
+
     for (let gi = 0; gi < giorniGenerator.length; gi++) {
       const giornoDef = giorniGenerator[gi];
       const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: schedaIdTarget, nome: giornoDef.nome, ordine: gi }).select().single();
       if (!nuovoGiorno) continue;
-      const righe = [];
+
+      const giaScelti = [];
+      let righeBlocco2 = [];
+      let righeBlocco3 = [];
       for (const gruppo of giornoDef.gruppi) {
         const totale = Number(serieGruppi[gruppo] || 0);
         const perSessione = Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1)));
-        righe.push(...scegliEserciziPerGruppo(gruppo, perSessione, libreria, client.livello_allenamento, esclusioniPattern));
+        const serieB2 = Math.round(perSessione * 0.4);
+        const serieB3 = perSessione - serieB2;
+
+        const sceltiB2 = scegliEserciziBlocco({ gruppo, serieTotali: serieB2, libreria, livello, escluse, blocco: 2, giaScelti });
+        sceltiB2.forEach((r) => { if (r.esercizio) giaScelti.push(r.esercizio.id); });
+        righeBlocco2.push(...sceltiB2);
+
+        const sceltiB3 = scegliEserciziBlocco({ gruppo, serieTotali: serieB3, libreria, livello, escluse, blocco: 3, giaScelti });
+        sceltiB3.forEach((r) => { if (r.esercizio) giaScelti.push(r.esercizio.id); });
+        righeBlocco3.push(...sceltiB3);
       }
-      const tecniche = assegnaTecnicheGiorno(righe.map((r) => ({ pattern: r.esercizio?.pattern })), client.fase_allenamento, client.livello_allenamento);
-      for (let i = 0; i < righe.length; i++) {
-        const { esercizio, serie, gruppoMancante } = righe[i];
+      righeBlocco2 = righeBlocco2.slice(0, 2); // il metodo prevede max 1-2 complessi fondamentali per sessione
+      righeBlocco3 = righeBlocco3.slice(0, 5); // max 3-5 accessori per sessione
+
+      let ordine = 0;
+      for (let i = 0; i < righeBlocco2.length; i++) {
+        const { esercizio, serie, gruppoMancante } = righeBlocco2[i];
         if (!esercizio) {
-          await supabase.from("scheda_esercizi").insert({
-            giorno_id: nuovoGiorno.id, nome_libero: `⚠️ Nessun esercizio in libreria per "${gruppoMancante}" (livello/esclusioni troppo restrittivi) — aggiungi a mano`,
-            ordine: i, serie: String(serie), tecnica_auto: false,
-          });
+          await supabase.from("scheda_esercizi").insert({ giorno_id: nuovoGiorno.id, nome_libero: `⚠️ Nessun compound trovato per "${gruppoMancante}" — aggiungi a mano`, ordine: ordine++, serie: String(serie), tecnica_auto: false });
           continue;
         }
         await supabase.from("scheda_esercizi").insert({
-          giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: i,
-          serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, client.livello_allenamento),
-          recupero: decidiRecupero(esercizio), tecnica: tecniche[i] || "", tecnica_auto: true,
+          giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: ordine++,
+          serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, livello, 2), recupero: decidiRecupero(2),
+          tecnica: i === 0 ? tecBlocco2 : "", tecnica_auto: true, note: "Blocco forza (complesso fondamentale)",
+        });
+      }
+      for (let i = 0; i < righeBlocco3.length; i++) {
+        const { esercizio, serie, gruppoMancante } = righeBlocco3[i];
+        if (!esercizio) {
+          await supabase.from("scheda_esercizi").insert({ giorno_id: nuovoGiorno.id, nome_libero: `⚠️ Nessun accessorio trovato per "${gruppoMancante}" — aggiungi a mano`, ordine: ordine++, serie: String(serie), tecnica_auto: false });
+          continue;
+        }
+        const isUltimo = i === righeBlocco3.length - 1;
+        await supabase.from("scheda_esercizi").insert({
+          giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: ordine++,
+          serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, livello, 3), recupero: decidiRecupero(3),
+          tecnica: isUltimo ? tecBlocco3 : "", tecnica_auto: true, note: "Blocco accessorio",
         });
       }
     }
@@ -2435,6 +2530,12 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => salvaCliente({ obiettivo_attuale: e.target.value || null })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
           <option value="">Obiettivo attuale...</option><option value="definizione">Definizione</option><option value="mantenimento">Mantenimento</option><option value="massa">Massa</option>
         </select>
+      </Card>
+
+      <Card className="p-4 space-y-1.5 bg-slate-50">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Ricorda ad ogni sessione (fisso, non modificabile qui)</p>
+        <p className="text-slate-600 text-xs"><strong>Riscaldamento 5-10':</strong> {RISCALDAMENTO_STANDARD.join(" · ")}</p>
+        <p className="text-slate-600 text-xs"><strong>NEAT giornaliero:</strong> {targetPassiGiornalieri(client.livello_attivita)}</p>
       </Card>
 
       <Card className="p-4 space-y-3">
@@ -2563,9 +2664,12 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
       <div>
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Segnali dai check</p>
-        <Card className="p-4">
+        <Card className="p-4 space-y-2">
           <p className="text-sm text-slate-700">{segnaliCheck.segnale}</p>
-          {segnaliCheck.avvisoDistanza && <p className="text-amber-600 text-xs mt-1">{segnaliCheck.avvisoDistanza}</p>}
+          {segnaliCheck.avvisoDistanza && <p className="text-amber-600 text-xs">{segnaliCheck.avvisoDistanza}</p>}
+          {calibrazioneCheck(checkOrdinati[0], checkOrdinati[1]).map((c, i) => (
+            <p key={i} className="text-slate-600 text-xs border-t border-slate-100 pt-2 first:border-0 first:pt-0">{c}</p>
+          ))}
         </Card>
       </div>
 
