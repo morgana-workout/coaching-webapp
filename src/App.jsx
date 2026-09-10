@@ -1861,7 +1861,8 @@ function scegliEserciziPerGruppo(gruppo, serieTotali, libreria, livello, escludi
   const candidati = libreria
     .filter((e) => (e.gruppo === gruppo || e.gruppo_secondario === gruppo) && adattoAlLivello(e, livello) && !escludiPattern.includes(e.pattern))
     .sort((a, b) => (PATTERN_COMPOUND.includes(a.pattern) ? 0 : 1) - (PATTERN_COMPOUND.includes(b.pattern) ? 0 : 1));
-  if (candidati.length === 0 || serieTotali <= 0) return [];
+  if (serieTotali <= 0) return [];
+  if (candidati.length === 0) return [{ esercizio: null, gruppoMancante: gruppo, serie: serieTotali }];
   const numeroEsercizi = Math.max(1, Math.min(4, candidati.length, Math.round(serieTotali / 3)));
   const scelti = candidati.slice(0, numeroEsercizi);
   const base = Math.floor(serieTotali / scelti.length);
@@ -2085,62 +2086,78 @@ function EsercizioSchedaRiga({ es, onCambia, onElimina, onMuovi }) {
 }
 
 
-function VistaStampaScheda({ client, scheda, trend, segnaliCheck, feedback, onChiudi }) {
+function apriStampaScheda(client, scheda, trend, feedback) {
   const tuttiEsercizi = scheda.giorni.flatMap((g) => g.esercizi);
+  const esc = (s) => (s == null ? "" : String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
   const trendConProblemi = tuttiEsercizi
     .map((es) => ({ nome: es.esercizi_libreria?.nome || es.nome_libero, msg: trend[es.id] }))
     .filter((t) => t.msg && t.msg !== "Dati insufficienti");
   const nessunDatoCarico = tuttiEsercizi.length > 0 && tuttiEsercizi.every((es) => !trend[es.id] || trend[es.id] === "Dati insufficienti");
   const ultimoFeedback = feedback[0];
+  const suggerimentiUltimo = ultimoFeedback ? suggerimentiFeedback(ultimoFeedback.tags || [], client.obiettivo_attuale).join(" ") : "";
 
-  return (
-    <div className="fixed inset-0 bg-white z-50 overflow-y-auto">
-      <style>{"@media print { body * { visibility: hidden; } #area-stampa, #area-stampa * { visibility: visible; } #area-stampa { position: absolute; top:0; left:0; width:100%; } }"}</style>
-      <div className="p-4 flex justify-end gap-2 print:hidden border-b border-slate-100 sticky top-0 bg-white">
-        <button onClick={() => window.print()} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">Stampa / Salva PDF</button>
-        <button onClick={onChiudi} className="border border-slate-200 text-slate-600 text-sm font-medium rounded-lg px-4 py-2">Chiudi</button>
-      </div>
-      <div id="area-stampa" className="max-w-2xl mx-auto p-8 text-slate-800">
-        <div className="border-b-2 border-slate-700 pb-4 mb-6">
-          <h1 className="text-2xl font-bold">{client.nome} {client.cognome}</h1>
-          <p className="text-slate-500 text-sm mt-1">Fase {client.fase_allenamento || "—"} · Livello {client.livello_allenamento || "—"} · Obiettivo: {client.obiettivo_attuale || "—"}</p>
-        </div>
-        {scheda.giorni.map((g) => (
-          <div key={g.id} className="mb-6">
-            <h2 className="text-lg font-semibold mb-2">{g.nome}</h2>
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="border-b-2 border-slate-300 text-left">
-                  <th className="py-1 pr-2">Esercizio</th><th className="py-1 pr-2">Serie x Rip</th><th className="py-1 pr-2">Carico</th>
-                  <th className="py-1 pr-2">Recupero</th><th className="py-1 pr-2">Tecnica</th><th className="py-1">Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {g.esercizi.map((es) => (
-                  <tr key={es.id} className="border-b border-slate-100">
-                    <td className="py-1.5 pr-2">{es.esercizi_libreria?.nome || es.nome_libero}</td>
-                    <td className="py-1.5 pr-2">{es.serie}{es.ripetizioni ? ` x ${es.ripetizioni}` : ""}</td>
-                    <td className="py-1.5 pr-2">{es.carico}</td>
-                    <td className="py-1.5 pr-2">{es.recupero}</td>
-                    <td className="py-1.5 pr-2">{es.tecnica}</td>
-                    <td className="py-1.5">{es.note}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))}
-        <div className="mt-8 border border-slate-300 rounded-lg p-4 bg-slate-50">
-          <h3 className="font-semibold mb-2">Note del Coach</h3>
-          {nessunDatoCarico && <p className="text-sm mb-2">Nessun dato di carico disponibile: valutare una progressione per VOLUME (+1 serie), DENSITÀ (-10% recupero) o TEMPO SOTTO TENSIONE (fermo di 2") invece che sul carico.</p>}
-          {trendConProblemi.map((t, i) => <p key={i} className="text-sm mb-1">{t.nome}: {t.msg}</p>)}
-          {ultimoFeedback && (
-            <p className="text-sm mt-2">Ultimo feedback ({ultimoFeedback.data?.split("-").reverse().join("/")}): {suggerimentiFeedback(ultimoFeedback.tags || [], client.obiettivo_attuale).join(" ") || "nessuna azione suggerita"}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+  const righeGiorni = scheda.giorni.map((g) => `
+    <h2>${esc(g.nome)}</h2>
+    <table>
+      <thead><tr><th>Esercizio</th><th>Serie x Rip</th><th>Carico</th><th>Recupero</th><th>Tecnica</th><th>Note</th></tr></thead>
+      <tbody>
+        ${g.esercizi.map((es) => `
+          <tr>
+            <td>${esc(es.esercizi_libreria?.nome || es.nome_libero)}</td>
+            <td>${esc(es.serie)}${es.ripetizioni ? " x " + esc(es.ripetizioni) : ""}</td>
+            <td>${esc(es.carico)}</td>
+            <td>${esc(es.recupero)}</td>
+            <td>${esc(es.tecnica)}</td>
+            <td>${esc(es.note)}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`).join("");
+
+  const noteCoach = `
+    <div class="note-coach">
+      <h3>Note del Coach</h3>
+      ${nessunDatoCarico ? '<p>Nessun dato di carico disponibile: valutare una progressione per VOLUME (+1 serie), DENSITÀ (-10% recupero) o TEMPO SOTTO TENSIONE (fermo di 2") invece che sul carico.</p>' : ""}
+      ${trendConProblemi.map((t) => `<p>${esc(t.nome)}: ${esc(t.msg)}</p>`).join("")}
+      ${ultimoFeedback ? `<p>Ultimo feedback (${esc(ultimoFeedback.data?.split("-").reverse().join("/"))}): ${esc(suggerimentiUltimo || "nessuna azione suggerita")}</p>` : ""}
+    </div>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Scheda ${esc(client.nome)} ${esc(client.cognome)}</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; color: #1e293b; max-width: 700px; margin: 0 auto; padding: 32px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sottotitolo { color: #64748b; font-size: 13px; margin-top: 4px; }
+  .intestazione { border-bottom: 2px solid #334155; padding-bottom: 16px; margin-bottom: 24px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
+  th { text-align: left; border-bottom: 2px solid #cbd5e1; padding: 4px 6px 4px 0; color: #475569; }
+  td { border-bottom: 1px solid #e2e8f0; padding: 6px 6px 6px 0; }
+  .note-coach { margin-top: 32px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; background: #f8fafc; }
+  .note-coach h3 { margin-top: 0; font-size: 14px; }
+  .note-coach p { font-size: 13px; margin: 4px 0; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="intestazione">
+    <h1>${esc(client.nome)} ${esc(client.cognome)}</h1>
+    <p class="sottotitolo">Fase ${esc(client.fase_allenamento || "—")} · Livello ${esc(client.livello_allenamento || "—")} · Obiettivo: ${esc(client.obiettivo_attuale || "—")}</p>
+  </div>
+  ${righeGiorni}
+  ${noteCoach}
+</body>
+</html>`;
+
+  const finestra = window.open("", "_blank");
+  if (!finestra) { alert("Il browser ha bloccato l'apertura della finestra. Consenti i popup per questo sito e riprova."); return; }
+  finestra.document.open();
+  finestra.document.write(html);
+  finestra.document.close();
+  finestra.focus();
+  setTimeout(() => finestra.print(), 300);
 }
 
 function GiornoScheda({ giorno, client, onEliminaGiorno, onRinominaGiorno, onMuoviGiorno, onEsercizioCambiato }) {
@@ -2376,9 +2393,16 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         const perSessione = Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1)));
         righe.push(...scegliEserciziPerGruppo(gruppo, perSessione, libreria, client.livello_allenamento, esclusioniPattern));
       }
-      const tecniche = assegnaTecnicheGiorno(righe.map((r) => ({ pattern: r.esercizio.pattern })), client.fase_allenamento, client.livello_allenamento);
+      const tecniche = assegnaTecnicheGiorno(righe.map((r) => ({ pattern: r.esercizio?.pattern })), client.fase_allenamento, client.livello_allenamento);
       for (let i = 0; i < righe.length; i++) {
-        const { esercizio, serie } = righe[i];
+        const { esercizio, serie, gruppoMancante } = righe[i];
+        if (!esercizio) {
+          await supabase.from("scheda_esercizi").insert({
+            giorno_id: nuovoGiorno.id, nome_libero: `⚠️ Nessun esercizio in libreria per "${gruppoMancante}" (livello/esclusioni troppo restrittivi) — aggiungi a mano`,
+            ordine: i, serie: String(serie), tecnica_auto: false,
+          });
+          continue;
+        }
         await supabase.from("scheda_esercizi").insert({
           giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: i,
           serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, client.livello_allenamento),
@@ -2397,7 +2421,6 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   const segnaliCheck = analizzaSegnaliCheck(checkOrdinati[0], checkOrdinati[1]);
   const isBozza = schedaCorrente?.stato === "bozza";
 
-  if (vistaStampa) return <VistaStampaScheda client={client} scheda={schedaCorrente} trend={trend} segnaliCheck={segnaliCheck} feedback={feedback} onChiudi={() => setVistaStampa(false)} />;
 
   return (
     <div className="space-y-5">
@@ -2534,7 +2557,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
               <button onClick={finalizzaScheda} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2">Finalizza scheda</button>
             </div>
           )}
-          <button onClick={() => setVistaStampa(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">Vista stampa / PDF</button>
+          <button onClick={() => apriStampaScheda(client, schedaCorrente, trend, feedback)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">Stampa / Salva PDF</button>
         </>
       )}
 
