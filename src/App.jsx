@@ -2326,30 +2326,55 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
   const gruppiDisponibili = [...new Set(libreria.map((e) => e.gruppo).filter(Boolean))].sort();
 
-  const aggiungiGiornoGenerator = () => setGiorniGenerator((prev) => [...prev, { nome: `Giorno ${String.fromCharCode(65 + prev.length)}`, gruppi: [] }]);
+  const aggiungiGiornoGenerator = () => setGiorniGenerator((prev) => [...prev, { nome: `Giorno ${String.fromCharCode(65 + prev.length)}`, gruppi: [], nomeManuale: false }]);
   const rimuoviGiornoGenerator = (idx) => setGiorniGenerator((prev) => prev.filter((_, i) => i !== idx));
-  const rinominaGiornoGenerator = (idx, nome) => setGiorniGenerator((prev) => prev.map((g, i) => (i === idx ? { ...g, nome } : g)));
+  const rinominaGiornoGenerator = (idx, nome) => setGiorniGenerator((prev) => prev.map((g, i) => (i === idx ? { ...g, nome, nomeManuale: true } : g)));
   const toggleGruppoGiorno = (idx, gruppo) => setGiorniGenerator((prev) => prev.map((g, i) => {
     if (i !== idx) return g;
     const gruppi = g.gruppi.includes(gruppo) ? g.gruppi.filter((x) => x !== gruppo) : [...g.gruppi, gruppo];
-    return { ...g, gruppi };
+    const nome = g.nomeManuale ? g.nome : (gruppi.length ? gruppi.join(" + ") : `Giorno ${String.fromCharCode(65 + idx)}`);
+    return { ...g, gruppi, nome };
   }));
   const gruppiUsatiNelGeneratore = [...new Set(giorniGenerator.flatMap((g) => g.gruppi))];
+
+  const opzioniSerie = client.livello_allenamento === "base" ? [6, 7, 8, 9, 10] : [10, 12, 14, 16, 18, 20, 22, 24, 25];
+  useEffect(() => {
+    const defaultVal = client.livello_allenamento === "base" ? 8 : 16;
+    setSerieGruppi((prev) => {
+      const next = { ...prev };
+      let cambiato = false;
+      gruppiUsatiNelGeneratore.forEach((gr) => { if (!(gr in next)) { next[gr] = defaultVal; cambiato = true; } });
+      return cambiato ? next : prev;
+    });
+  }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento]);
 
   const generaSchedaAutomatica = async () => {
     setGenerando(true);
     const esclusioniPattern = CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).flatMap((c) => c.pattern_evitati);
-    const { data: nuova } = await supabase.from("schede").insert({ client_id: client.id, stato: "bozza" }).select().single();
-    if (!nuova) { setGenerando(false); return; }
+
+    // Il volume settimanale per gruppo va diviso tra tutte le sessioni in cui quel gruppo compare
+    const occorrenzeGruppo = {};
+    giorniGenerator.forEach((g) => g.gruppi.forEach((gr) => { occorrenzeGruppo[gr] = (occorrenzeGruppo[gr] || 0) + 1; }));
+
+    let schedaIdTarget;
+    if (schedaCorrente && schedaCorrente.stato === "bozza") {
+      schedaIdTarget = schedaCorrente.id;
+      if (schedaCorrente.giorni.length > 0) await supabase.from("scheda_giorni").delete().eq("scheda_id", schedaIdTarget);
+    } else {
+      const { data: nuova } = await supabase.from("schede").insert({ client_id: client.id, stato: "bozza" }).select().single();
+      if (!nuova) { setGenerando(false); return; }
+      schedaIdTarget = nuova.id;
+    }
 
     for (let gi = 0; gi < giorniGenerator.length; gi++) {
       const giornoDef = giorniGenerator[gi];
-      const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: nuova.id, nome: giornoDef.nome, ordine: gi }).select().single();
+      const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: schedaIdTarget, nome: giornoDef.nome, ordine: gi }).select().single();
       if (!nuovoGiorno) continue;
       const righe = [];
       for (const gruppo of giornoDef.gruppi) {
-        const serieTotali = Number(serieGruppi[gruppo] || 0);
-        righe.push(...scegliEserciziPerGruppo(gruppo, serieTotali, libreria, client.livello_allenamento, esclusioniPattern));
+        const totale = Number(serieGruppi[gruppo] || 0);
+        const perSessione = Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1)));
+        righe.push(...scegliEserciziPerGruppo(gruppo, perSessione, libreria, client.livello_allenamento, esclusioniPattern));
       }
       const tecniche = assegnaTecnicheGiorno(righe.map((r) => ({ pattern: r.esercizio.pattern })), client.fase_allenamento, client.livello_allenamento);
       for (let i = 0; i < righe.length; i++) {
@@ -2410,10 +2435,10 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         )}
       </Card>
 
-      {!schedaCorrente && !mostraGeneratore && (
+      {(!schedaCorrente || isBozza) && !mostraGeneratore && (
         <div className="flex gap-2">
-          <button onClick={() => creaNuovaBozza(null)} className="flex-1 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-3">+ Scheda vuota (manuale)</button>
-          <button onClick={() => setMostraGeneratore(true)} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-3">✨ Genera automaticamente</button>
+          {!schedaCorrente && <button onClick={() => creaNuovaBozza(null)} className="flex-1 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-3">+ Scheda vuota (manuale)</button>}
+          <button onClick={() => setMostraGeneratore(true)} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-3">✨ {isBozza ? "Rigenera con il generatore" : "Genera automaticamente"}</button>
         </div>
       )}
 
@@ -2445,13 +2470,23 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           {gruppiUsatiNelGeneratore.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Serie settimanali totali per gruppo</p>
-              {gruppiUsatiNelGeneratore.map((gr) => (
-                <div key={gr} className="flex items-center gap-2">
-                  <span className="flex-1 text-sm text-slate-600">{gr}</span>
-                  <input type="number" value={serieGruppi[gr] || ""} onChange={(e) => setSerieGruppi((prev) => ({ ...prev, [gr]: e.target.value }))}
-                    placeholder="serie" className="w-20 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center" />
-                </div>
-              ))}
+              <p className="text-slate-400 text-xs">Il totale viene diviso automaticamente tra le sessioni in cui compare quel gruppo.</p>
+              {gruppiUsatiNelGeneratore.map((gr) => {
+                const occorrenze = giorniGenerator.filter((g) => g.gruppi.includes(gr)).length;
+                const perSessione = Math.max(1, Math.round(Number(serieGruppi[gr] || 0) / occorrenze));
+                return (
+                  <div key={gr} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <span className="text-sm text-slate-600 block">{gr}</span>
+                      {occorrenze > 1 && <span className="text-slate-400 text-[11px]">≈ {perSessione} per sessione × {occorrenze} sessioni</span>}
+                    </div>
+                    <select value={serieGruppi[gr] || ""} onChange={(e) => setSerieGruppi((prev) => ({ ...prev, [gr]: e.target.value }))}
+                      className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center">
+                      {opzioniSerie.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
             </div>
           )}
 
