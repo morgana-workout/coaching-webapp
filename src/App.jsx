@@ -1824,8 +1824,13 @@ function RigaStato({ label, valore, presente }) {
 /* MODULO SCHEDA (solo coach) — libreria, tecniche, trend, segnali      */
 /* ------------------------------------------------------------------ */
 
-const PATTERN_COMPOUND = ["Hip Hinge", "Squat", "Squat monopodalico", "Squat laterale", "Pull Verticale", "Pull Orizzontale", "Pull Orizzontale Alto", "Pull", "Push Orizzontale", "Push Verticale"];
-const PATTERN_ISOLAMENTO = ["Isolamento ginocchio", "Isolamento anca", "Isolamento spalla", "Isolamento petto", "Isolamento gomito", "Isolamento caviglia"];
+const PAROLE_CHIAVE_COMPOUND = ["squat", "hip hinge", "spinta", "tirata", "stacco", "accosciata", "estensione anca"];
+function isCompoundPattern(pattern) {
+  if (!pattern) return false;
+  const p = pattern.toLowerCase();
+  if (p.includes("isolamento")) return false;
+  return PAROLE_CHIAVE_COMPOUND.some((k) => p.includes(k));
+}
 const TAG_FEEDBACK = [
   { value: "stanca", label: "Stanca" }, { value: "energica", label: "Energica" },
   { value: "troppo_lavoro", label: "Troppo lavoro" }, { value: "poco_lavoro", label: "Poco lavoro" },
@@ -1871,7 +1876,7 @@ function adattoAlLivello(es, livello) {
 function decidiRipetizioni(es, livello, blocco) {
   if (blocco === 2) return livello === "avanzata" ? "5-7" : "6-8";
   // blocco 3: multiarticolari secondari (unilaterali/monopodalici) 8-10, isolamento puro 10-12
-  if (es.unilaterale || PATTERN_COMPOUND.includes(es.pattern)) return "8-10";
+  if (es.unilaterale || isCompoundPattern(es.pattern)) return "8-10";
   return "10-12";
 }
 function decidiRecupero(blocco) {
@@ -1884,6 +1889,24 @@ function esercizioEscluso(es, escluse) {
   return false;
 }
 
+function scegliVariati(candidati, numero) {
+  const perPattern = new Map();
+  candidati.forEach((e) => {
+    if (!perPattern.has(e.pattern)) perPattern.set(e.pattern, []);
+    perPattern.get(e.pattern).push(e);
+  });
+  const patternUnici = [...perPattern.keys()];
+  const scelti = [];
+  let giro = 0;
+  while (scelti.length < numero && scelti.length < candidati.length && giro < patternUnici.length * 5) {
+    const pattern = patternUnici[giro % patternUnici.length];
+    const disponibili = perPattern.get(pattern);
+    if (disponibili && disponibili.length > 0) scelti.push(disponibili.shift());
+    giro++;
+  }
+  return scelti;
+}
+
 function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse, blocco, giaScelti }) {
   let candidati = libreria.filter((e) =>
     (e.gruppo === gruppo || e.gruppo_secondario === gruppo) &&
@@ -1892,14 +1915,15 @@ function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse,
     !giaScelti.includes(e.id)
   );
   // Blocco 2: solo esercizi compound (forza meccanica); Blocco 3: tutto il resto (accessori/isolamento)
-  candidati = candidati.filter((e) => (blocco === 2 ? PATTERN_COMPOUND.includes(e.pattern) : true));
+  candidati = candidati.filter((e) => (blocco === 2 ? isCompoundPattern(e.pattern) : true));
   if (serieTotali <= 0) return [];
   if (candidati.length === 0) return [{ esercizio: null, gruppoMancante: gruppo, serie: serieTotali }];
 
   const numeroEsercizi = blocco === 2
     ? Math.min(2, candidati.length)
     : Math.max(1, Math.min(5, candidati.length, Math.round(serieTotali / 3)));
-  const scelti = candidati.slice(0, numeroEsercizi);
+  // Un esercizio per ogni tipo di movimento diverso quando possibile (es. schiena: tirata dall'alto, dal basso, orizzontale)
+  const scelti = scegliVariati(candidati, numeroEsercizi);
   const base = Math.floor(serieTotali / scelti.length);
   const resto = serieTotali % scelti.length;
   return scelti.map((es, i) => ({ esercizio: es, serie: base + (i < resto ? 1 : 0) }));
@@ -1926,9 +1950,9 @@ function risolviEsercizio(nomeGrezzo, lookup) {
 
 function assegnaTecnicheGiorno(esercizi, fase, livello) {
   if (livello !== "avanzata" || !fase || fase < 3) return esercizi.map(() => "");
-  const primoCompoundIdx = esercizi.findIndex((e) => PATTERN_COMPOUND.includes(e.pattern));
+  const primoCompoundIdx = esercizi.findIndex((e) => isCompoundPattern(e.pattern));
   let ultimoIsolamentoIdx = -1;
-  esercizi.forEach((e, i) => { if (PATTERN_ISOLAMENTO.includes(e.pattern)) ultimoIsolamentoIdx = i; });
+  esercizi.forEach((e, i) => { if (!isCompoundPattern(e.pattern)) ultimoIsolamentoIdx = i; });
   const tecBlocco2 = TECNICHE_BLOCCO2[(fase - 3) % TECNICHE_BLOCCO2.length];
   const tecBlocco3 = TECNICHE_BLOCCO3[(fase - 3) % TECNICHE_BLOCCO3.length];
   return esercizi.map((e, i) => {
@@ -2417,7 +2441,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   }));
   const gruppiUsatiNelGeneratore = [...new Set(giorniGenerator.flatMap((g) => g.gruppi))];
 
-  const opzioniSerie = client.livello_allenamento === "base" ? [6, 7, 8, 9, 10] : [10, 12, 14, 16, 18, 20, 22, 24, 25];
+  const opzioniSerie = Array.from({ length: 17 }, (_, i) => 4 + i * 2); // 4, 6, 8 ... 36
   useEffect(() => {
     const defaultVal = client.livello_allenamento === "base" ? 8 : 16;
     setSerieGruppi((prev) => {
