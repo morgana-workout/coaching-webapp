@@ -1680,6 +1680,67 @@ function EliminaClienteBottone({ client, onEliminato }) {
   );
 }
 
+function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
+  const [data, setData] = useState(lezione.data || "");
+  const [ora, setOra] = useState(lezione.ora || "");
+  const [nota, setNota] = useState(lezione.nota || "");
+  const [salvando, setSalvando] = useState(false);
+  const [salvato, setSalvato] = useState(false);
+  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "") || nota !== (lezione.nota || "");
+
+  const salva = async () => {
+    setSalvando(true);
+    setSalvato(false);
+    const campi = { data: data || null, ora: ora || null, nota: nota || null };
+    await supabase.from("lezioni_svolte").update(campi).eq("id", lezione.id);
+
+    let calendarEventId = lezione.calendar_event_id;
+    if (data) {
+      if (calendarEventId) {
+        await supabase.from("calendar_events").update({ data, ora: ora || null }).eq("id", calendarEventId);
+      } else {
+        const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
+          client_id: client.id, tipo: "lezione", data, ora: ora || null, luogo: client.sede_abituale || null, stato: "confermato",
+        }).select().single();
+        if (nuovoEvento) {
+          calendarEventId = nuovoEvento.id;
+          await supabase.from("lezioni_svolte").update({ calendar_event_id: calendarEventId }).eq("id", lezione.id);
+        }
+      }
+    }
+
+    setSalvando(false);
+    setSalvato(true);
+    onSalvato({ ...lezione, ...campi, calendar_event_id: calendarEventId });
+  };
+
+  return (
+    <Card className="p-3 space-y-2">
+      <div className="flex items-center gap-3">
+        <button onClick={() => onFattaCambiata(lezione.id, !lezione.fatta)}
+          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${lezione.fatta ? "bg-emerald-500" : "border-2 border-slate-300"}`}>
+          {lezione.fatta && <CheckCircle2 size={16} className="text-white" />}
+        </button>
+        <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
+        <InputData value={data} onChange={(e) => { setData(e.target.value); setSalvato(false); }} className="flex-1" />
+        <select value={ora} onChange={(e) => { setOra(e.target.value); setSalvato(false); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
+          <option value="">--:--</option>
+          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <input value={nota} onChange={(e) => { setNota(e.target.value); setSalvato(false); }} placeholder="Nota sulla lezione"
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
+      <div className="flex items-center gap-2">
+        <button onClick={salva} disabled={salvando || !modificato}
+          className={`flex-1 rounded-lg py-2 text-xs font-medium ${modificato ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-400"}`}>
+          {salvando ? "Salvo..." : "Salva"}
+        </button>
+        {salvato && !modificato && <span className="text-emerald-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
+      </div>
+    </Card>
+  );
+}
+
 function LezioniPacchetto({ client, onCompletato }) {
   const [lezioni, setLezioni] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -1688,7 +1749,6 @@ function LezioniPacchetto({ client, onCompletato }) {
   const carica = async () => {
     const { data: rows } = await supabase.from("lezioni_svolte").select("*").eq("client_id", client.id).order("numero");
     let attuali = rows || [];
-    // Crea gli slot numerati mancanti in base alla dimensione del pacchetto
     if (incluse > attuali.length) {
       const mancanti = [];
       for (let n = attuali.length + 1; n <= incluse; n++) mancanti.push({ client_id: client.id, numero: n, fatta: false });
@@ -1700,43 +1760,18 @@ function LezioniPacchetto({ client, onCompletato }) {
   };
   useEffect(() => { carica(); }, [client.id, incluse]);
 
-  const aggiorna = async (id, campi) => {
-    let lezioneAggiornata;
-    setLezioni((prev) => prev.map((l) => {
-      if (l.id !== id) return l;
-      lezioneAggiornata = { ...l, ...campi };
-      return lezioneAggiornata;
-    }));
-    await supabase.from("lezioni_svolte").update(campi).eq("id", id);
-
-    if ("fatta" in campi && incluse > 0) {
-      setLezioni((prev) => {
-        const tutteFatte = prev.filter((l) => l.fatta).length === incluse;
-        if (tutteFatte && client.stato_pacchetto !== "scaduto") {
-          supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", client.id).then(() => onCompletato?.());
-        }
-        return prev;
-      });
-    }
-    return lezioneAggiornata;
-  };
-
-  const cambiaData = async (id, nuovaData) => {
-    const l = await aggiorna(id, { data: nuovaData || null });
-    if (!nuovaData) return;
-    if (l.calendar_event_id) {
-      await supabase.from("calendar_events").update({ data: nuovaData }).eq("id", l.calendar_event_id);
-    } else {
-      const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
-        client_id: client.id, tipo: "lezione", data: nuovaData, ora: l.ora || null, luogo: client.sede_abituale || null, stato: "confermato",
-      }).select().single();
-      if (nuovoEvento) await aggiorna(id, { calendar_event_id: nuovoEvento.id });
+  const cambiaFatta = async (id, fatta) => {
+    setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, fatta } : l)));
+    await supabase.from("lezioni_svolte").update({ fatta }).eq("id", id);
+    const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === incluse;
+    if (tutteFatte && incluse > 0 && client.stato_pacchetto !== "scaduto") {
+      await supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", client.id);
+      onCompletato?.();
     }
   };
 
-  const cambiaOra = async (id, nuovaOra) => {
-    const l = await aggiorna(id, { ora: nuovaOra || null });
-    if (l.calendar_event_id) await supabase.from("calendar_events").update({ ora: nuovaOra || null }).eq("id", l.calendar_event_id);
+  const onRigaSalvata = (lezioneAggiornata) => {
+    setLezioni((prev) => prev.map((l) => (l.id === lezioneAggiornata.id ? lezioneAggiornata : l)));
   };
 
   const svolte = lezioni.filter((l) => l.fatta).length;
@@ -1754,25 +1789,10 @@ function LezioniPacchetto({ client, onCompletato }) {
 
       <div className="space-y-2">
         {lezioni.map((l) => (
-          <Card key={l.id} className="p-3 space-y-2">
-            <div className="flex items-center gap-3">
-              <button onClick={() => aggiorna(l.id, { fatta: !l.fatta })}
-                className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${l.fatta ? "bg-emerald-500" : "border-2 border-slate-300"}`}>
-                {l.fatta && <CheckCircle2 size={16} className="text-white" />}
-              </button>
-              <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {l.numero}</p>
-              <InputData defaultValue={l.data || ""} onBlur={(e) => cambiaData(l.id, e.target.value)} className="flex-1" />
-              <select defaultValue={l.ora || ""} onBlur={(e) => cambiaOra(l.id, e.target.value)} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
-                <option value="">--:--</option>
-                {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <input defaultValue={l.nota || ""} onBlur={(e) => aggiorna(l.id, { nota: e.target.value || null })} placeholder="Nota sulla lezione"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
-          </Card>
+          <RigaLezione key={l.id} lezione={l} client={client} onFattaCambiata={cambiaFatta} onSalvato={onRigaSalvata} />
         ))}
       </div>
-      <p className="text-slate-400 text-xs px-1">Impostando una data qui, la lezione compare in automatico anche nel calendario coach.</p>
+      <p className="text-slate-400 text-xs px-1">Ricordati di toccare "Salva" dopo aver scritto data e ora — solo così la lezione compare anche nel calendario coach.</p>
     </div>
   );
 }
