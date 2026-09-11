@@ -1865,23 +1865,46 @@ const VOLUME_LANDMARKS = {
   Bicipiti: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
   Tricipiti: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
   Polpacci: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [20, 20] },
-  Addome: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] }, // stima, non specificata
+  Core: { mv: [0, 0], mev: [0, 0], mav: [10, 14], mrv: [10, 14] }, // solo se aggiunto manualmente, tetto fisso 10-14 (anche in focus)
 };
 const SERIE_MAX_PER_SESSIONE = 10; // evita junk volume in singola seduta (regola avanzati, applicata a tutti per sicurezza)
 
-function serieIdealiPerGruppo(gruppo, livello, inFocus) {
+const GRUPPI_UPPER = ["Petto", "Schiena", "Spalle", "Bicipiti", "Tricipiti"];
+const GRUPPI_TONIFICAZIONE_DONNA = ["Petto", "Bicipiti", "Tricipiti"];
+
+function serieIdealiPerGruppo(gruppo, livello, inFocus, sesso) {
   const landmark = VOLUME_LANDMARKS[gruppo];
   if (!landmark) return livello === "base" ? 8 : 12;
   // Gruppo in focus di crescita: spinge verso il volume massimo tollerabile (MRV) invece che sull'ottimale.
   if (inFocus) return landmark.mrv[0];
+  // Donne, senza focus esplicito: petto/braccia restano a livello di tonificazione/mantenimento (MEV), non MAV.
+  if (sesso === "F" && GRUPPI_TONIFICAZIONE_DONNA.includes(gruppo)) return landmark.mev[1];
+  // Uomini: maggiore enfasi upper body anche senza focus esplicito (tra MAV alto e MRV).
+  if (sesso === "M" && GRUPPI_UPPER.includes(gruppo)) return Math.round((landmark.mav[1] + landmark.mrv[0]) / 2);
   // Principiante/Intermedio: limite inferiore del volume ottimale (MAV min). Avanzato: verso l'alto (MAV max).
   return livello === "avanzata" ? landmark.mav[1] : landmark.mav[0];
+}
+
+// Bicipiti/Tricipiti ricevono già stimolo indiretto dalle tirate (Schiena) e spinte (Petto/Spalle):
+// riduciamo il volume diretto in base a quante sessioni di quel tipo sono già presenti in settimana.
+function aggiustaVolumeIndiretto(gruppo, serieBase, giorniGenerator) {
+  if (gruppo === "Bicipiti") {
+    const sessioniTirata = giorniGenerator.filter((g) => g.gruppi.includes("Schiena")).length;
+    const riduzione = Math.min(0.5, sessioniTirata * 0.2);
+    return Math.max(4, Math.round(serieBase * (1 - riduzione)));
+  }
+  if (gruppo === "Tricipiti") {
+    const sessioniSpinta = giorniGenerator.filter((g) => g.gruppi.includes("Petto") || g.gruppi.includes("Spalle")).length;
+    const riduzione = Math.min(0.5, sessioniSpinta * 0.15);
+    return Math.max(4, Math.round(serieBase * (1 - riduzione)));
+  }
+  return serieBase;
 }
 
 // Frequenza settimanale ideale per gruppo (da note di programmazione del metodo)
 const FREQUENZA_IDEALE = {
   Quadricipiti: 2, Glutei: 2, Femorali: 1, Schiena: 2, Petto: 2,
-  Spalle: 2, Bicipiti: 1, Tricipiti: 1, Polpacci: 2, Addome: 1,
+  Spalle: 2, Bicipiti: 1, Tricipiti: 1, Polpacci: 2,
 };
 
 // Combinazioni di giorno valide (split scientificamente sensate) — il generatore pesca solo da qui
@@ -1891,7 +1914,7 @@ const COMBINAZIONI_VALIDE = [
   ["Schiena", "Bicipiti"], ["Bicipiti", "Tricipiti"], ["Bicipiti", "Tricipiti", "Spalle"], ["Petto"],
 ];
 // Gruppi senza combinazione dedicata: si aggiungono come richiamo alla giornata più coerente
-const GRUPPI_RICHIAMO = ["Quadricipiti", "Polpacci", "Addome"];
+const GRUPPI_RICHIAMO = ["Quadricipiti", "Polpacci"];
 
 // Template di split per numero di giorni a settimana (combo principale + richiami), pensati per coprire
 // tutti i 10 gruppi con frequenza ragionevole in base alle note di programmazione del metodo
@@ -1899,24 +1922,24 @@ const TEMPLATE_SPLIT = {
   1: [{ combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti", "Schiena", "Spalle", "Petto"] }],
   2: [
     { combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti", "Polpacci"] },
-    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Bicipiti", "Addome", "Schiena"] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Bicipiti", "Schiena"] },
   ],
   3: [
     { combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti"] },
-    { combo: ["Schiena", "Bicipiti"], richiami: ["Addome"] },
+    { combo: ["Schiena", "Bicipiti"], richiami: [] },
     { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Polpacci"] },
   ],
   4: [
     { combo: ["Femorali", "Schiena"], richiami: [] },
     { combo: ["Glutei"], richiami: ["Quadricipiti"] },
     { combo: ["Spalle", "Petto", "Tricipiti"], richiami: [] },
-    { combo: ["Bicipiti", "Tricipiti", "Spalle"], richiami: ["Polpacci", "Addome"] },
+    { combo: ["Bicipiti", "Tricipiti", "Spalle"], richiami: ["Polpacci"] },
   ],
   5: [
     { combo: ["Glutei", "Femorali"], richiami: [] },
     { combo: ["Spalle", "Petto"], richiami: [] },
     { combo: ["Schiena", "Bicipiti"], richiami: [] },
-    { combo: ["Petto", "Tricipiti"], richiami: ["Addome"] },
+    { combo: ["Petto", "Tricipiti"], richiami: [] },
     { combo: ["Glutei"], richiami: ["Quadricipiti", "Polpacci"] },
   ],
   6: [
@@ -1925,7 +1948,7 @@ const TEMPLATE_SPLIT = {
     { combo: ["Schiena", "Bicipiti"], richiami: [] },
     { combo: ["Femorali", "Schiena"], richiami: [] },
     { combo: ["Spalle"], richiami: ["Polpacci"] },
-    { combo: ["Bicipiti", "Tricipiti"], richiami: ["Addome", "Quadricipiti"] },
+    { combo: ["Bicipiti", "Tricipiti"], richiami: ["Quadricipiti"] },
   ],
 };
 
@@ -1961,8 +1984,8 @@ function targetPassiGiornalieri(livelloAttivita) {
 }
 
 function adattoAlLivello(es, livello) {
-  if (livello === "base") return (es.attrezzo || "").toLowerCase().includes("corpo libero");
-  return true;
+  if (livello === "base") return !!es.solo_base && (es.attrezzo || "").toLowerCase().includes("corpo libero");
+  return !es.solo_base;
 }
 
 // BLOCCO 2 = complessi fondamentali (1-2 multiarticolari primari) · BLOCCO 3 = accessori/isolamento (3-5 esercizi)
@@ -2000,6 +2023,8 @@ function scegliVariati(candidati, numero) {
   return scelti;
 }
 
+const ESERCIZI_MARGINALI = { Spalle: ["Alzate frontali"] }; // deltoide anteriore: già stimolato dal petto, da usare solo se serve varietà
+
 function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse, blocco, giaScelti }) {
   let candidati = libreria.filter((e) =>
     (e.gruppo === gruppo || e.gruppo_secondario === gruppo) &&
@@ -2009,6 +2034,9 @@ function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse,
   );
   // Blocco 2: solo esercizi compound (forza meccanica); Blocco 3: tutto il resto (accessori/isolamento)
   candidati = candidati.filter((e) => (blocco === 2 ? isCompoundPattern(e.pattern) : true));
+  // Esercizi marginali (es. deltoide anteriore): in coda, usati solo se servono per completare la varietà
+  const marginali = ESERCIZI_MARGINALI[gruppo] || [];
+  candidati = [...candidati.filter((e) => !marginali.includes(e.nome)), ...candidati.filter((e) => marginali.includes(e.nome))];
   if (serieTotali <= 0) return [];
   if (candidati.length === 0) return [{ esercizio: null, gruppoMancante: gruppo, serie: serieTotali }];
 
@@ -2016,7 +2044,24 @@ function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse,
     ? Math.min(2, candidati.length)
     : Math.max(1, Math.min(5, candidati.length, Math.round(serieTotali / 3)));
   // Un esercizio per ogni tipo di movimento diverso quando possibile (es. schiena: tirata dall'alto, dal basso, orizzontale)
-  const scelti = scegliVariati(candidati, numeroEsercizi);
+  let scelti = scegliVariati(candidati, numeroEsercizi);
+
+  // Schiena, blocco accessori: garantisce sempre almeno un esercizio di ampiezza (tirata verticale)
+  // e uno di spessore (tirata orizzontale), non lasciarlo al caso del round-robin.
+  if (gruppo === "Schiena" && blocco === 3 && scelti.length >= 2) {
+    const eAmpiezza = (e) => e.pattern.toLowerCase().includes("verticale");
+    const eSpessore = (e) => e.pattern.toLowerCase().includes("orizzontale");
+    const haAmpiezza = scelti.some(eAmpiezza);
+    const haSpessore = scelti.some(eSpessore);
+    if (!haAmpiezza) {
+      const sostituto = candidati.find((e) => eAmpiezza(e) && !scelti.includes(e));
+      if (sostituto) scelti = [sostituto, ...scelti.slice(1)];
+    } else if (!haSpessore) {
+      const sostituto = candidati.find((e) => eSpessore(e) && !scelti.includes(e));
+      if (sostituto) scelti = [sostituto, ...scelti.slice(1)];
+    }
+  }
+
   const base = Math.floor(serieTotali / scelti.length);
   const resto = serieTotali % scelti.length;
   return scelti.map((es, i) => ({ esercizio: es, serie: base + (i < resto ? 1 : 0) }));
@@ -2541,11 +2586,15 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
       const next = { ...prev };
       let cambiato = false;
       gruppiUsatiNelGeneratore.forEach((gr) => {
-        if (!(gr in next)) { next[gr] = serieIdealiPerGruppo(gr, client.livello_allenamento, (client.focus_crescita || []).includes(gr)); cambiato = true; }
+        if (!(gr in next)) {
+          const base = serieIdealiPerGruppo(gr, client.livello_allenamento, (client.focus_crescita || []).includes(gr), client.sesso);
+          next[gr] = aggiustaVolumeIndiretto(gr, base, giorniGenerator);
+          cambiato = true;
+        }
       });
       return cambiato ? next : prev;
     });
-  }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento, JSON.stringify(client.focus_crescita)]);
+  }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento, JSON.stringify(client.focus_crescita), client.sesso]);
 
   const generaSchedaAutomatica = async () => {
     setGenerando(true);
@@ -2578,15 +2627,18 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
       if (!nuovoGiorno) continue;
 
       const giaScelti = [];
+      const GRUPPI_SENZA_COMPOUND = ["Bicipiti", "Tricipiti"];
       let righeBlocco2 = [];
       let righeBlocco3 = [];
       for (const gruppo of giornoDef.gruppi) {
         const totale = Number(serieGruppi[gruppo] || 0);
         const perSessione = Math.min(SERIE_MAX_PER_SESSIONE, Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1))));
-        const serieB2 = Math.round(perSessione * 0.4);
+        // Bicipiti/Tricipiti non hanno esercizi multiarticolari: tutto il volume va al blocco accessori
+        const senzaCompound = GRUPPI_SENZA_COMPOUND.includes(gruppo);
+        const serieB2 = senzaCompound ? 0 : Math.round(perSessione * 0.4);
         const serieB3 = perSessione - serieB2;
 
-        const sceltiB2 = scegliEserciziBlocco({ gruppo, serieTotali: serieB2, libreria, livello, escluse, blocco: 2, giaScelti });
+        const sceltiB2 = senzaCompound ? [] : scegliEserciziBlocco({ gruppo, serieTotali: serieB2, libreria, livello, escluse, blocco: 2, giaScelti });
         sceltiB2.forEach((r) => { if (r.esercizio) giaScelti.push(r.esercizio.id); });
         righeBlocco2.push(...sceltiB2);
 
@@ -2692,7 +2744,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
           <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
             <div>
-              <label className="text-xs text-slate-500">Focus di crescita (facoltativo — questi gruppi ricevono più volume e frequenza)</label>
+              <label className="text-xs text-slate-500">Focus di crescita (facoltativo — non significa allenare <em>solo</em> questi gruppi, ma dargli maggiore enfasi/volume rispetto agli altri)</label>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {Object.keys(VOLUME_LANDMARKS).map((gr) => (
                   <button key={gr} onClick={() => salvaCliente({ focus_crescita: (client.focus_crescita || []).includes(gr) ? (client.focus_crescita || []).filter((x) => x !== gr) : [...(client.focus_crescita || []), gr] })}
