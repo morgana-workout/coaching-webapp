@@ -1854,6 +1854,28 @@ const CONDIZIONI_SALUTE = [
 const TECNICHE_BLOCCO2 = ["Top Set (RIR 1) + 2 Back-off (-15%)", 'TUT eccentrica 3-4", RIR 1-2', "Cluster set: 2x(3+3), rec. 20\" interno"];
 const TECNICHE_BLOCCO3 = ["Drop set: -30/40% carico, a cedimento tecnico", 'Rest-pause: cedimento + 15" + AMRAP', "Tensione continua, no lockout in uscita"];
 
+// Soglie di volume settimanale per gruppo muscolare (serie a intensità reale RIR 0-2)
+const VOLUME_LANDMARKS = {
+  Quadricipiti: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [18, 20] },
+  Glutei: { mv: [4, 6], mev: [8, 10], mav: [12, 18], mrv: [20, 22] },
+  Femorali: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
+  Schiena: { mv: [6, 8], mev: [8, 10], mav: [14, 20], mrv: [22, 25] },
+  Petto: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [18, 20] },
+  Spalle: { mv: [6, 8], mev: [8, 12], mav: [14, 22], mrv: [24, 26] }, // riferimento: deltoidi laterali
+  Bicipiti: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
+  Tricipiti: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
+  Polpacci: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [20, 20] },
+  Addome: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] }, // stima, non specificata
+};
+const SERIE_MAX_PER_SESSIONE = 10; // evita junk volume in singola seduta (regola avanzati, applicata a tutti per sicurezza)
+
+function serieIdealiPerGruppo(gruppo, livello) {
+  const landmark = VOLUME_LANDMARKS[gruppo];
+  if (!landmark) return livello === "base" ? 8 : 12;
+  // Principiante/Intermedio: limite inferiore del volume ottimale (MAV min). Avanzato: verso l'alto (MAV max).
+  return livello === "avanzata" ? landmark.mav[1] : landmark.mav[0];
+}
+
 const RISCALDAMENTO_STANDARD = [
   "Foam rolling (SMR): 30 sec per distretto target della seduta",
   "Mobilità dinamica anche (es. 90/90, affondi con rotazione)",
@@ -2443,11 +2465,10 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
   const opzioniSerie = Array.from({ length: 17 }, (_, i) => 4 + i * 2); // 4, 6, 8 ... 36
   useEffect(() => {
-    const defaultVal = client.livello_allenamento === "base" ? 8 : 16;
     setSerieGruppi((prev) => {
       const next = { ...prev };
       let cambiato = false;
-      gruppiUsatiNelGeneratore.forEach((gr) => { if (!(gr in next)) { next[gr] = defaultVal; cambiato = true; } });
+      gruppiUsatiNelGeneratore.forEach((gr) => { if (!(gr in next)) { next[gr] = serieIdealiPerGruppo(gr, client.livello_allenamento); cambiato = true; } });
       return cambiato ? next : prev;
     });
   }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento]);
@@ -2487,7 +2508,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
       let righeBlocco3 = [];
       for (const gruppo of giornoDef.gruppi) {
         const totale = Number(serieGruppi[gruppo] || 0);
-        const perSessione = Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1)));
+        const perSessione = Math.min(SERIE_MAX_PER_SESSIONE, Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1))));
         const serieB2 = Math.round(perSessione * 0.4);
         const serieB3 = perSessione - serieB2;
 
@@ -2618,14 +2639,16 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           {gruppiUsatiNelGeneratore.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Serie settimanali totali per gruppo</p>
-              <p className="text-slate-400 text-xs">Il totale viene diviso automaticamente tra le sessioni in cui compare quel gruppo.</p>
+              <p className="text-slate-400 text-xs">Precompilate in automatico da livello ({client.livello_allenamento || "non impostato"}) e soglie di volume; il totale viene diviso tra le sessioni in cui compare quel gruppo (max {SERIE_MAX_PER_SESSIONE}/seduta).</p>
               {gruppiUsatiNelGeneratore.map((gr) => {
                 const occorrenze = giorniGenerator.filter((g) => g.gruppi.includes(gr)).length;
                 const perSessione = Math.max(1, Math.round(Number(serieGruppi[gr] || 0) / occorrenze));
+                const lm = VOLUME_LANDMARKS[gr];
                 return (
                   <div key={gr} className="flex items-center gap-2">
                     <div className="flex-1">
                       <span className="text-sm text-slate-600 block">{gr}</span>
+                      {lm && <span className="text-slate-400 text-[11px] block">MEV {lm.mev[0]}-{lm.mev[1]} · MAV {lm.mav[0]}-{lm.mav[1]} · MRV {lm.mrv[0]}-{lm.mrv[1]}</span>}
                       {occorrenze > 1 && <span className="text-slate-400 text-[11px]">≈ {perSessione} per sessione × {occorrenze} sessioni</span>}
                     </div>
                     <select value={serieGruppi[gr] || ""} onChange={(e) => setSerieGruppi((prev) => ({ ...prev, [gr]: e.target.value }))}
