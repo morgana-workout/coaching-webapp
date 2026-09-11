@@ -1869,11 +1869,82 @@ const VOLUME_LANDMARKS = {
 };
 const SERIE_MAX_PER_SESSIONE = 10; // evita junk volume in singola seduta (regola avanzati, applicata a tutti per sicurezza)
 
-function serieIdealiPerGruppo(gruppo, livello) {
+function serieIdealiPerGruppo(gruppo, livello, inFocus) {
   const landmark = VOLUME_LANDMARKS[gruppo];
   if (!landmark) return livello === "base" ? 8 : 12;
+  // Gruppo in focus di crescita: spinge verso il volume massimo tollerabile (MRV) invece che sull'ottimale.
+  if (inFocus) return landmark.mrv[0];
   // Principiante/Intermedio: limite inferiore del volume ottimale (MAV min). Avanzato: verso l'alto (MAV max).
   return livello === "avanzata" ? landmark.mav[1] : landmark.mav[0];
+}
+
+// Frequenza settimanale ideale per gruppo (da note di programmazione del metodo)
+const FREQUENZA_IDEALE = {
+  Quadricipiti: 2, Glutei: 2, Femorali: 1, Schiena: 2, Petto: 2,
+  Spalle: 2, Bicipiti: 1, Tricipiti: 1, Polpacci: 2, Addome: 1,
+};
+
+// Combinazioni di giorno valide (split scientificamente sensate) — il generatore pesca solo da qui
+const COMBINAZIONI_VALIDE = [
+  ["Femorali", "Schiena"], ["Glutei", "Femorali"], ["Glutei"], ["Femorali"], ["Spalle"],
+  ["Spalle", "Petto"], ["Spalle", "Petto", "Tricipiti"], ["Petto", "Tricipiti"], ["Schiena"],
+  ["Schiena", "Bicipiti"], ["Bicipiti", "Tricipiti"], ["Bicipiti", "Tricipiti", "Spalle"], ["Petto"],
+];
+// Gruppi senza combinazione dedicata: si aggiungono come richiamo alla giornata più coerente
+const GRUPPI_RICHIAMO = ["Quadricipiti", "Polpacci", "Addome"];
+
+// Template di split per numero di giorni a settimana (combo principale + richiami), pensati per coprire
+// tutti i 10 gruppi con frequenza ragionevole in base alle note di programmazione del metodo
+const TEMPLATE_SPLIT = {
+  1: [{ combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti", "Schiena", "Spalle", "Petto"] }],
+  2: [
+    { combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti", "Polpacci"] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Bicipiti", "Addome", "Schiena"] },
+  ],
+  3: [
+    { combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti"] },
+    { combo: ["Schiena", "Bicipiti"], richiami: ["Addome"] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Polpacci"] },
+  ],
+  4: [
+    { combo: ["Femorali", "Schiena"], richiami: [] },
+    { combo: ["Glutei"], richiami: ["Quadricipiti"] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: [] },
+    { combo: ["Bicipiti", "Tricipiti", "Spalle"], richiami: ["Polpacci", "Addome"] },
+  ],
+  5: [
+    { combo: ["Glutei", "Femorali"], richiami: [] },
+    { combo: ["Spalle", "Petto"], richiami: [] },
+    { combo: ["Schiena", "Bicipiti"], richiami: [] },
+    { combo: ["Petto", "Tricipiti"], richiami: ["Addome"] },
+    { combo: ["Glutei"], richiami: ["Quadricipiti", "Polpacci"] },
+  ],
+  6: [
+    { combo: ["Glutei", "Femorali"], richiami: [] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: [] },
+    { combo: ["Schiena", "Bicipiti"], richiami: [] },
+    { combo: ["Femorali", "Schiena"], richiami: [] },
+    { combo: ["Spalle"], richiami: ["Polpacci"] },
+    { combo: ["Bicipiti", "Tricipiti"], richiami: ["Addome", "Quadricipiti"] },
+  ],
+};
+
+function generaSplitAutomatica(numeroGiorni, focus) {
+  const n = Math.min(6, Math.max(1, Number(numeroGiorni) || 3));
+  const template = TEMPLATE_SPLIT[n] || TEMPLATE_SPLIT[3];
+  const giorni = template.map((t) => ({ gruppi: [...t.combo, ...t.richiami] }));
+
+  // I gruppi in focus vogliono più frequenza: se compaiono una sola volta, li aggiungiamo
+  // come richiamo su un'altra giornata che non li ha già (e non è già troppo carica)
+  (focus || []).forEach((gruppoFocus) => {
+    const occorrenze = giorni.filter((g) => g.gruppi.includes(gruppoFocus)).length;
+    if (occorrenze < 2) {
+      const candidato = giorni.find((g) => !g.gruppi.includes(gruppoFocus) && g.gruppi.length < 4);
+      if (candidato) candidato.gruppi.push(gruppoFocus);
+    }
+  });
+
+  return giorni.map((g) => ({ nome: g.gruppi.join(" + "), gruppi: g.gruppi, nomeManuale: false }));
 }
 
 const RISCALDAMENTO_STANDARD = [
@@ -2338,6 +2409,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   const [notaFeedback, setNotaFeedback] = useState("");
   const [mostraGeneratore, setMostraGeneratore] = useState(false);
   const [giorniGenerator, setGiorniGenerator] = useState([{ nome: "Giorno A", gruppi: [] }]);
+  const [numeroGiorniSettimana, setNumeroGiorniSettimana] = useState(3);
   const [serieGruppi, setSerieGruppi] = useState({});
   const [generando, setGenerando] = useState(false);
   const [condizioniAltroTesto, setCondizioniAltroTesto] = useState(client.problematiche_salute_note || "");
@@ -2468,10 +2540,12 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
     setSerieGruppi((prev) => {
       const next = { ...prev };
       let cambiato = false;
-      gruppiUsatiNelGeneratore.forEach((gr) => { if (!(gr in next)) { next[gr] = serieIdealiPerGruppo(gr, client.livello_allenamento); cambiato = true; } });
+      gruppiUsatiNelGeneratore.forEach((gr) => {
+        if (!(gr in next)) { next[gr] = serieIdealiPerGruppo(gr, client.livello_allenamento, (client.focus_crescita || []).includes(gr)); cambiato = true; }
+      });
       return cambiato ? next : prev;
     });
-  }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento]);
+  }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento, JSON.stringify(client.focus_crescita)]);
 
   const generaSchedaAutomatica = async () => {
     setGenerando(true);
@@ -2615,6 +2689,31 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <Card className="p-4 space-y-4">
           <p className="text-sm font-medium text-slate-700">Genera scheda automatica</p>
           <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {client.obiettivo_attuale || "—"}</p>
+
+          <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+            <div>
+              <label className="text-xs text-slate-500">Focus di crescita (facoltativo — questi gruppi ricevono più volume e frequenza)</label>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {Object.keys(VOLUME_LANDMARKS).map((gr) => (
+                  <button key={gr} onClick={() => salvaCliente({ focus_crescita: (client.focus_crescita || []).includes(gr) ? (client.focus_crescita || []).filter((x) => x !== gr) : [...(client.focus_crescita || []), gr] })}
+                    className={`px-2.5 py-1 rounded-full text-xs ${(client.focus_crescita || []).includes(gr) ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+                    {gr}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-500 flex-1">Giorni di allenamento a settimana</label>
+              <select value={numeroGiorniSettimana} onChange={(e) => setNumeroGiorniSettimana(Number(e.target.value))} className="w-16 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center">
+                {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <button onClick={() => setGiorniGenerator(generaSplitAutomatica(numeroGiorniSettimana, client.focus_crescita))}
+              className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
+              🧠 Elabora la split migliore per questa cliente
+            </button>
+            <p className="text-slate-400 text-[11px]">Genera una proposta di split scientificamente sensata; puoi comunque modificarla liberamente qui sotto prima di generare la scheda.</p>
+          </div>
 
           <div className="space-y-3">
             {giorniGenerator.map((g, idx) => (
