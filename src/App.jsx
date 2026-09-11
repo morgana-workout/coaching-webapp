@@ -2029,14 +2029,16 @@ function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse,
   let candidati = libreria.filter((e) =>
     (e.gruppo === gruppo || e.gruppo_secondario === gruppo) &&
     adattoAlLivello(e, livello) &&
-    !esercizioEscluso(e, escluse) &&
-    !giaScelti.includes(e.id)
+    !esercizioEscluso(e, escluse)
   );
   // Blocco 2: solo esercizi compound (forza meccanica); Blocco 3: tutto il resto (accessori/isolamento)
   candidati = candidati.filter((e) => (blocco === 2 ? isCompoundPattern(e.pattern) : true));
   // Esercizi marginali (es. deltoide anteriore): in coda, usati solo se servono per completare la varietà
   const marginali = ESERCIZI_MARGINALI[gruppo] || [];
   candidati = [...candidati.filter((e) => !marginali.includes(e.nome)), ...candidati.filter((e) => marginali.includes(e.nome))];
+  // Preferenza morbida: primi in lista quelli non ancora usati in nessun altro giorno della settimana.
+  // Se la libreria non basta a coprire tutte le sessioni senza ripetere, va bene ripetere piuttosto che lasciare vuoto.
+  candidati = [...candidati.filter((e) => !giaScelti.includes(e.id)), ...candidati.filter((e) => giaScelti.includes(e.id))];
   if (serieTotali <= 0) return [];
   if (candidati.length === 0) return [{ esercizio: null, gruppoMancante: gruppo, serie: serieTotali }];
 
@@ -2620,14 +2622,14 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
     const isAvanzataFaseAlta = livello === "avanzata" && fase >= 3;
     const tecBlocco2 = isAvanzataFaseAlta ? TECNICHE_BLOCCO2[(fase - 3) % TECNICHE_BLOCCO2.length] : "";
     const tecBlocco3 = isAvanzataFaseAlta ? TECNICHE_BLOCCO3[(fase - 3) % TECNICHE_BLOCCO3.length] : "";
+    const GRUPPI_SENZA_COMPOUND = ["Bicipiti", "Tricipiti"];
+    const giaScelti = []; // condiviso su tutta la settimana: evita di ripetere lo stesso esercizio nei giorni diversi quando possibile
 
     for (let gi = 0; gi < giorniGenerator.length; gi++) {
       const giornoDef = giorniGenerator[gi];
       const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: schedaIdTarget, nome: giornoDef.nome, ordine: gi }).select().single();
       if (!nuovoGiorno) continue;
 
-      const giaScelti = [];
-      const GRUPPI_SENZA_COMPOUND = ["Bicipiti", "Tricipiti"];
       let righeBlocco2 = [];
       let righeBlocco3 = [];
       for (const gruppo of giornoDef.gruppi) {
@@ -2912,6 +2914,109 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   );
 }
 
+async function esportaDatiCliente(client, setInCorso) {
+  setInCorso(true);
+  const cid = client.id;
+  const [
+    { data: checkins }, { data: notes }, { data: nutrizione }, { data: giorniLog }, { data: eserciziLog },
+    { data: entriesLog }, { data: lezioni }, { data: pagamenti }, { data: schede }, { data: feedback },
+  ] = await Promise.all([
+    supabase.from("checkins").select("*").eq("client_id", cid).order("data_check"),
+    supabase.from("notes").select("*").eq("client_id", cid).order("data"),
+    supabase.from("nutrition_plans").select("*").eq("client_id", cid).order("data_aggiornamento"),
+    supabase.from("training_days").select("*").eq("client_id", cid).order("ordine"),
+    supabase.from("training_exercises").select("*").eq("client_id", cid).order("ordine"),
+    supabase.from("training_entries").select("*").eq("client_id", cid).order("data"),
+    supabase.from("lezioni_svolte").select("*").eq("client_id", cid).order("numero"),
+    supabase.from("payments").select("*").eq("client_id", cid).order("data_pagamento"),
+    supabase.from("schede").select("*").eq("client_id", cid).order("creata_il", { ascending: false }),
+    supabase.from("feedback_soggettivo").select("*").eq("client_id", cid).order("data"),
+  ]);
+
+  const schedeComplete = [];
+  for (const s of schede || []) {
+    const { data: giorni } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", s.id).order("ordine");
+    const giorniConEs = [];
+    for (const g of giorni || []) {
+      const { data: es } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome)").eq("giorno_id", g.id).order("ordine");
+      giorniConEs.push({ ...g, esercizi: es || [] });
+    }
+    schedeComplete.push({ ...s, giorni: giorniConEs });
+  }
+
+  const r = [];
+  r.push(`# Dati completi — ${client.nome} ${client.cognome}`);
+  r.push(`Esportato il ${new Date().toLocaleDateString("it-IT")}`);
+  r.push("");
+  r.push("## Anagrafica");
+  r.push(`- Codice: ${client.codice || "-"}`);
+  r.push(`- Email: ${client.email || "-"} · Telefono: ${client.telefono || "-"}`);
+  r.push(`- Sesso: ${client.sesso || "-"} · Età: ${client.eta || "-"} · Data nascita: ${client.data_nascita || "-"} · Altezza: ${client.altezza_cm || "-"} cm`);
+  r.push(`- Tipo servizio: ${client.tipo_servizio || "-"} · Piano: ${client.piano || "-"}`);
+  r.push(`- Livello attività: ${client.livello_attivita || "-"}`);
+  r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${client.obiettivo_attuale || "-"}`);
+  r.push(`- Focus di crescita: ${(client.focus_crescita || []).join(", ") || "-"}`);
+  r.push(`- Problematiche di salute: ${(client.problematiche_salute || []).join(", ") || "-"}${client.problematiche_salute_note ? " — " + client.problematiche_salute_note : ""}`);
+  r.push(`- Note particolari: ${client.note_particolari || "-"}`);
+  r.push("");
+
+  r.push("## Check nel tempo");
+  (checkins || []).forEach((c) => {
+    r.push(`### ${c.data_check}`);
+    r.push(`Peso: ${c.peso_kg ?? "-"} kg · Petto: ${c.petto_cm ?? "-"} · Vita: ${c.ombelico_cm ?? "-"} · Glutei: ${c.glutei_cm ?? "-"} · Coscia: ${c.coscia_dx_cm ?? "-"} · Braccio: ${c.braccio_dx_cm ?? "-"}`);
+    if (c.note_cliente) r.push(`Nota cliente: ${c.note_cliente}`);
+  });
+  r.push("");
+
+  r.push("## Note");
+  (notes || []).forEach((n) => r.push(`- [${n.data}] (${n.tipo}) ${n.testo}`));
+  r.push("");
+
+  r.push("## Nutrizione");
+  (nutrizione || []).forEach((n) => r.push(`- [${n.data_aggiornamento}] ${n.kcal ?? "-"} kcal · P ${n.proteine_g ?? "-"}g · C ${n.carboidrati_g ?? "-"}g · G ${n.grassi_g ?? "-"}g${n.note ? " — " + n.note : ""}`));
+  r.push("");
+
+  r.push("## Diario allenamento (log carichi)");
+  (giorniLog || []).forEach((g) => {
+    r.push(`### ${g.nome}`);
+    (eserciziLog || []).filter((e) => e.training_day_id === g.id).forEach((e) => {
+      r.push(`- ${e.nome}: ${e.serie ?? "-"}x${e.ripetizioni ?? "-"}`);
+      (entriesLog || []).filter((en) => en.exercise_id === e.id).forEach((en) => r.push(`  - ${en.data}: ${en.kg ?? "-"}kg`));
+    });
+  });
+  r.push("");
+
+  if ((lezioni || []).length) {
+    r.push("## Lezioni (pacchetto)");
+    lezioni.forEach((l) => r.push(`- #${l.numero}: ${l.fatta ? "fatta" : "da fare"}${l.data ? ` il ${l.data} ${l.ora || ""}` : ""}`));
+    r.push("");
+  }
+
+  r.push("## Schede di allenamento (attuale e storico)");
+  schedeComplete.forEach((s) => {
+    r.push(`### Scheda ${s.stato} (creata il ${(s.creata_il || "").slice(0, 10)})`);
+    s.giorni.forEach((g) => {
+      r.push(`**${g.nome}**`);
+      g.esercizi.forEach((es) => r.push(`- ${es.esercizi_libreria?.nome || es.nome_libero}: ${es.serie ?? "-"}x${es.ripetizioni ?? "-"}${es.tecnica ? " · " + es.tecnica : ""}`));
+    });
+  });
+  r.push("");
+
+  if ((feedback || []).length) {
+    r.push("## Feedback soggettivo");
+    feedback.forEach((f) => r.push(`- [${f.data}] ${(f.tags || []).join(", ")}${f.nota_libera ? " — " + f.nota_libera : ""}`));
+    r.push("");
+  }
+
+  if ((pagamenti || []).length) {
+    r.push("## Pagamenti");
+    pagamenti.forEach((p) => r.push(`- ${p.data_pagamento}: ${p.tipo_piano}`));
+  }
+
+  scaricaFile(`dati-${client.cognome || ""}-${client.nome || ""}-${new Date().toISOString().slice(0, 10)}.md`, r.join("\n"), "text/markdown");
+  setInCorso(false);
+}
+
 function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
@@ -2919,6 +3024,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [nutrizione, setNutrizione] = useState(null);
   const [pagamenti, setPagamenti] = useState([]);
   const [tab, setTab] = useState("riepilogo");
+  const [esportazioneInCorso, setEsportazioneInCorso] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
   const [checkInModifica, setCheckInModifica] = useState(null);
@@ -2965,7 +3071,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       <button onClick={onBack} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti i clienti</button>
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
-        <StatoBadge stato={client.stato_check} />
+        <div className="flex items-center gap-2">
+          <button onClick={() => esportaDatiCliente(client, setEsportazioneInCorso)} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
+            {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
+          </button>
+          <StatoBadge stato={client.stato_check} />
+        </div>
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
@@ -3885,10 +3996,39 @@ function AdminList({ clients, onSelect, onChanged }) {
   );
 }
 
+function scaricaFile(nomeFile, contenuto, tipo) {
+  const blob = new Blob([contenuto], { type: tipo });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nomeFile;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function esportaBackupCompleto(setInCorso) {
+  setInCorso(true);
+  const tabelle = [
+    "clients", "checkins", "notes", "nutrition_plans", "training_days", "training_exercises", "training_entries",
+    "lezioni_svolte", "calendar_events", "notifiche", "payments", "esercizi_libreria", "esercizi_alias",
+    "schede", "scheda_giorni", "scheda_esercizi", "feedback_soggettivo",
+  ];
+  const risultato = { esportato_il: new Date().toISOString() };
+  for (const t of tabelle) {
+    const { data, error } = await supabase.from(t).select("*");
+    risultato[t] = error ? { errore: error.message } : data;
+  }
+  scaricaFile(`backup-completo-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(risultato, null, 2), "application/json");
+  setInCorso(false);
+}
+
 function AdminApp() {
   const [clients, setClients] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
+  const [backupInCorso, setBackupInCorso] = useState(false);
 
   const carica = async () => {
     const { data } = await supabase.from("clients").select("*").order("ordine", { ascending: true, nullsFirst: false });
@@ -3904,7 +4044,12 @@ function AdminApp() {
     <div className="min-h-screen bg-slate-50">
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span>
-        <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => esportaBackupCompleto(setBackupInCorso)} disabled={backupInCorso} className="text-slate-400 flex items-center gap-1 text-xs disabled:opacity-50">
+            {backupInCorso ? "Esporto..." : "📦 Backup completo"}
+          </button>
+          <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
+        </div>
       </div>
       {selectedId ? (
         <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
