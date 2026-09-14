@@ -889,8 +889,17 @@ function CellaAllenamento({ exerciseId, data, clientId, entry, onSaved }) {
     onSaved();
   };
 
+  const elimina = async () => {
+    if (!id) return;
+    if (!confirm("Eliminare questa registrazione?")) return;
+    await supabase.from("training_entries").delete().eq("id", id);
+    setKg(""); setSerie(""); setRip(""); setNota(""); setId(null);
+    onSaved();
+  };
+
   return (
-    <div className="flex flex-col gap-1 w-24">
+    <div className="flex flex-col gap-1 w-24 relative">
+      {id && <button onClick={elimina} className="absolute -top-1 -right-1 text-slate-300 hover:text-rose-500 bg-white rounded-full"><X size={13} /></button>}
       <input type="number" step="0.5" value={kg} onChange={(e) => setKg(e.target.value)} onBlur={salva} disabled={salvando}
         placeholder="kg" className="w-full text-center border border-slate-200 rounded-lg px-1 py-1.5 text-sm" />
       <div className="flex gap-1">
@@ -983,6 +992,23 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
     carica();
   };
 
+  const eliminaEsercizio = async (id) => {
+    if (!confirm("Eliminare questo esercizio e tutto il suo storico di carichi registrati?")) return;
+    await supabase.from("training_entries").delete().eq("exercise_id", id);
+    await supabase.from("training_exercises").delete().eq("id", id);
+    carica();
+  };
+
+  const muoviEsercizio = async (id, direzione) => {
+    const idx = esercizi.findIndex((e) => e.id === id);
+    const altroIdx = idx + direzione;
+    if (altroIdx < 0 || altroIdx >= esercizi.length) return;
+    const nuovo = [...esercizi];
+    [nuovo[idx], nuovo[altroIdx]] = [nuovo[altroIdx], nuovo[idx]];
+    setEsercizi(nuovo);
+    await Promise.all(nuovo.map((e, i) => supabase.from("training_exercises").update({ ordine: i + 1 }).eq("id", e.id)));
+  };
+
   if (caricando) return <p className="text-slate-400 text-sm px-1">Caricamento...</p>;
 
   return (
@@ -997,7 +1023,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
           <table className="text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
-                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[190px]">Esercizio</th>
+                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[230px]">Esercizio</th>
                 {date.map((d) => (
                   <th key={d} className="text-center px-2 py-2 whitespace-nowrap">
                     <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
@@ -1009,8 +1035,13 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
             <tbody>
               {esercizi.map((es) => (
                 <tr key={es.id} className="border-t border-slate-100 align-top">
-                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[140px]">
-                    <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
+                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[180px]">
+                    <div className="flex items-center gap-1">
+                      <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
+                      <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
+                      <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
+                      <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
+                    </div>
                   </td>
                   {date.map((d) => {
                     const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
@@ -1204,7 +1235,7 @@ function LeMieLezioni({ client }) {
             <Card key={e.id} className="p-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-700 text-sm">{e.data.split("-").reverse().join("/")} · {e.ora?.slice(0, 5)}</p>
-                <p className="text-slate-500 text-xs truncate">{e.luogo}</p>
+                <p className="text-slate-500 text-xs ">{e.luogo}</p>
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
               <button onClick={() => annulla(e)} className="text-rose-500 text-xs font-medium flex-shrink-0">Annulla</button>
@@ -1221,7 +1252,7 @@ function LeMieLezioni({ client }) {
             <Card key={e.id} className="p-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-700 text-sm">{e.data.split("-").reverse().join("/")} · {e.ora?.slice(0, 5)}</p>
-                <p className="text-slate-500 text-xs truncate">{e.luogo}</p>
+                <p className="text-slate-500 text-xs ">{e.luogo}</p>
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
             </Card>
@@ -1766,8 +1797,8 @@ function LezioniPacchetto({ client, onCompletato }) {
   const cambiaFatta = async (id, fatta) => {
     setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, fatta } : l)));
     await supabase.from("lezioni_svolte").update({ fatta }).eq("id", id);
-    const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === incluse;
-    if (tutteFatte && incluse > 0 && client.stato_pacchetto !== "scaduto") {
+    const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === lezioni.length;
+    if (tutteFatte && lezioni.length > 0 && client.stato_pacchetto !== "scaduto") {
       await supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", client.id);
       onCompletato?.();
     }
@@ -1777,7 +1808,14 @@ function LezioniPacchetto({ client, onCompletato }) {
     setLezioni((prev) => prev.map((l) => (l.id === lezioneAggiornata.id ? lezioneAggiornata : l)));
   };
 
+  const aggiungiLezioneExtra = async () => {
+    const prossimoNumero = lezioni.length + 1;
+    const { data } = await supabase.from("lezioni_svolte").insert({ client_id: client.id, numero: prossimoNumero, fatta: false }).select().single();
+    if (data) setLezioni((prev) => [...prev, data]);
+  };
+
   const svolte = lezioni.filter((l) => l.fatta).length;
+  const totale = lezioni.length;
 
   if (caricando) return <Spinner />;
   if (!incluse) return <Card className="p-6 text-center text-slate-400 text-sm">Imposta prima un pacchetto lezioni nel tab Dati.</Card>;
@@ -1786,8 +1824,9 @@ function LezioniPacchetto({ client, onCompletato }) {
     <div className="space-y-3">
       <Card className="p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Pacchetto</p>
-        <p className="text-2xl font-semibold text-slate-800">{svolte} / {incluse} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
-        {svolte === incluse && <p className="text-amber-600 text-xs mt-1">Pacchetto completo — stato impostato automaticamente su "scaduto".</p>}
+        <p className="text-2xl font-semibold text-slate-800">{svolte} / {totale} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
+        {totale > incluse && <p className="text-slate-400 text-xs mt-1">Include {totale - incluse} lezione/i extra aggiunta/e manualmente</p>}
+        {svolte === totale && totale > 0 && <p className="text-amber-600 text-xs mt-1">Pacchetto completo — stato impostato automaticamente su "scaduto".</p>}
       </Card>
 
       <div className="space-y-2">
@@ -1795,6 +1834,9 @@ function LezioniPacchetto({ client, onCompletato }) {
           <RigaLezione key={l.id} lezione={l} client={client} onFattaCambiata={cambiaFatta} onSalvato={onRigaSalvata} />
         ))}
       </div>
+      <button onClick={aggiungiLezioneExtra} className="w-full border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-xl py-2.5">
+        + Aggiungi lezione extra (es. per recuperare una cancellazione)
+      </button>
       <p className="text-slate-400 text-xs px-1">Ricordati di toccare "Salva" dopo aver scritto data e ora — solo così la lezione compare anche nel calendario coach.</p>
     </div>
   );
@@ -3130,6 +3172,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                 <option value="1">1 lezione</option>
                 <option value="4">4 lezioni (1 al mese)</option>
                 <option value="8">8 lezioni (2 al mese)</option>
+                <option value="10">10 lezioni</option>
                 <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
                 <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
               </select>
@@ -3358,6 +3401,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
             <option value="1">1 lezione</option>
             <option value="4">4 lezioni (1 al mese)</option>
             <option value="8">8 lezioni (2 al mese)</option>
+            <option value="10">10 lezioni</option>
             <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
             <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
           </select>
@@ -3651,8 +3695,8 @@ function CalendarioAgenda({ clients, onSelect }) {
               <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
               {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-700 truncate">{e.nome}</p>
-                <p className="text-slate-500 text-xs truncate">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                <p className="font-medium text-slate-700 ">{e.nome}</p>
+                <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
               </div>
             </button>
             {e.id && (
@@ -3967,12 +4011,12 @@ function AdminList({ clients, onSelect, onChanged }) {
               <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
+                    <p className="font-medium text-slate-700 ">{c.nome} {c.cognome}</p>
                     <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
                       {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
                   </div>
-                  <p className="text-slate-500 text-xs mt-0.5 truncate">
+                  <p className="text-slate-500 text-xs mt-0.5 ">
                     {c.tipo_servizio === "presenza"
                       ? `${c.piano || "—"} · ${c.pacchetto_lezioni ? c.pacchetto_lezioni + " lezioni" : "pacchetto non impostato"}`
                       : `${c.piano || "—"} · Prossimo check: ${c.prossimo_check || "—"}`}
