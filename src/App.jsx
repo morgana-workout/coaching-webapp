@@ -1106,6 +1106,17 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   };
   useEffect(() => { carica(); }, [clientId]);
 
+  const eliminaGiorno = async (giornoId) => {
+    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
+    const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giornoId);
+    const idsEsercizi = (es || []).map((e) => e.id);
+    if (idsEsercizi.length) await supabase.from("training_entries").delete().in("exercise_id", idsEsercizi);
+    await supabase.from("training_exercises").delete().eq("training_day_id", giornoId);
+    await supabase.from("training_days").delete().eq("id", giornoId);
+    if (giornoAttivo === giornoId) setGiornoAttivo(null);
+    await carica();
+  };
+
   const creaGiorno = async () => {
     if (giorni.length >= 30) return;
     const { data } = await supabase.from("training_days").insert({
@@ -1115,7 +1126,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     if (data) setGiornoAttivo(data.id);
   };
 
-  const importaSchedaDaCSV = async (file) => {
+  const importaSchedaDaCSV = async (file, giorniIniziali = giorni) => {
     setImportando(true);
     const testo = await file.text();
     const righe = parseCSV(testo);
@@ -1133,7 +1144,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       return;
     }
 
-    let giorniLocali = [...giorni];
+    let giorniLocali = [...giorniIniziali];
     const cacheGiorni = {};
     let giorniCreati = 0, eserciziCreati = 0, saltati = 0;
 
@@ -1187,6 +1198,44 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
   };
 
+  const esportaLogCompleto = async (giorniDaEsportare) => {
+    const r = [];
+    r.push("# Diario allenamento completo");
+    r.push(`Esportato il ${new Date().toLocaleDateString("it-IT")}`);
+    r.push("");
+    for (const g of giorniDaEsportare) {
+      r.push(`## ${g.nome}`);
+      const { data: esercizi } = await supabase.from("training_exercises").select("*").eq("training_day_id", g.id).order("ordine");
+      for (const es of esercizi || []) {
+        r.push(`### ${es.nome}${es.note ? " — " + es.note : ""}`);
+        const { data: entries } = await supabase.from("training_entries").select("*").eq("exercise_id", es.id).order("data");
+        (entries || []).forEach((en) => r.push(`- ${en.data}: ${en.kg ?? "-"}kg${en.serie ? " · " + en.serie + " serie" : ""}${en.ripetizioni ? " x " + en.ripetizioni : ""}${en.note ? " — " + en.note : ""}`));
+        if (!(entries || []).length) r.push("- (nessun carico registrato)");
+      }
+      r.push("");
+    }
+    scaricaFile(`diario-allenamento-${new Date().toISOString().slice(0, 10)}.md`, r.join("\n"), "text/markdown");
+  };
+
+  const sostituisciConNuovaScheda = async (file) => {
+    if (giorni.length > 0 && !confirm(`Questo esporterà in un file tutto il diario attuale (${giorni.length} giorno/i), poi eliminerà TUTTI i giorni esistenti prima di importare la nuova scheda dal CSV. Vuoi procedere?`)) return;
+    setImportando(true);
+    if (giorni.length > 0) {
+      await esportaLogCompleto(giorni);
+      for (const g of giorni) {
+        const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", g.id);
+        const idsEsercizi = (es || []).map((e) => e.id);
+        if (idsEsercizi.length) await supabase.from("training_entries").delete().in("exercise_id", idsEsercizi);
+        await supabase.from("training_exercises").delete().eq("training_day_id", g.id);
+        await supabase.from("training_days").delete().eq("id", g.id);
+      }
+      setGiorni([]);
+      setGiornoAttivo(null);
+    }
+    setImportando(false);
+    await importaSchedaDaCSV(file, []);
+  };
+
   if (caricando) return <Spinner />;
 
   return (
@@ -1198,10 +1247,17 @@ function DiarioAllenamento({ clientId, isAdmin }) {
 
       <div className="flex gap-2 overflow-x-auto pb-1">
         {giorni.map((g) => (
-          <button key={g.id} onClick={() => setGiornoAttivo(g.id)}
-            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${giornoAttivo === g.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
-            {g.nome}
-          </button>
+          <div key={g.id} className="relative flex-shrink-0">
+            <button onClick={() => setGiornoAttivo(g.id)}
+              className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${giornoAttivo === g.id ? "bg-slate-800 text-white pr-6" : "bg-slate-100 text-slate-600 pr-6"}`}>
+              {g.nome}
+            </button>
+            {isAdmin && (
+              <button onClick={() => eliminaGiorno(g.id)} className={`absolute right-1.5 top-1/2 -translate-y-1/2 ${giornoAttivo === g.id ? "text-slate-300 hover:text-white" : "text-slate-400 hover:text-rose-500"}`}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
         ))}
         {giorni.length < 30 && (
           <button onClick={creaGiorno} className="px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 border border-dashed border-slate-300 text-slate-500">+ Giorno</button>
@@ -1209,10 +1265,16 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       </div>
 
       {isAdmin && (
-        <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-          {importando ? "Importo..." : "📥 Importa scheda da file CSV"}
-          <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
-        </label>
+        <div className="space-y-2">
+          <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+            {importando ? "Importo..." : "📥 Importa scheda da file CSV (aggiungi ai giorni esistenti)"}
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+          <label className={`w-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+            🔄 Sostituisci con nuova scheda (esporta e ripulisci i giorni attuali)
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) sostituisciConNuovaScheda(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+        </div>
       )}
 
       {giorni.length === 0 && (
