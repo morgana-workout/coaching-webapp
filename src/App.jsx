@@ -4176,7 +4176,7 @@ function AdminList({ clients, onSelect, onChanged }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
-  const [vista, setVista] = useState("lista");
+  const [vista, setVista] = useState("calendario");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
 
   const caricaNonLetteCoach = async () => {
