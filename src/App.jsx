@@ -923,7 +923,7 @@ function EsercizioNome({ id, nome, onSaved }) {
   };
   return (
     <input value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva}
-      className="w-full border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+      className="w-full min-w-0 border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
   );
 }
 
@@ -1023,7 +1023,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
           <table className="text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
-                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[230px]">Esercizio</th>
+                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 w-[210px] max-w-[210px]">Esercizio</th>
                 {date.map((d) => (
                   <th key={d} className="text-center px-2 py-2 whitespace-nowrap">
                     <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
@@ -1035,14 +1035,14 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
             <tbody>
               {esercizi.map((es) => (
                 <tr key={es.id} className="border-t border-slate-100 align-top">
-                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[180px]">
+                  <td className="px-3 py-2 sticky left-0 bg-white w-[210px] max-w-[210px]">
                     <div className="flex items-center gap-1">
                       <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
                       <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
                       <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
                       <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
                     </div>
-                    {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1">{es.note}</p>}
+                    {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
                   </td>
                   {date.map((d) => {
                     const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
@@ -1069,6 +1069,29 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
   );
 }
 
+function parseCSV(testo) {
+  const righe = [];
+  let riga = [], campo = "", dentroVirgolette = false;
+  for (let i = 0; i < testo.length; i++) {
+    const c = testo[i];
+    if (dentroVirgolette) {
+      if (c === '"') {
+        if (testo[i + 1] === '"') { campo += '"'; i++; }
+        else dentroVirgolette = false;
+      } else campo += c;
+    } else if (c === '"') dentroVirgolette = true;
+    else if (c === ",") { riga.push(campo); campo = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && testo[i + 1] === "\n") i++;
+      riga.push(campo); campo = "";
+      if (riga.some((v) => v.trim() !== "")) righe.push(riga);
+      riga = [];
+    } else campo += c;
+  }
+  if (campo !== "" || riga.length > 0) { riga.push(campo); righe.push(riga); }
+  return righe;
+}
+
 function DiarioAllenamento({ clientId, isAdmin }) {
   const [giorni, setGiorni] = useState([]);
   const [giornoAttivo, setGiornoAttivo] = useState(null);
@@ -1084,7 +1107,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   useEffect(() => { carica(); }, [clientId]);
 
   const creaGiorno = async () => {
-    if (giorni.length >= 6) return;
+    if (giorni.length >= 30) return;
     const { data } = await supabase.from("training_days").insert({
       client_id: clientId, nome: `Giorno ${giorni.length + 1}`, ordine: giorni.length + 1,
     }).select().single();
@@ -1092,47 +1115,76 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     if (data) setGiornoAttivo(data.id);
   };
 
-  const importaGiorniDallaScheda = async () => {
+  const importaSchedaDaCSV = async (file) => {
     setImportando(true);
-    const { data: schede } = await supabase.from("schede").select("*").eq("client_id", clientId).order("creata_il", { ascending: false });
-    const schedaScelta = (schede || []).find((s) => s.stato === "finale") || (schede || [])[0];
-    if (!schedaScelta) { alert("Nessuna scheda trovata per questo cliente."); setImportando(false); return; }
+    const testo = await file.text();
+    const righe = parseCSV(testo);
+    if (righe.length < 2) { alert("File vuoto o non leggibile."); setImportando(false); return; }
 
-    const { data: giorniScheda } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", schedaScelta.id).order("ordine");
-    if (!giorniScheda || giorniScheda.length === 0) { alert("La scheda non ha giorni."); setImportando(false); return; }
+    const header = righe[0].map((h) => h.trim().toLowerCase());
+    const idx = {
+      scheda: header.indexOf("scheda"), giorno: header.indexOf("giorno"), esercizio: header.indexOf("esercizio"),
+      serie: header.indexOf("serie"), ripetizioni: header.indexOf("ripetizioni"), recupero: header.indexOf("recupero"),
+      tecnica: header.indexOf("tecnica"), note: header.indexOf("note"),
+    };
+    if (idx.giorno === -1 || idx.esercizio === -1) {
+      alert('Il file deve avere almeno le colonne "giorno" e "esercizio" nella prima riga.');
+      setImportando(false);
+      return;
+    }
 
-    let giorniAttuali = [...giorni];
-    let creatiGiorni = 0, saltatiGiorni = 0, creatiEsercizi = 0;
-    for (const gs of giorniScheda) {
-      let giornoTarget = giorniAttuali.find((g) => g.nome === gs.nome);
-      if (!giornoTarget) {
-        if (giorniAttuali.length >= 6) { saltatiGiorni++; continue; }
-        const { data: nuovoGiorno } = await supabase.from("training_days").insert({ client_id: clientId, nome: gs.nome, ordine: giorniAttuali.length + 1 }).select().single();
-        if (!nuovoGiorno) continue;
-        giornoTarget = nuovoGiorno;
-        giorniAttuali.push(nuovoGiorno);
-        creatiGiorni++;
+    let giorniLocali = [...giorni];
+    const cacheGiorni = {};
+    let giorniCreati = 0, eserciziCreati = 0, saltati = 0;
+
+    for (let r = 1; r < righe.length; r++) {
+      const riga = righe[r];
+      if (riga.every((v) => !v || !v.trim())) continue;
+      const schedaVal = idx.scheda !== -1 ? (riga[idx.scheda] || "").trim() : "";
+      const giornoVal = (riga[idx.giorno] || "").trim();
+      const nomeEsercizio = (riga[idx.esercizio] || "").trim();
+      if (!giornoVal || !nomeEsercizio) continue;
+
+      const nomeGiornoCompleto = schedaVal ? `${schedaVal} - ${giornoVal}` : giornoVal;
+      let giornoId = cacheGiorni[nomeGiornoCompleto];
+      if (!giornoId) {
+        const esistente = giorniLocali.find((g) => g.nome === nomeGiornoCompleto);
+        if (esistente) {
+          giornoId = esistente.id;
+        } else if (giorniLocali.length >= 30) {
+          saltati++;
+          continue;
+        } else {
+          const { data: nuovo } = await supabase.from("training_days").insert({ client_id: clientId, nome: nomeGiornoCompleto, ordine: giorniLocali.length + 1 }).select().single();
+          if (!nuovo) continue;
+          giorniLocali.push(nuovo);
+          giornoId = nuovo.id;
+          giorniCreati++;
+        }
+        cacheGiorni[nomeGiornoCompleto] = giornoId;
       }
 
-      const { data: eserciziEsistenti } = await supabase.from("training_exercises").select("nome").eq("training_day_id", giornoTarget.id);
+      const { data: eserciziEsistenti } = await supabase.from("training_exercises").select("nome").eq("training_day_id", giornoId);
       const nomiEsistenti = (eserciziEsistenti || []).map((e) => e.nome);
+      if (nomiEsistenti.includes(nomeEsercizio)) continue;
 
-      const { data: eserciziScheda } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome)").eq("giorno_id", gs.id).order("ordine");
-      for (const es of eserciziScheda || []) {
-        const nomeEsercizio = es.esercizi_libreria?.nome || es.nome_libero || "Esercizio";
-        if (nomiEsistenti.includes(nomeEsercizio)) continue;
-        const noteCombinate = [es.tecnica, es.note].filter(Boolean).join(" — ");
-        await supabase.from("training_exercises").insert({
-          client_id: clientId, training_day_id: giornoTarget.id, nome: nomeEsercizio,
-          ordine: nomiEsistenti.length + 1, serie: es.serie ? Number(es.serie) : null, ripetizioni: es.ripetizioni, note: noteCombinate || null,
-        });
-        nomiEsistenti.push(nomeEsercizio);
-        creatiEsercizi++;
-      }
+      const noteParti = [];
+      if (idx.recupero !== -1 && riga[idx.recupero]?.trim()) noteParti.push(`Recupero: ${riga[idx.recupero].trim()}`);
+      if (idx.tecnica !== -1 && riga[idx.tecnica]?.trim()) noteParti.push(riga[idx.tecnica].trim());
+      if (idx.note !== -1 && riga[idx.note]?.trim()) noteParti.push(riga[idx.note].trim());
+
+      await supabase.from("training_exercises").insert({
+        client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio,
+        ordine: nomiEsistenti.length + 1,
+        serie: idx.serie !== -1 && riga[idx.serie]?.trim() ? Number(riga[idx.serie].trim()) : null,
+        ripetizioni: idx.ripetizioni !== -1 ? (riga[idx.ripetizioni] || "").trim() || null : null,
+        note: noteParti.join(" — ") || null,
+      });
+      eserciziCreati++;
     }
     await carica();
     setImportando(false);
-    alert(`Importati ${creatiGiorni} giorno/i e ${creatiEsercizi} esercizio/i dalla scheda.${saltatiGiorni ? ` ${saltatiGiorni} giorno/i saltato/i (limite di 6 giorni nel diario).` : ""}`);
+    alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
   };
 
   if (caricando) return <Spinner />;
@@ -1151,19 +1203,20 @@ function DiarioAllenamento({ clientId, isAdmin }) {
             {g.nome}
           </button>
         ))}
-        {giorni.length < 6 && (
+        {giorni.length < 30 && (
           <button onClick={creaGiorno} className="px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 border border-dashed border-slate-300 text-slate-500">+ Giorno</button>
         )}
       </div>
 
       {isAdmin && (
-        <button onClick={importaGiorniDallaScheda} disabled={importando} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 disabled:opacity-50">
-          {importando ? "Importo..." : "📋 Importa giorni dalla scheda"}
-        </button>
+        <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+          {importando ? "Importo..." : "📥 Importa scheda da file CSV"}
+          <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
+        </label>
       )}
 
       {giorni.length === 0 && (
-        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare{isAdmin ? ", oppure importa dalla scheda" : ""}.</Card>
+        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare{isAdmin ? ", oppure importa un file CSV" : ""}.</Card>
       )}
 
       {giornoAttivo && (
