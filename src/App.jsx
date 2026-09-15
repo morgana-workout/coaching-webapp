@@ -1466,7 +1466,9 @@ function ClientApp({ session }) {
 
   const carica = async () => {
     setCaricando(true);
-    await conTimeout(supabase.rpc("sincronizza_stati_check").catch(() => {}));
+    try {
+      await conTimeout(supabase.rpc("sincronizza_stati_check"));
+    } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
     const { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).single();
     setClient(c);
     if (c) {
@@ -4069,7 +4071,9 @@ function CentroNotificheCoach({ clients, onSelect }) {
   const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); carica(); };
   const segnaRevisionato = async (id) => {
     await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
-    await conTimeout(supabase.rpc("sincronizza_stati_check").catch(() => {}));
+    try {
+      await conTimeout(supabase.rpc("sincronizza_stati_check"));
+    } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
     carica();
   };
 
@@ -4356,7 +4360,9 @@ function AdminApp() {
   const [backupInCorso, setBackupInCorso] = useState(false);
 
   const carica = async () => {
-    await conTimeout(supabase.rpc("sincronizza_stati_check").catch(() => {}));
+    try {
+      await conTimeout(supabase.rpc("sincronizza_stati_check"));
+    } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
     const { data } = await supabase.from("clients").select("*").order("ordine", { ascending: true, nullsFirst: false });
     setClients(data || []);
     setCaricando(false);
