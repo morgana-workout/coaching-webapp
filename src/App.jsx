@@ -1042,6 +1042,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
                       <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
                       <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
                     </div>
+                    {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1">{es.note}</p>}
                   </td>
                   {date.map((d) => {
                     const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
@@ -1068,10 +1069,11 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
   );
 }
 
-function DiarioAllenamento({ clientId }) {
+function DiarioAllenamento({ clientId, isAdmin }) {
   const [giorni, setGiorni] = useState([]);
   const [giornoAttivo, setGiornoAttivo] = useState(null);
   const [caricando, setCaricando] = useState(true);
+  const [importando, setImportando] = useState(false);
 
   const carica = async () => {
     const { data } = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
@@ -1088,6 +1090,49 @@ function DiarioAllenamento({ clientId }) {
     }).select().single();
     await carica();
     if (data) setGiornoAttivo(data.id);
+  };
+
+  const importaGiorniDallaScheda = async () => {
+    setImportando(true);
+    const { data: schede } = await supabase.from("schede").select("*").eq("client_id", clientId).order("creata_il", { ascending: false });
+    const schedaScelta = (schede || []).find((s) => s.stato === "finale") || (schede || [])[0];
+    if (!schedaScelta) { alert("Nessuna scheda trovata per questo cliente."); setImportando(false); return; }
+
+    const { data: giorniScheda } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", schedaScelta.id).order("ordine");
+    if (!giorniScheda || giorniScheda.length === 0) { alert("La scheda non ha giorni."); setImportando(false); return; }
+
+    let giorniAttuali = [...giorni];
+    let creatiGiorni = 0, saltatiGiorni = 0, creatiEsercizi = 0;
+    for (const gs of giorniScheda) {
+      let giornoTarget = giorniAttuali.find((g) => g.nome === gs.nome);
+      if (!giornoTarget) {
+        if (giorniAttuali.length >= 6) { saltatiGiorni++; continue; }
+        const { data: nuovoGiorno } = await supabase.from("training_days").insert({ client_id: clientId, nome: gs.nome, ordine: giorniAttuali.length + 1 }).select().single();
+        if (!nuovoGiorno) continue;
+        giornoTarget = nuovoGiorno;
+        giorniAttuali.push(nuovoGiorno);
+        creatiGiorni++;
+      }
+
+      const { data: eserciziEsistenti } = await supabase.from("training_exercises").select("nome").eq("training_day_id", giornoTarget.id);
+      const nomiEsistenti = (eserciziEsistenti || []).map((e) => e.nome);
+
+      const { data: eserciziScheda } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome)").eq("giorno_id", gs.id).order("ordine");
+      for (const es of eserciziScheda || []) {
+        const nomeEsercizio = es.esercizi_libreria?.nome || es.nome_libero || "Esercizio";
+        if (nomiEsistenti.includes(nomeEsercizio)) continue;
+        const noteCombinate = [es.tecnica, es.note].filter(Boolean).join(" — ");
+        await supabase.from("training_exercises").insert({
+          client_id: clientId, training_day_id: giornoTarget.id, nome: nomeEsercizio,
+          ordine: nomiEsistenti.length + 1, serie: es.serie ? Number(es.serie) : null, ripetizioni: es.ripetizioni, note: noteCombinate || null,
+        });
+        nomiEsistenti.push(nomeEsercizio);
+        creatiEsercizi++;
+      }
+    }
+    await carica();
+    setImportando(false);
+    alert(`Importati ${creatiGiorni} giorno/i e ${creatiEsercizi} esercizio/i dalla scheda.${saltatiGiorni ? ` ${saltatiGiorni} giorno/i saltato/i (limite di 6 giorni nel diario).` : ""}`);
   };
 
   if (caricando) return <Spinner />;
@@ -1111,8 +1156,14 @@ function DiarioAllenamento({ clientId }) {
         )}
       </div>
 
+      {isAdmin && (
+        <button onClick={importaGiorniDallaScheda} disabled={importando} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 disabled:opacity-50">
+          {importando ? "Importo..." : "📋 Importa giorni dalla scheda"}
+        </button>
+      )}
+
       {giorni.length === 0 && (
-        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare.</Card>
+        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare{isAdmin ? ", oppure importa dalla scheda" : ""}.</Card>
       )}
 
       {giornoAttivo && (
@@ -1775,32 +1826,70 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
   );
 }
 
+function StoricoPacchetti({ pacchetti }) {
+  if (pacchetti.length === 0) return null;
+  return (
+    <div className="pt-2">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Pacchetti precedenti</p>
+      <div className="space-y-1">
+        {pacchetti.map((p) => (
+          <Card key={p.id} className="p-3 text-sm text-slate-600">
+            {p.numero_lezioni} lezioni — completato il {p.completato_il ? new Date(p.completato_il).toLocaleDateString("it-IT") : "-"}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LezioniPacchetto({ client, onCompletato }) {
+  const [pacchetti, setPacchetti] = useState([]);
   const [lezioni, setLezioni] = useState([]);
   const [caricando, setCaricando] = useState(true);
-  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
+  const [nuovoNumero, setNuovoNumero] = useState("8");
 
   const carica = async () => {
-    const { data: rows } = await supabase.from("lezioni_svolte").select("*").eq("client_id", client.id).order("numero");
-    let attuali = rows || [];
-    if (incluse > attuali.length) {
-      const mancanti = [];
-      for (let n = attuali.length + 1; n <= incluse; n++) mancanti.push({ client_id: client.id, numero: n, fatta: false });
-      const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
-      attuali = [...attuali, ...(creati || [])].sort((a, b) => a.numero - b.numero);
+    const { data: pacchettiData } = await supabase.from("pacchetti_lezioni").select("*").eq("client_id", client.id).order("creato_il");
+    let pacchettiAttuali = pacchettiData || [];
+
+    // Primo utilizzo: se non esiste ancora nessun pacchetto ma il tab Dati ne ha impostato uno, lo creo ora
+    if (pacchettiAttuali.length === 0 && client.pacchetto_lezioni) {
+      const { data: nuovo } = await supabase.from("pacchetti_lezioni")
+        .insert({ client_id: client.id, numero_lezioni: Number(client.pacchetto_lezioni), stato: "attivo" }).select().single();
+      if (nuovo) pacchettiAttuali = [nuovo];
     }
-    setLezioni(attuali);
+
+    const attivo = pacchettiAttuali.find((p) => p.stato === "attivo");
+    if (attivo) {
+      const { data: righeEsistenti } = await supabase.from("lezioni_svolte").select("*").eq("pacchetto_id", attivo.id).order("numero");
+      let righe = righeEsistenti || [];
+      if (attivo.numero_lezioni > righe.length) {
+        const mancanti = [];
+        for (let n = righe.length + 1; n <= attivo.numero_lezioni; n++) mancanti.push({ client_id: client.id, pacchetto_id: attivo.id, numero: n, fatta: false });
+        const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
+        righe = [...righe, ...(creati || [])].sort((a, b) => a.numero - b.numero);
+      }
+      setLezioni(righe);
+    } else {
+      setLezioni([]);
+    }
+    setPacchetti(pacchettiAttuali);
     setCaricando(false);
   };
-  useEffect(() => { carica(); }, [client.id, incluse]);
+  useEffect(() => { carica(); }, [client.id, client.pacchetto_lezioni]);
+
+  const pacchettoAttivo = pacchetti.find((p) => p.stato === "attivo");
+  const pacchettiCompletati = [...pacchetti.filter((p) => p.stato === "completato")].sort((a, b) => new Date(b.completato_il) - new Date(a.completato_il));
 
   const cambiaFatta = async (id, fatta) => {
     setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, fatta } : l)));
     await supabase.from("lezioni_svolte").update({ fatta }).eq("id", id);
     const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === lezioni.length;
-    if (tutteFatte && lezioni.length > 0 && client.stato_pacchetto !== "scaduto") {
+    if (tutteFatte && lezioni.length > 0 && pacchettoAttivo) {
+      await supabase.from("pacchetti_lezioni").update({ stato: "completato", completato_il: new Date().toISOString() }).eq("id", pacchettoAttivo.id);
       await supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", client.id);
       onCompletato?.();
+      carica();
     }
   };
 
@@ -1809,24 +1898,84 @@ function LezioniPacchetto({ client, onCompletato }) {
   };
 
   const aggiungiLezioneExtra = async () => {
+    if (!pacchettoAttivo) return;
     const prossimoNumero = lezioni.length + 1;
-    const { data } = await supabase.from("lezioni_svolte").insert({ client_id: client.id, numero: prossimoNumero, fatta: false }).select().single();
+    const { data } = await supabase.from("lezioni_svolte").insert({ client_id: client.id, pacchetto_id: pacchettoAttivo.id, numero: prossimoNumero, fatta: false }).select().single();
     if (data) setLezioni((prev) => [...prev, data]);
   };
+
+  const modificaNumeroPacchetto = async (valoreInserito) => {
+    const nuovoNumero = Number(valoreInserito);
+    if (!pacchettoAttivo || !nuovoNumero || nuovoNumero < 1 || nuovoNumero === pacchettoAttivo.numero_lezioni) return;
+    const svolteCount = lezioni.filter((l) => l.fatta).length;
+    if (nuovoNumero < svolteCount) {
+      alert(`Non puoi impostare un numero inferiore alle lezioni già svolte (${svolteCount}).`);
+      return;
+    }
+    await supabase.from("pacchetti_lezioni").update({ numero_lezioni: nuovoNumero }).eq("id", pacchettoAttivo.id);
+    await supabase.from("clients").update({ pacchetto_lezioni: String(nuovoNumero) }).eq("id", client.id);
+
+    if (nuovoNumero > lezioni.length) {
+      const mancanti = [];
+      for (let n = lezioni.length + 1; n <= nuovoNumero; n++) mancanti.push({ client_id: client.id, pacchetto_id: pacchettoAttivo.id, numero: n, fatta: false });
+      const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
+      setLezioni((prev) => [...prev, ...(creati || [])].sort((a, b) => a.numero - b.numero));
+    } else if (nuovoNumero < lezioni.length) {
+      // Rimuove solo le lezioni non ancora svolte, partendo dal fondo — mai quelle già fatte
+      const daRimuovere = lezioni.filter((l) => !l.fatta).sort((a, b) => b.numero - a.numero).slice(0, lezioni.length - nuovoNumero);
+      await supabase.from("lezioni_svolte").delete().in("id", daRimuovere.map((l) => l.id));
+      setLezioni((prev) => prev.filter((l) => !daRimuovere.some((d) => d.id === l.id)));
+    }
+    setPacchetti((prev) => prev.map((p) => (p.id === pacchettoAttivo.id ? { ...p, numero_lezioni: nuovoNumero } : p)));
+  };
+
+  const iniziaNuovoPacchetto = async () => {
+    const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: client.id, numero_lezioni: Number(nuovoNumero), stato: "attivo" }).select().single();
+    if (nuovo) {
+      await supabase.from("clients").update({ pacchetto_lezioni: nuovoNumero, stato_pacchetto: "attivo" }).eq("id", client.id);
+      await carica();
+    }
+  };
+
+  if (caricando) return <Spinner />;
+
+  const opzioniPacchetto = ["1", "4", "8", "10", "24", "48"];
+
+  if (!pacchettoAttivo) {
+    return (
+      <div className="space-y-3">
+        <Card className="p-6 space-y-3">
+          <p className="text-center text-slate-400 text-sm">
+            {pacchettiCompletati.length > 0 ? "Nessun pacchetto attivo — l'ultimo è stato completato." : "Imposta prima un pacchetto lezioni nel tab Dati."}
+          </p>
+          {pacchettiCompletati.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select value={nuovoNumero} onChange={(e) => setNuovoNumero(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                {opzioniPacchetto.map((n) => <option key={n} value={n}>{n} lezioni</option>)}
+              </select>
+              <button onClick={iniziaNuovoPacchetto} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">Inizia nuovo pacchetto</button>
+            </div>
+          )}
+        </Card>
+        <StoricoPacchetti pacchetti={pacchettiCompletati} />
+      </div>
+    );
+  }
 
   const svolte = lezioni.filter((l) => l.fatta).length;
   const totale = lezioni.length;
 
-  if (caricando) return <Spinner />;
-  if (!incluse) return <Card className="p-6 text-center text-slate-400 text-sm">Imposta prima un pacchetto lezioni nel tab Dati.</Card>;
-
   return (
     <div className="space-y-3">
       <Card className="p-4">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Pacchetto</p>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Pacchetto attuale</p>
+          <select defaultValue={pacchettoAttivo.numero_lezioni} onChange={(e) => modificaNumeroPacchetto(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 text-xs">
+            {["1", "4", "8", "10", "24", "48"].map((n) => <option key={n} value={n}>{n} lezioni</option>)}
+          </select>
+        </div>
         <p className="text-2xl font-semibold text-slate-800">{svolte} / {totale} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
-        {totale > incluse && <p className="text-slate-400 text-xs mt-1">Include {totale - incluse} lezione/i extra aggiunta/e manualmente</p>}
-        {svolte === totale && totale > 0 && <p className="text-amber-600 text-xs mt-1">Pacchetto completo — stato impostato automaticamente su "scaduto".</p>}
+        {totale > pacchettoAttivo.numero_lezioni && <p className="text-slate-400 text-xs mt-1">Include {totale - pacchettoAttivo.numero_lezioni} lezione/i extra aggiunta/e manualmente</p>}
       </Card>
 
       <div className="space-y-2">
@@ -1838,6 +1987,8 @@ function LezioniPacchetto({ client, onCompletato }) {
         + Aggiungi lezione extra (es. per recuperare una cancellazione)
       </button>
       <p className="text-slate-400 text-xs px-1">Ricordati di toccare "Salva" dopo aver scritto data e ora — solo così la lezione compare anche nel calendario coach.</p>
+
+      <StoricoPacchetti pacchetti={pacchettiCompletati} />
     </div>
   );
 }
@@ -3176,6 +3327,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                 <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
                 <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
               </select>
+              <p className="text-slate-400 text-[11px] mt-1">Vale solo per impostare il primo pacchetto. Per aggiungere lezioni a un pacchetto già avviato o iniziarne uno nuovo dopo il completamento, usa il tab "Lezioni".</p>
             </div>
           )}
           {(client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido") && (
@@ -3325,7 +3477,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} titolo="Progressi e storico check" />}
 
-      {tab === "allenamento" && <DiarioAllenamento clientId={clientId} />}
+      {tab === "allenamento" && <DiarioAllenamento clientId={clientId} isAdmin />}
 
       {tab === "nutrizione" && (
         <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
