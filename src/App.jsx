@@ -922,8 +922,8 @@ function EsercizioNome({ id, nome, onSaved }) {
     onSaved();
   };
   return (
-    <input value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva}
-      className="w-full min-w-0 border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+    <textarea value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva} rows={2}
+      className="w-full min-w-0 border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 resize-none leading-snug" />
   );
 }
 
@@ -1042,6 +1042,11 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
                       <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
                       <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
                     </div>
+                    {(es.serie || es.ripetizioni) && (
+                      <p className="text-slate-600 text-[11px] font-medium mt-0.5">
+                        {es.serie ? `${es.serie} serie` : ""}{es.serie && es.ripetizioni ? " x " : ""}{es.ripetizioni || ""}
+                      </p>
+                    )}
                     {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
                   </td>
                   {date.map((d) => {
