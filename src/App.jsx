@@ -127,7 +127,7 @@ function Spinner() {
 const STATO_LABEL = {
   programmato: { t: "Programmato", c: "bg-sky-100 text-sky-700" },
   da_compilare: { t: "Da compilare", c: "bg-amber-100 text-amber-700" },
-  ricevuto: { t: "Ricevuto", c: "bg-violet-100 text-violet-700" },
+  ricevuto: { t: "In revisione", c: "bg-violet-100 text-violet-700" },
   revisionato: { t: "Revisionato", c: "bg-emerald-100 text-emerald-700" },
 };
 function StatoBadge({ stato }) {
@@ -1466,6 +1466,7 @@ function ClientApp({ session }) {
 
   const carica = async () => {
     setCaricando(true);
+    await supabase.rpc("sincronizza_stati_check").catch(() => {});
     const { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).single();
     setClient(c);
     if (c) {
@@ -3371,7 +3372,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const tabs = [
     { key: "riepilogo", label: "Riepilogo" },
     { key: "dati", label: "Dati" },
-    ...(isOnline ? [{ key: "check", label: "Check" }, { key: "scheda", label: "Scheda" }] : []),
+    ...(isOnline ? [{ key: "check", label: "Check" }] : []), // tab "Scheda" congelato temporaneamente (workflow spostato su CSV esterno)
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
     { key: "progressi", label: "Progressi" },
     { key: "allenamento", label: "Allenamento" },
@@ -4066,7 +4067,11 @@ function CentroNotificheCoach({ clients, onSelect }) {
 
   const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); carica(); };
   const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); carica(); };
-  const segnaRevisionato = async (id) => { await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id); carica(); };
+  const segnaRevisionato = async (id) => {
+    await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
+    await supabase.rpc("sincronizza_stati_check").catch(() => {});
+    carica();
+  };
 
   if (caricando) return <Spinner />;
 
@@ -4347,6 +4352,7 @@ function AdminApp() {
   const [backupInCorso, setBackupInCorso] = useState(false);
 
   const carica = async () => {
+    await supabase.rpc("sincronizza_stati_check").catch(() => {});
     const { data } = await supabase.from("clients").select("*").order("ordine", { ascending: true, nullsFirst: false });
     setClients(data || []);
     setCaricando(false);
