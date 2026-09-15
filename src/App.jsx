@@ -1466,7 +1466,7 @@ function ClientApp({ session }) {
 
   const carica = async () => {
     setCaricando(true);
-    await supabase.rpc("sincronizza_stati_check").catch(() => {});
+    await conTimeout(supabase.rpc("sincronizza_stati_check").catch(() => {}));
     const { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).single();
     setClient(c);
     if (c) {
@@ -4069,7 +4069,7 @@ function CentroNotificheCoach({ clients, onSelect }) {
   const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); carica(); };
   const segnaRevisionato = async (id) => {
     await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
-    await supabase.rpc("sincronizza_stati_check").catch(() => {});
+    await conTimeout(supabase.rpc("sincronizza_stati_check").catch(() => {}));
     carica();
   };
 
@@ -4317,6 +4317,10 @@ function AdminList({ clients, onSelect, onChanged }) {
   );
 }
 
+function conTimeout(promise, ms = 4000) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+}
+
 function scaricaFile(nomeFile, contenuto, tipo) {
   const blob = new Blob([contenuto], { type: tipo });
   const url = URL.createObjectURL(blob);
@@ -4352,7 +4356,7 @@ function AdminApp() {
   const [backupInCorso, setBackupInCorso] = useState(false);
 
   const carica = async () => {
-    await supabase.rpc("sincronizza_stati_check").catch(() => {});
+    await conTimeout(supabase.rpc("sincronizza_stati_check").catch(() => {}));
     const { data } = await supabase.from("clients").select("*").order("ordine", { ascending: true, nullsFirst: false });
     setClients(data || []);
     setCaricando(false);
