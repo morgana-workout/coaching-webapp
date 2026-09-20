@@ -828,7 +828,13 @@ function ClientProgress({ checkins, altezza, sesso, eta, titolo = "I tuoi progre
   );
 }
 
-function StoricoNutrizione({ storico }) {
+function formattaPeriodo(r) {
+  const ini = r.data_inizio ? r.data_inizio.split("-").reverse().join("/") : r.data_aggiornamento?.split("-").reverse().join("/");
+  const fine = r.data_fine ? r.data_fine.split("-").reverse().join("/") : null;
+  return fine ? `${ini} → ${fine}` : `dal ${ini}`;
+}
+
+function StoricoNutrizione({ storico, isAdmin, onModifica }) {
   const [vista, setVista] = useState("aggiornamenti");
   const conKcal = (storico || []).filter((r) => r.kcal != null && r.data_aggiornamento);
   if (conKcal.length === 0) return null;
@@ -874,13 +880,17 @@ function StoricoNutrizione({ storico }) {
       )}
       {vista === "aggiornamenti" ? (
         <ul className="space-y-1.5 max-h-64 overflow-y-auto">
-          {[...conKcal].reverse().map((r) => (
-            <li key={r.id} className="flex justify-between items-center text-sm border-b border-slate-100 pb-1.5">
-              <span className="text-slate-500">{r.data_aggiornamento.split("-").reverse().join("/")}</span>
-              <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
-              <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
-            </li>
-          ))}
+          {[...conKcal].reverse().map((r) => {
+            const Riga = isAdmin ? "button" : "div";
+            return (
+              <Riga key={r.id} onClick={isAdmin ? () => onModifica?.(r) : undefined}
+                className={`w-full flex justify-between items-center text-sm border-b border-slate-100 pb-1.5 ${isAdmin ? "text-left hover:bg-slate-50 rounded px-1 -mx-1" : ""}`}>
+                <span className="text-slate-500">{formattaPeriodo(r)}</span>
+                <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
+                <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
+              </Riga>
+            );
+          })}
         </ul>
       ) : (
         <ul className="space-y-1.5">
@@ -910,7 +920,7 @@ function ClientNutrizione({ piano, storico }) {
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Nutrizione</h1>
-        <p className="text-slate-500 text-sm mt-1">Valori indicativi, aggiornati il {piano.data_aggiornamento}</p>
+        <p className="text-slate-500 text-sm mt-1">Valori indicativi, {formattaPeriodo(piano)}</p>
       </div>
       <div className="rounded-2xl border border-slate-700 shadow-sm p-5 bg-slate-800">
         <div className="flex items-center gap-2 text-slate-300 text-xs uppercase tracking-wide font-medium mb-1"><Apple size={14} /> Kcal indicative giornaliere</div>
@@ -1775,12 +1785,26 @@ function NuovaNotaForm({ clientId, onSalvato, onAnnulla }) {
   );
 }
 
-function NutrizioneForm({ clientId, ultimo, onSalvato }) {
+function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifica }) {
+  const oggi = new Date().toISOString().slice(0, 10);
+  const sorgente = modifica || ultimo;
   const [f, setF] = useState({
-    kcal: ultimo?.kcal || "", proteine_g: ultimo?.proteine_g || "", carboidrati_g: ultimo?.carboidrati_g || "",
-    grassi_g: ultimo?.grassi_g || "", note: ultimo?.note || "",
+    kcal: sorgente?.kcal || "", proteine_g: sorgente?.proteine_g || "", carboidrati_g: sorgente?.carboidrati_g || "",
+    grassi_g: sorgente?.grassi_g || "", note: modifica ? (modifica.note || "") : "",
+    data_inizio: modifica ? (modifica.data_inizio || "") : oggi,
+    data_fine: modifica ? (modifica.data_fine || "") : "",
   });
   const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    setF({
+      kcal: sorgente?.kcal || "", proteine_g: sorgente?.proteine_g || "", carboidrati_g: sorgente?.carboidrati_g || "",
+      grassi_g: sorgente?.grassi_g || "", note: modifica ? (modifica.note || "") : "",
+      data_inizio: modifica ? (modifica.data_inizio || "") : oggi,
+      data_fine: modifica ? (modifica.data_fine || "") : "",
+    });
+  }, [modifica?.id]);
+
   const campo = (label, key) => (
     <div><label className="text-xs text-slate-500">{label}</label>
       <input type="number" value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
@@ -1788,17 +1812,38 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
   );
   const salva = async () => {
     setSalvando(true);
-    await supabase.from("nutrition_plans").insert({
-      client_id: clientId, data_aggiornamento: new Date().toISOString().slice(0, 10),
+    const payload = {
       kcal: f.kcal || null, proteine_g: f.proteine_g || null, carboidrati_g: f.carboidrati_g || null,
       grassi_g: f.grassi_g || null, note: f.note || null,
-    });
+      data_inizio: f.data_inizio || null, data_fine: f.data_fine || null,
+    };
+    if (modifica) {
+      await supabase.from("nutrition_plans").update(payload).eq("id", modifica.id);
+    } else {
+      await supabase.from("nutrition_plans").insert({
+        client_id: clientId, data_aggiornamento: oggi, ...payload,
+      });
+    }
     setSalvando(false);
     onSalvato();
+    if (modifica) onAnnullaModifica?.();
   };
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Valori nutrizionali indicativi</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-700">{modifica ? "Modifica ciclo alimentare" : "Nuovo ciclo alimentare"}</p>
+        {modifica && <button onClick={onAnnullaModifica} className="text-xs text-slate-400 hover:text-slate-600">Annulla modifica</button>}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Inizio ciclo</label>
+          <InputData value={f.data_inizio} onChange={(e) => setF({ ...f, data_inizio: e.target.value })} className="mt-1" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Fine ciclo (facoltativa)</label>
+          <InputData value={f.data_fine} onChange={(e) => setF({ ...f, data_fine: e.target.value })} className="mt-1" />
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         {campo("Kcal", "kcal")}
         {campo("Proteine (g)", "proteine_g")}
@@ -1806,8 +1851,10 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
         {campo("Grassi (g)", "grassi_g")}
       </div>
       <textarea placeholder="Note per la cliente" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva valori"}</button>
-      {ultimo && <p className="text-slate-400 text-xs">Ultimo aggiornamento: {ultimo.data_aggiornamento}</p>}
+      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
+        {salvando ? "Salvo..." : modifica ? "Salva modifiche" : "Salva nuovo ciclo"}
+      </button>
+      {!modifica && ultimo && <p className="text-slate-400 text-xs">Ultimo aggiornamento: {ultimo.data_aggiornamento}</p>}
     </Card>
   );
 }
@@ -3470,6 +3517,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
   const [checkInModifica, setCheckInModifica] = useState(null);
   const [mostraNotaForm, setMostraNotaForm] = useState(false);
+  const [nutrizioneModifica, setNutrizioneModifica] = useState(null);
 
   const carica = async () => {
     const { data: c } = await supabase.from("clients").select("*").eq("id", clientId).single();
@@ -3744,8 +3792,9 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
       {tab === "nutrizione" && (
         <div className="space-y-3">
-          <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
-          <StoricoNutrizione storico={nutrizioneStorico} />
+          <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica}
+            modifica={nutrizioneModifica} onAnnullaModifica={() => setNutrizioneModifica(null)} />
+          <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica} />
         </div>
       )}
 
