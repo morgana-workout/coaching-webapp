@@ -1735,7 +1735,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
       )}
       <textarea placeholder="Note" value={f.note_cliente} onChange={(e) => setF({ ...f, note_cliente: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div>
-        <label className="text-xs text-slate-500 block mb-1">Foto progressi (facoltative)</label>
+        <label className="text-xs text-slate-500 block mb-1">Foto progressi</label>
         <FotoInputs files={files} setFiles={setFiles} />
       </div>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
