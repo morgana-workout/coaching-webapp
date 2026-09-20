@@ -4111,11 +4111,10 @@ function CalendarioAgenda({ clients, onSelect }) {
 
   const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
 
-  const lunediDi = (ds) => {
+  const domenicaDi = (ds) => {
+    // La settimana del promemoria messaggi inizia (e si azzera) la domenica.
     const d = new Date(ds + "T00:00:00");
-    const giorno = d.getDay();
-    const diff = giorno === 0 ? -6 : 1 - giorno;
-    d.setDate(d.getDate() + diff);
+    d.setDate(d.getDate() - d.getDay());
     return d.toISOString().slice(0, 10);
   };
 
@@ -4154,13 +4153,17 @@ function CalendarioAgenda({ clients, onSelect }) {
     }
   });
 
-  // Fasce fisse dedicate ai messaggi clienti, ogni giorno del mese visualizzato
+  // Fasce fisse dedicate ai messaggi clienti, dal lunedì al venerdì (no weekend)
   for (let g = 1; g <= giorniNelMese; g++) {
     const ds = dataStr(g);
-    eventi.push({ data: ds, ora: "08:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (08:00–09:00)", clientId: null });
-    eventi.push({ data: ds, ora: "18:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (18:00–19:00)", clientId: null });
-    if (new Date(ds + "T00:00:00").getDay() === 5) {
-      const settimana = lunediDi(ds);
+    const giornoSettimana = new Date(ds + "T00:00:00").getDay(); // 0 = domenica ... 6 = sabato
+    const feriale = giornoSettimana >= 1 && giornoSettimana <= 5;
+    if (feriale) {
+      eventi.push({ data: ds, ora: "08:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (08:00–09:00)", clientId: null });
+      eventi.push({ data: ds, ora: "18:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (18:00–19:00)", clientId: null });
+    }
+    if (giornoSettimana === 5) {
+      const settimana = domenicaDi(ds);
       const inviateSettimana = new Set(promemoriaRighe.filter((r) => r.settimana === settimana && r.inviato).map((r) => r.client_id));
       const mancanti = clients.filter((c) => !inviateSettimana.has(c.id));
       eventi.push({
@@ -4342,17 +4345,18 @@ function InviaNotaForm({ clients, onFatto }) {
   );
 }
 
-function lunediSettimanaCorrente() {
+function domenicaSettimanaCorrente() {
+  // Restituisce la domenica di inizio della settimana corrente: il promemoria messaggi
+  // si azzera esattamente alla domenica (non al lunedì).
   const oggi = new Date();
-  const giorno = oggi.getDay(); // 0 = domenica, 1 = lunedì, ... 6 = sabato
-  const diff = giorno === 0 ? -6 : 1 - giorno;
-  const lunedi = new Date(oggi);
-  lunedi.setDate(oggi.getDate() + diff);
-  return lunedi.toISOString().slice(0, 10);
+  const diff = -oggi.getDay(); // getDay(): 0 = domenica ... 6 = sabato
+  const domenica = new Date(oggi);
+  domenica.setDate(oggi.getDate() + diff);
+  return domenica.toISOString().slice(0, 10);
 }
 
 function PromemoriaMessaggi({ clients }) {
-  const settimana = useMemo(() => lunediSettimanaCorrente(), []);
+  const settimana = useMemo(() => domenicaSettimanaCorrente(), []);
   const [stato, setStato] = useState({});
   const [caricando, setCaricando] = useState(true);
 
