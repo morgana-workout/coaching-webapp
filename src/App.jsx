@@ -3948,16 +3948,22 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500" };
+const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500" };
+const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
 
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
+  const [f, setF] = useState({
+    client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10),
+    ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "", titolo: "",
+  });
   const [salvando, setSalvando] = useState(false);
 
   const salva = async () => {
-    if (!f.client_id) return;
+    if (f.tipo === "personale" ? !f.titolo.trim() : !f.client_id) return;
     setSalvando(true);
-    const payload = { ...f, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
+    const payload = f.tipo === "personale"
+      ? { tipo: "personale", data: f.data, ora: f.ora || null, titolo: f.titolo.trim(), nota: f.nota || null, stato: "confermato" }
+      : { client_id: f.client_id, tipo: f.tipo, data: f.data, ora: f.ora || null, nota: f.nota || null, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
     const { data: creato } = await supabase.from("calendar_events").insert(payload).select().single();
     if (creato && f.tipo === "lezione") await collegaLezionePacchetto(f.client_id, creato);
     setSalvando(false);
@@ -3967,16 +3973,30 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">Nuovo evento</p>
-      <div>
-        <label className="text-xs text-slate-500">Cliente</label>
-        <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
-        </select>
-      </div>
       <div className="flex gap-2">
         <button onClick={() => setF({ ...f, tipo: "lezione" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "lezione" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Lezione 1:1</button>
         <button onClick={() => setF({ ...f, tipo: "call" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "call" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600"}`}>Call</button>
+        <button onClick={() => setF({ ...f, tipo: "personale" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "personale" ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"}`}>Personale/extra</button>
       </div>
+      {f.tipo === "personale" ? (
+        <div>
+          <label className="text-xs text-slate-500">Titolo attività</label>
+          <input value={f.titolo} onChange={(e) => setF({ ...f, titolo: e.target.value })} placeholder="Es. Allenamento"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {SUGGERIMENTI_PERSONALE.map((s) => (
+              <button key={s} onClick={() => setF({ ...f, titolo: s })} className="text-[11px] bg-slate-100 text-slate-600 rounded-full px-2.5 py-1">{s}</button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <label className="text-xs text-slate-500">Cliente</label>
+          <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+          </select>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
         <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -4001,12 +4021,19 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
 }
 
 function EditEventoForm({ evento, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ data: evento.data, ora: evento.ora ? evento.ora.slice(0, 5) : "", luogo: evento.luogo || "", stato: evento.stato });
+  const [f, setF] = useState({
+    data: evento.data, ora: evento.ora ? evento.ora.slice(0, 5) : "", luogo: evento.luogo || "",
+    stato: evento.stato, titolo: evento.titolo || "", nota: evento.nota || "",
+  });
   const [salvando, setSalvando] = useState(false);
+  const isPersonale = evento.tipo === "personale";
 
   const salva = async () => {
     setSalvando(true);
-    await supabase.from("calendar_events").update({ data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato }).eq("id", evento.id);
+    const payload = isPersonale
+      ? { data: f.data, ora: f.ora || null, titolo: f.titolo.trim() || evento.titolo, nota: f.nota || null }
+      : { data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato };
+    await supabase.from("calendar_events").update(payload).eq("id", evento.id);
     setSalvando(false);
     onSalvato();
   };
@@ -4020,7 +4047,13 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : "Call"})</p>
+      <p className="text-sm font-medium text-slate-700">
+        Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : evento.tipo === "call" ? "Call" : "Personale/extra"})
+      </p>
+      {isPersonale && (
+        <input value={f.titolo} onChange={(e) => setF({ ...f, titolo: e.target.value })} placeholder="Titolo attività"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
         <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -4034,12 +4067,16 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
           {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
       )}
-      <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        <option value="richiesta">Da confermare</option>
-        <option value="confermato">Confermato</option>
-        <option value="annullata">Annullato</option>
-        <option value="persa">Persa</option>
-      </select>
+      {isPersonale ? (
+        <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      ) : (
+        <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="richiesta">Da confermare</option>
+          <option value="confermato">Confermato</option>
+          <option value="annullata">Annullato</option>
+          <option value="persa">Persa</option>
+        </select>
+      )}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva modifiche"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
@@ -4070,6 +4107,13 @@ function CalendarioAgenda({ clients, onSelect }) {
     if (c.data_scadenza && c.stato_pacchetto !== "scaduto") eventi.push({ data: c.data_scadenza, ora: null, tipo: "scadenza", nome: `${c.nome} ${c.cognome}`, label: "Pacchetto in scadenza", clientId: c.id });
   });
   eventiCalendario.forEach((e) => {
+    if (e.tipo === "personale") {
+      const pezzi = [];
+      if (e.stato === "annullata") pezzi.push("annullata");
+      if (e.nota) pezzi.push(e.nota);
+      eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: "personale", nome: e.titolo || "Attività personale", label: pezzi.join(" — "), clientId: null });
+      return;
+    }
     const nomeCliente = e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente";
     const pezzi = [e.tipo === "lezione" ? "Lezione 1:1" : "Call"];
     if (e.luogo) pezzi.push(e.luogo);
@@ -4109,7 +4153,7 @@ function CalendarioAgenda({ clients, onSelect }) {
   return (
     <div className="space-y-3">
       {!mostraForm && (
-        <button onClick={() => setMostraForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi lezione o call</button>
+        <button onClick={() => setMostraForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi evento (lezione, call o personale)</button>
       )}
       {mostraForm && <NuovoEventoForm clients={clients} onAnnulla={() => setMostraForm(false)} onSalvato={() => { setMostraForm(false); caricaEventi(); }} />}
 
@@ -4145,7 +4189,15 @@ function CalendarioAgenda({ clients, onSelect }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Scadenza</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" /> Lezione 1:1</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Personale/extra</span>
       </div>
+
+      <Card className="p-3 flex items-center gap-2 bg-slate-50 border-slate-100">
+        <Clock size={15} className="text-slate-400 flex-shrink-0" />
+        <p className="text-xs text-slate-500">Fasce dedicate ai messaggi clienti, ogni giorno: <span className="font-medium text-slate-600">08:00–09:00</span> e <span className="font-medium text-slate-600">18:00–19:00</span></p>
+      </Card>
+
+      <PromemoriaVenerdi clients={clients} />
 
       <div className="space-y-2 pt-2">
         {giornoFiltro && (
@@ -4158,18 +4210,29 @@ function CalendarioAgenda({ clients, onSelect }) {
         {eventiVisibili.length === 0 && <p className="text-slate-400 text-sm px-1">Nessun evento {giornoFiltro ? "in questo giorno" : "in programma"}.</p>}
         {eventiVisibili.map((e, i) => (
           <Card key={i} className="p-3 flex items-center gap-3">
-            <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
-              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
-              {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-700 ">{e.nome}</p>
-                <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+            {e.clientId ? (
+              <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+                {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 ">{e.nome}</p>
+                  <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                </div>
+              </button>
+            ) : (
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+                {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 ">{e.nome}</p>
+                  <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                </div>
               </div>
-            </button>
+            )}
             {e.id && (
               <button onClick={() => setEventoInModifica(e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
             )}
-            <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+            {e.clientId && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
           </Card>
         ))}
       </div>
@@ -4251,6 +4314,36 @@ function lunediSettimanaCorrente() {
   const lunedi = new Date(oggi);
   lunedi.setDate(oggi.getDate() + diff);
   return lunedi.toISOString().slice(0, 10);
+}
+
+function PromemoriaVenerdi({ clients }) {
+  const giornoSett = new Date().getDay(); // 0 domenica ... 6 sabato
+  const mostra = giornoSett === 5 || giornoSett === 6 || giornoSett === 0; // ven, sab, dom
+  const settimana = useMemo(() => lunediSettimanaCorrente(), []);
+  const [stato, setStato] = useState({});
+  const [caricando, setCaricando] = useState(true);
+
+  useEffect(() => {
+    if (!mostra) { setCaricando(false); return; }
+    (async () => {
+      const { data } = await supabase.from("promemoria_messaggi").select("client_id, inviato").eq("settimana", settimana);
+      const map = {};
+      (data || []).forEach((r) => { map[r.client_id] = r.inviato; });
+      setStato(map);
+      setCaricando(false);
+    })();
+  }, [mostra, settimana]);
+
+  if (!mostra || caricando) return null;
+  const mancanti = clients.filter((c) => !stato[c.id]);
+  if (mancanti.length === 0) return null;
+
+  return (
+    <Card className="p-4 bg-amber-50 border-amber-100 space-y-1.5">
+      <p className="text-sm font-medium text-amber-800">Promemoria di fine settimana</p>
+      <p className="text-xs text-amber-700">{mancanti.length} client{mancanti.length === 1 ? "e" : "i"} ancora da contattare questa settimana: {mancanti.map((c) => `${c.nome} ${c.cognome}`).join(", ")}</p>
+    </Card>
+  );
 }
 
 function PromemoriaMessaggi({ clients }) {
