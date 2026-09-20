@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -518,6 +518,10 @@ function ClientCheckin({ client, onInviato }) {
   );
 
   const invia = async () => {
+    if (!files.frontale || !files.laterale || !files.posteriore || !files.extra) {
+      setErrore("Le 4 foto (frontale, laterale destra, laterale sinistra, posteriore) sono obbligatorie.");
+      return;
+    }
     setInviando(true);
     setErrore("");
     const dataCheck = new Date().toISOString().slice(0, 10);
@@ -611,7 +615,7 @@ function ClientCheckin({ client, onInviato }) {
         {slider("Aderenza all'allenamento", "aderenza_allenamento")}
       </Card>
       <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi <span className="text-rose-400 normal-case font-normal">(obbligatorie)</span></p>
         <FotoInputs files={files} setFiles={setFiles} />
       </Card>
       <Card className="p-4 space-y-2">
@@ -1557,7 +1561,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
     setSalvando(true);
     setErrore("");
     const payload = { data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
-    if (!checkin) payload.client_id = clientId;
+    if (!checkin) { payload.client_id = clientId; payload.stato = "ricevuto"; }
     for (const k of ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
     }
@@ -1575,6 +1579,11 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
       await supabase.from("checkins").update(payload).eq("id", checkin.id);
     } else {
       await supabase.from("checkins").insert(payload);
+      // Anche se il check lo inserisce la coach, lo stato/il prossimo check si aggiornano
+      // esattamente come se lo avesse inviato la cliente stessa.
+      try {
+        await conTimeout(supabase.rpc("aggiorna_prossimo_check", { check_date: f.data_check, p_client_id: clientId }));
+      } catch (e) { /* non blocca mai il salvataggio anche in caso di errore */ }
     }
     setSalvando(false);
     onSalvato();
@@ -4052,6 +4061,80 @@ function InviaNotaForm({ clients, onFatto }) {
   );
 }
 
+function lunediSettimanaCorrente() {
+  const oggi = new Date();
+  const giorno = oggi.getDay(); // 0 = domenica, 1 = lunedì, ... 6 = sabato
+  const diff = giorno === 0 ? -6 : 1 - giorno;
+  const lunedi = new Date(oggi);
+  lunedi.setDate(oggi.getDate() + diff);
+  return lunedi.toISOString().slice(0, 10);
+}
+
+function PromemoriaMessaggi({ clients }) {
+  const settimana = useMemo(() => lunediSettimanaCorrente(), []);
+  const [stato, setStato] = useState({});
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data } = await supabase.from("promemoria_messaggi").select("client_id, inviato").eq("settimana", settimana);
+    const map = {};
+    (data || []).forEach((r) => { map[r.client_id] = r.inviato; });
+    setStato(map);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [settimana]);
+
+  const toggle = async (clientId, attuale) => {
+    const nuovo = !attuale;
+    setStato((s) => ({ ...s, [clientId]: nuovo }));
+    await supabase.from("promemoria_messaggi").upsert(
+      { client_id: clientId, settimana, inviato: nuovo, data_invio: nuovo ? new Date().toISOString() : null },
+      { onConflict: "client_id,settimana" }
+    );
+  };
+
+  if (caricando) return <Spinner />;
+
+  const bulb = clients.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido");
+  const online = clients.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido");
+
+  const Gruppo = ({ titolo, sottotitolo, elenco }) => {
+    const mancanti = elenco.filter((c) => !stato[c.id]).length;
+    return (
+      <div>
+        <div className="flex items-baseline justify-between px-1 mb-2">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{titolo}</p>
+          <span className="text-[11px] text-slate-400">{sottotitolo}</span>
+        </div>
+        <Card className="p-1 divide-y divide-slate-100">
+          {elenco.length === 0 && <p className="text-center text-slate-400 text-sm py-3">Nessuna cliente in questo gruppo.</p>}
+          {elenco.map((c) => {
+            const fatto = !!stato[c.id];
+            return (
+              <button key={c.id} onClick={() => toggle(c.id, fatto)} className="w-full flex items-center gap-3 px-2 py-2.5 text-left">
+                <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-emerald-500 border-emerald-500" : "border-slate-300"}`}>
+                  {fatto && <Check size={13} className="text-white" />}
+                </span>
+                <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}>{c.nome} {c.cognome}</span>
+                {!fatto && <span className="text-[10px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
+              </button>
+            );
+          })}
+        </Card>
+        {mancanti > 0 && <p className="text-[11px] text-amber-600 mt-1 px-1">{mancanti} da contattare questa settimana</p>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Promemoria messaggio settimanale</p>
+      <Gruppo titolo="Bulb / in presenza" sottotitolo="domenica sera" elenco={bulb} />
+      <Gruppo titolo="Coaching online" sottotitolo="durante la settimana" elenco={online} />
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, onSelect }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
@@ -4081,6 +4164,8 @@ function CentroNotificheCoach({ clients, onSelect }) {
 
   return (
     <div className="space-y-5">
+      <PromemoriaMessaggi clients={clients} />
+
       <div>
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Richieste lezione/call ({richieste.length})</p>
         <div className="space-y-2">
