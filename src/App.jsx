@@ -3948,7 +3948,8 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500" };
+const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-orange-500" };
+const ORDINE_TIPO_DOT = { check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
 const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
 
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
@@ -4092,14 +4093,31 @@ function CalendarioAgenda({ clients, onSelect }) {
   const [anno, setAnno] = useState(oggi.getFullYear());
   const [giornoFiltro, setGiornoFiltro] = useState(null);
   const [eventiCalendario, setEventiCalendario] = useState([]);
+  const [promemoriaRighe, setPromemoriaRighe] = useState([]);
   const [mostraForm, setMostraForm] = useState(false);
   const [eventoInModifica, setEventoInModifica] = useState(null);
 
   const caricaEventi = async () => {
     const { data } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").order("data");
     setEventiCalendario(data || []);
+    const { data: pr } = await supabase.from("promemoria_messaggi").select("client_id, settimana, inviato");
+    setPromemoriaRighe(pr || []);
   };
   useEffect(() => { caricaEventi(); }, []);
+
+  const primoDelMese = new Date(anno, mese, 1);
+  const giorniNelMese = new Date(anno, mese + 1, 0).getDate();
+  const offset = (primoDelMese.getDay() + 6) % 7;
+
+  const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
+
+  const lunediDi = (ds) => {
+    const d = new Date(ds + "T00:00:00");
+    const giorno = d.getDay();
+    const diff = giorno === 0 ? -6 : 1 - giorno;
+    d.setDate(d.getDate() + diff);
+    return d.toISOString().slice(0, 10);
+  };
 
   const eventi = [];
   clients.forEach((c) => {
@@ -4124,13 +4142,35 @@ function CalendarioAgenda({ clients, onSelect }) {
     if (e.extra_euro) pezzi.push(`+${e.extra_euro}€ da riscuotere`);
     if (e.nota) pezzi.push(e.nota);
     eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
+
+    // Promemoria automatico 48h prima di una lezione in presenza: ricordati di scrivere alla cliente
+    if (e.tipo === "lezione" && e.stato !== "annullata" && e.stato !== "persa") {
+      const dataPromemoria = addGiorni(e.data, -2);
+      eventi.push({
+        data: dataPromemoria, ora: null, tipo: "promemoria", nome: `Scrivi a ${nomeCliente}`,
+        label: `Ricorda la lezione del ${e.data.split("-").reverse().join("/")}${e.ora ? " alle " + e.ora.slice(0, 5) : ""}`,
+        clientId: e.client_id,
+      });
+    }
   });
 
-  const primoDelMese = new Date(anno, mese, 1);
-  const giorniNelMese = new Date(anno, mese + 1, 0).getDate();
-  const offset = (primoDelMese.getDay() + 6) % 7;
+  // Fasce fisse dedicate ai messaggi clienti, ogni giorno del mese visualizzato
+  for (let g = 1; g <= giorniNelMese; g++) {
+    const ds = dataStr(g);
+    eventi.push({ data: ds, ora: "08:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (08:00–09:00)", clientId: null });
+    eventi.push({ data: ds, ora: "18:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (18:00–19:00)", clientId: null });
+    if (new Date(ds + "T00:00:00").getDay() === 5) {
+      const settimana = lunediDi(ds);
+      const inviateSettimana = new Set(promemoriaRighe.filter((r) => r.settimana === settimana && r.inviato).map((r) => r.client_id));
+      const mancanti = clients.filter((c) => !inviateSettimana.has(c.id));
+      eventi.push({
+        data: ds, ora: null, tipo: "promemoria", nome: "Promemoria di fine settimana",
+        label: mancanti.length === 0 ? "Tutte le clienti contattate questa settimana" : `${mancanti.length} client${mancanti.length === 1 ? "e" : "i"} ancora da contattare: ${mancanti.map((c) => `${c.nome} ${c.cognome}`).join(", ")}`,
+        clientId: null,
+      });
+    }
+  }
 
-  const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
   const eventiDelGiorno = (g) => eventi.filter((e) => e.data === dataStr(g));
 
   const cambiaMese = (delta) => {
@@ -4148,7 +4188,7 @@ function CalendarioAgenda({ clients, onSelect }) {
 
   const eventiVisibili = giornoFiltro
     ? ordinaGiornoSingolo(eventiDelGiorno(giornoFiltro))
-    : eventi.filter((e) => e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data) || (a.ora || "").localeCompare(b.ora || "")).slice(0, 15);
+    : eventi.filter((e) => e.tipo !== "messaggi" && e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data) || (a.ora || "").localeCompare(b.ora || "")).slice(0, 15);
 
   return (
     <div className="space-y-3">
@@ -4176,7 +4216,7 @@ function CalendarioAgenda({ clients, onSelect }) {
               <span>{g}</span>
               {evs.length > 0 && (
                 <span className="flex gap-0.5">
-                  {evs.slice(0, 3).map((e, idx) => <span key={idx} className={`w-1.5 h-1.5 rounded-full ${COLORE_TIPO[e.tipo]}`} />)}
+                  {[...evs].sort((a, b) => ORDINE_TIPO_DOT[a.tipo] - ORDINE_TIPO_DOT[b.tipo]).slice(0, 3).map((e, idx) => <span key={idx} className={`w-1.5 h-1.5 rounded-full ${COLORE_TIPO[e.tipo]}`} />)}
                 </span>
               )}
             </button>
@@ -4190,14 +4230,9 @@ function CalendarioAgenda({ clients, onSelect }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" /> Lezione 1:1</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Personale/extra</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Promemoria</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400" /> Messaggi clienti</span>
       </div>
-
-      <Card className="p-3 flex items-center gap-2 bg-slate-50 border-slate-100">
-        <Clock size={15} className="text-slate-400 flex-shrink-0" />
-        <p className="text-xs text-slate-500">Fasce dedicate ai messaggi clienti, ogni giorno: <span className="font-medium text-slate-600">08:00–09:00</span> e <span className="font-medium text-slate-600">18:00–19:00</span></p>
-      </Card>
-
-      <PromemoriaVenerdi clients={clients} />
 
       <div className="space-y-2 pt-2">
         {giornoFiltro && (
@@ -4314,36 +4349,6 @@ function lunediSettimanaCorrente() {
   const lunedi = new Date(oggi);
   lunedi.setDate(oggi.getDate() + diff);
   return lunedi.toISOString().slice(0, 10);
-}
-
-function PromemoriaVenerdi({ clients }) {
-  const giornoSett = new Date().getDay(); // 0 domenica ... 6 sabato
-  const mostra = giornoSett === 5 || giornoSett === 6 || giornoSett === 0; // ven, sab, dom
-  const settimana = useMemo(() => lunediSettimanaCorrente(), []);
-  const [stato, setStato] = useState({});
-  const [caricando, setCaricando] = useState(true);
-
-  useEffect(() => {
-    if (!mostra) { setCaricando(false); return; }
-    (async () => {
-      const { data } = await supabase.from("promemoria_messaggi").select("client_id, inviato").eq("settimana", settimana);
-      const map = {};
-      (data || []).forEach((r) => { map[r.client_id] = r.inviato; });
-      setStato(map);
-      setCaricando(false);
-    })();
-  }, [mostra, settimana]);
-
-  if (!mostra || caricando) return null;
-  const mancanti = clients.filter((c) => !stato[c.id]);
-  if (mancanti.length === 0) return null;
-
-  return (
-    <Card className="p-4 bg-amber-50 border-amber-100 space-y-1.5">
-      <p className="text-sm font-medium text-amber-800">Promemoria di fine settimana</p>
-      <p className="text-xs text-amber-700">{mancanti.length} client{mancanti.length === 1 ? "e" : "i"} ancora da contattare questa settimana: {mancanti.map((c) => `${c.nome} ${c.cognome}`).join(", ")}</p>
-    </Card>
-  );
 }
 
 function PromemoriaMessaggi({ clients }) {
