@@ -4951,7 +4951,8 @@ function GuadagniCoach({ clients, onSelect }) {
   if (caricando) return <Spinner />;
 
   const oggi = new Date();
-  const meseCorrente = oggi.toISOString().slice(0, 7);
+  const meseChiave = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; // usa la data locale, non toISOString (che converte in UTC e sfasa il mese)
+  const meseCorrente = meseChiave(oggi);
   const conImporto = pagamenti.filter((p) => p.importo != null);
   const incassi = conImporto.filter((p) => p.stato === "saldato");
   const spese = conImporto.filter((p) => p.stato === "spesa");
@@ -4975,7 +4976,7 @@ function GuadagniCoach({ clients, onSelect }) {
     let d = new Date(annoInizio, mInizio - 1, 1);
     const fine = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
     while (d <= fine) {
-      mesi.push({ chiave: d.toISOString().slice(0, 7), label: d.toLocaleDateString("it-IT", { month: "short", year: annoInizio !== oggi.getFullYear() ? "2-digit" : undefined }), totale: 0 });
+      mesi.push({ chiave: meseChiave(d), label: d.toLocaleDateString("it-IT", { month: "short", year: annoInizio !== oggi.getFullYear() ? "2-digit" : undefined }), totale: 0 });
       d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
     }
   }
