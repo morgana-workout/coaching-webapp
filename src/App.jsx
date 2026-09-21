@@ -3895,6 +3895,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <StatoBadge stato={client.stato_check} />
         </div>
       </div>
+      {client.archiviato && (
+        <div className="flex items-center justify-between gap-3 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-500">
+          <span>Cliente archiviato — non compare nelle liste attive, nei promemoria né nei rinnovi.</span>
+          <button onClick={() => salvaCliente({ archiviato: false })} disabled={salvando} className="flex-shrink-0 text-sky-600 font-medium">Riattiva</button>
+        </div>
+      )}
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${tab === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{t.label}</button>
@@ -4067,6 +4073,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <p className="text-emerald-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
             )}
             <InvitaClienteForm client={client} onInvitato={carica} />
+          </div>
+          <div className="col-span-2 border-t border-slate-100 pt-4">
+            <button onClick={() => salvaCliente({ archiviato: !client.archiviato })} disabled={salvando} className="text-slate-500 text-sm font-medium">
+              {client.archiviato ? "↩ Riattiva cliente" : "🗄 Archivia cliente (percorso non attivo)"}
+            </button>
+            <p className="text-slate-400 text-xs mt-1">{client.archiviato ? "Torna a comparire in tutte le liste e nei promemoria." : "Nasconde il cliente dalle liste attive, dal calendario e dai promemoria, senza cancellare nulla. Lo ritrovi qui sotto in \"Mostra archiviati\", riattivabile in ogni momento."}</p>
           </div>
           <div className="col-span-2 border-t border-slate-100 pt-4">
             <EliminaClienteBottone client={client} onEliminato={() => { onBack(); onChanged?.(); }} />
@@ -5353,12 +5365,17 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
   };
   useEffect(() => { caricaNonLetteCoach(); }, [vista]);
 
-  const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
-  const daFare = clients.filter((c) => c.stato_check === "da_compilare");
-  const scaduti = clients.filter((c) => c.stato_pacchetto === "scaduto");
+  // I clienti archiviati (percorso non attivo) restano fuori da liste, calendario, promemoria e
+  // rinnovi finché non vengono riattivati — ma restano recuperabili con "Mostra archiviati".
+  const clientiAttivi = clients.filter((c) => !c.archiviato);
+  const clientiArchiviati = clients.filter((c) => c.archiviato);
+
+  const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
+  const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
+  const scaduti = clientiAttivi.filter((c) => c.stato_pacchetto === "scaduto");
 
   const spostaOrdine = async (clienteId, direzione) => {
-    const ordinati = [...clients].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+    const ordinati = [...clients].filter((c) => !c.archiviato).sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
     const idx = ordinati.findIndex((c) => c.id === clienteId);
     const altroIdx = idx + direzione;
     if (altroIdx < 0 || altroIdx >= ordinati.length) return;
@@ -5368,7 +5385,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
     onChanged();
   };
 
-  let visibili = [...clients].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+  const baseVisibili = filtro === "archiviati" ? clientiArchiviati : clientiAttivi;
+  let visibili = [...baseVisibili].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
   if (ricerca.trim()) {
     const q = ricerca.trim().toLowerCase();
     visibili = visibili.filter((c) => `${c.nome} ${c.cognome} ${c.codice}`.toLowerCase().includes(q));
@@ -5420,9 +5438,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
         <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-xs font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
       </div>
 
-      {vista === "calendario" && <CalendarioAgenda clients={clients} onSelect={onSelect} />}
-      {vista === "notifiche" && <CentroNotificheCoach clients={clients} onSelect={onSelect} />}
-      {vista === "guadagni" && <GuadagniCoach clients={clients} onSelect={onSelect} onClientiCambiati={onChanged} />}
+      {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} onSelect={onSelect} />}
+      {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
@@ -5436,19 +5454,24 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
       <div className="flex gap-2">
         <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
-          ONLINE ({clients.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
+          ONLINE ({clientiAttivi.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
         </button>
         <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
-          BULB ({clients.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
+          BULB ({clientiAttivi.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
         </button>
       </div>
       {filtro !== "tutti" && (
         <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
       )}
+      {clientiArchiviati.length > 0 && (
+        <button onClick={() => setFiltro(filtro === "archiviati" ? "tutti" : "archiviati")} className="text-slate-400 text-xs font-medium">
+          {filtro === "archiviati" ? "← Torna ai clienti attivi" : `🗄 Mostra archiviati (${clientiArchiviati.length})`}
+        </button>
+      )}
 
       <div>
-        <p className="text-sm font-medium text-slate-700 px-1 mb-2">Clienti ({visibili.length})</p>
+        <p className="text-sm font-medium text-slate-700 px-1 mb-2">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
         <div className="space-y-2">
           {visibili.map((c) => (
             <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50 border-rose-100" : ""}`}>
@@ -5465,6 +5488,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
                     <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
                       {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
+                    {c.archiviato && <Badge className="flex-shrink-0 bg-slate-200 text-slate-500">ARCHIVIATO</Badge>}
                   </div>
                   <p className="text-slate-500 text-xs mt-0.5 ">
                     {c.tipo_servizio === "presenza"
