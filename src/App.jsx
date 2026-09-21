@@ -5507,6 +5507,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
 function GrigliaCompletezza({ clients, onSelect }) {
   const [nutrizione, setNutrizione] = useState({});
   const [allenamento, setAllenamento] = useState({});
+  const [ultimiCheck, setUltimiCheck] = useState({});
   const [caricando, setCaricando] = useState(true);
 
   useEffect(() => {
@@ -5528,6 +5529,18 @@ function GrigliaCompletezza({ clients, onSelect }) {
         if (!teMap[r.client_id] || (r.data || "") > teMap[r.client_id]) teMap[r.client_id] = r.data;
       });
       setAllenamento(teMap);
+
+      // Ultimo check: va preso dalla data di riferimento (data_check) più recente presente nei
+      // check effettivamente caricati, non dal campo client.ultimo_check (che può restare
+      // disallineato se un check viene modificato o eliminato dopo il salvataggio).
+      const { data: ck } = await supabase.from("checkins").select("client_id, data_check");
+      const ckMap = {};
+      (ck || []).forEach((r) => {
+        if (!r.client_id || !r.data_check) return;
+        if (!ckMap[r.client_id] || r.data_check > ckMap[r.client_id]) ckMap[r.client_id] = r.data_check;
+      });
+      setUltimiCheck(ckMap);
+
       setCaricando(false);
     })();
   }, []);
@@ -5566,7 +5579,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
               const schedaStato = !!(c.link_scheda || c.scheda_pdf_path);
               const logData = allenamento[c.id];
               const nutData = nutrizione[c.id];
-              const checkData = c.ultimo_check;
+              const checkData = ultimiCheck[c.id] || null;
               return (
                 <tr key={c.id} onClick={() => onSelect(c.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
                   <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{c.nome} {c.cognome}</td>
