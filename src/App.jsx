@@ -4963,12 +4963,21 @@ function GuadagniCoach({ clients, onSelect }) {
   const totaleDaSaldare = daSaldare.reduce((s, p) => s + Number(p.importo), 0);
   const guadagnoMese = nettoRows.filter((p) => (p.data_pagamento || "").slice(0, 7) === meseCorrente).reduce((s, p) => s + Number(p.importo), 0);
 
-  // Guadagni mensili — ultimi 6 mesi (incassi al netto delle spese)
+  // Guadagni mensili — dal primo mese con dati ad oggi (incassi al netto delle spese)
+  const primaChiaveDati = nettoRows.reduce((min, p) => {
+    const c = (p.data_pagamento || "").slice(0, 7);
+    return c && (!min || c < min) ? c : min;
+  }, null);
+  const meseInizio = primaChiaveDati && primaChiaveDati < `${oggi.getFullYear()}-01` ? primaChiaveDati : `${oggi.getFullYear()}-01`;
+  const [annoInizio, mInizio] = meseInizio.split("-").map(Number);
   const mesi = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(oggi.getFullYear(), oggi.getMonth() - i, 1);
-    const chiave = d.toISOString().slice(0, 7);
-    mesi.push({ chiave, label: d.toLocaleDateString("it-IT", { month: "short" }), totale: 0 });
+  {
+    let d = new Date(annoInizio, mInizio - 1, 1);
+    const fine = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+    while (d <= fine) {
+      mesi.push({ chiave: d.toISOString().slice(0, 7), label: d.toLocaleDateString("it-IT", { month: "short", year: annoInizio !== oggi.getFullYear() ? "2-digit" : undefined }), totale: 0 });
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
   }
   nettoRows.forEach((p) => {
     const chiave = (p.data_pagamento || "").slice(0, 7);
@@ -4995,6 +5004,7 @@ function GuadagniCoach({ clients, onSelect }) {
   const pagamentiVisibili = filtro === "tutti" ? pagamenti : pagamenti.filter((p) => p.stato === filtro);
 
   const cambiaStato = async (p) => {
+    if (p.stato === "spesa") return; // le spese non si alternano tra saldato/da saldare
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
     carica();
   };
@@ -5009,41 +5019,49 @@ function GuadagniCoach({ clients, onSelect }) {
       <div className="grid grid-cols-2 gap-2">
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Guadagno del mese (netto)</p>
-          <p className="text-lg font-semibold text-slate-800 mt-0.5">{guadagnoMese.toFixed(0)}€</p>
+          <p className="text-lg font-semibold text-slate-800 mt-0.5">{guadagnoMese.toFixed(2)}€</p>
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Totale netto da inizio anno</p>
-          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleNetto.toFixed(0)}€</p>
+          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleNetto.toFixed(2)}€</p>
         </Card>
       </div>
       <div className="grid grid-cols-3 gap-2">
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Incassato</p>
-          <p className="text-base font-semibold text-slate-700 mt-0.5">{totaleIncassato.toFixed(0)}€</p>
+          <p className="text-base font-semibold text-slate-700 mt-0.5">{totaleIncassato.toFixed(2)}€</p>
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Spese (affitto ecc.)</p>
-          <p className="text-base font-semibold text-rose-600 mt-0.5">{totaleSpese.toFixed(0)}€</p>
+          <p className="text-base font-semibold text-rose-600 mt-0.5">{totaleSpese.toFixed(2)}€</p>
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Da saldare</p>
-          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(0)}€</p>
+          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(2)}€</p>
         </Card>
       </div>
 
       <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} />
 
       <Card className="p-4">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Guadagni mensili (ultimi 6 mesi)</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Guadagni mensili {oggi.getFullYear()} (netto: incassi − spese)</p>
         <ResponsiveContainer width="100%" height={160}>
           <BarChart data={mesi}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
             <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={35} />
-            <Tooltip formatter={(v) => `${v.toFixed(0)}€`} />
+            <Tooltip formatter={(v) => `${v.toFixed(2)}€`} />
             <Bar dataKey="totale" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+          {mesi.map((m) => (
+            <div key={m.chiave} className="flex justify-between text-xs">
+              <span className="text-slate-500 capitalize">{new Date(m.chiave + "-01").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</span>
+              <span className={`font-medium ${m.totale < 0 ? "text-rose-600" : "text-slate-700"}`}>{m.totale.toFixed(2)}€</span>
+            </div>
+          ))}
+        </div>
       </Card>
 
       {metodiOrdinati.length > 0 && (
@@ -5053,7 +5071,7 @@ function GuadagniCoach({ clients, onSelect }) {
             {metodiOrdinati.map(([k, v]) => (
               <div key={k} className="flex justify-between text-sm">
                 <span className="text-slate-600 capitalize">{labelMetodo(k) === k ? k : labelMetodo(k)}</span>
-                <span className="text-slate-700 font-medium">{v.toFixed(0)}€</span>
+                <span className="text-slate-700 font-medium">{v.toFixed(2)}€</span>
               </div>
             ))}
           </div>
@@ -5098,7 +5116,7 @@ function GuadagniCoach({ clients, onSelect }) {
                 <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
                 <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : ""}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
               </button>
-              <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{p.importo != null ? `${Number(p.importo).toFixed(0)}€` : "—"}</span>
+              <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{p.importo != null ? `${Number(p.importo).toFixed(2)}€` : "—"}</span>
               {p.stato && (
                 p.stato === "spesa" ? (
                   <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-rose-100 text-rose-700">Spesa</span>
