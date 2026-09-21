@@ -4838,10 +4838,13 @@ async function esportaCarichiCsv() {
   scaricaCsv(`carichi_allenamento_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
-function NuovoPagamentoGuadagni({ clients, onSalvato }) {
+const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
+
+function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
   const [aperto, setAperto] = useState(false);
   const [clientId, setClientId] = useState("");
-  const [tipoPiano, setTipoPiano] = useState("");
+  const [tipoPiano, setTipoPiano] = useState("Mensile");
+  const [tipoLibero, setTipoLibero] = useState("");
   const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
   const [importo, setImporto] = useState("");
   const [metodo, setMetodo] = useState("");
@@ -4851,9 +4854,10 @@ function NuovoPagamentoGuadagni({ clients, onSalvato }) {
   const [errore, setErrore] = useState("");
 
   const clientiOrdinati = [...clients].sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
+  const aggiornaScadenza = ["Mensile", "Trimestrale", "Semestrale"].includes(tipoPiano);
 
   const reset = () => {
-    setClientId(""); setTipoPiano(""); setImporto(""); setMetodo(""); setStato("saldato"); setNota("");
+    setClientId(""); setTipoPiano("Mensile"); setTipoLibero(""); setImporto(""); setMetodo(""); setStato("saldato"); setNota("");
     setDataPagamento(new Date().toISOString().slice(0, 10));
   };
 
@@ -4862,20 +4866,35 @@ function NuovoPagamentoGuadagni({ clients, onSalvato }) {
     if (!clientId) { setErrore("Seleziona un cliente."); return; }
     if (importo === "" || isNaN(Number(importo))) { setErrore("Inserisci un importo valido."); return; }
     setSalvando(true);
+    const cliente = clients.find((c) => c.id === clientId);
+    const etichettaTipo = tipoPiano === "Altro" ? (tipoLibero || "Pagamento") : tipoPiano;
     const { error } = await supabase.from("payments").insert({
       client_id: clientId,
       data_pagamento: dataPagamento,
-      tipo_piano: tipoPiano || "Pagamento",
+      tipo_piano: etichettaTipo,
       importo: Number(importo),
       metodo_pagamento: metodo || null,
       stato,
       note: nota || null,
     });
+    if (error) { setSalvando(false); setErrore("Errore nel salvataggio, riprova."); return; }
+    // Mensile/Trimestrale/Semestrale: la scadenza del pacchetto si aggiorna in automatico, coerente col tipo — mai una data "a caso"
+    if (aggiornaScadenza && cliente) {
+      const oggi = new Date().toISOString().slice(0, 10);
+      const base = (cliente.data_scadenza && cliente.data_scadenza > oggi) ? cliente.data_scadenza : dataPagamento;
+      const nuovaScadenza = addMesi(base, MESI_PER_TIPO_PAGAMENTO[tipoPiano]);
+      await supabase.from("clients").update({
+        piano: tipoPiano,
+        data_scadenza: nuovaScadenza,
+        data_inizio: cliente.data_inizio || dataPagamento,
+        stato_pacchetto: "attivo",
+      }).eq("id", clientId);
+    }
     setSalvando(false);
-    if (error) { setErrore("Errore nel salvataggio, riprova."); return; }
     reset();
     setAperto(false);
     onSalvato();
+    onClientiCambiati?.();
   };
 
   if (!aperto) {
@@ -4922,9 +4941,23 @@ function NuovoPagamentoGuadagni({ clients, onSalvato }) {
         </div>
       </div>
       <div>
-        <label className="text-xs text-slate-500">Tipo (facoltativo)</label>
-        <input value={tipoPiano} onChange={(e) => setTipoPiano(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. Mensile, A lezione, Coaching online..." />
+        <label className="text-xs text-slate-500">Tipo</label>
+        <select value={tipoPiano} onChange={(e) => setTipoPiano(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="Mensile">Mensile (+1 mese di scadenza)</option>
+          <option value="Trimestrale">Trimestrale (+3 mesi di scadenza)</option>
+          <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
+          <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
+          <option value="A lezione">A lezione (non tocca la scadenza)</option>
+          <option value="Altro">Altro (non tocca la scadenza)</option>
+        </select>
+        {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
       </div>
+      {tipoPiano === "Altro" && (
+        <div>
+          <label className="text-xs text-slate-500">Specifica tipo</label>
+          <input value={tipoLibero} onChange={(e) => setTipoLibero(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. Coaching online, saldo pacchetto..." />
+        </div>
+      )}
       <div>
         <label className="text-xs text-slate-500">Nota (facoltativa)</label>
         <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. saldo pacchetto..." />
@@ -5035,7 +5068,7 @@ function ImportoMancante({ p, onSalvato }) {
   );
 }
 
-function GuadagniCoach({ clients, onSelect }) {
+function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const [pagamenti, setPagamenti] = useState([]);
   const [billing, setBilling] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -5100,8 +5133,9 @@ function GuadagniCoach({ clients, onSelect }) {
   // Rinnovi imminenti — clienti con pacchetto attivo/in scadenza ordinati per data_scadenza
   const billingByClient = {};
   billing.forEach((b) => { billingByClient[b.client_id] = b; });
+  // Solo pacchetti a cadenza fissa hanno una data di rinnovo coerente da mostrare — Occasionale/A lezione/Altro non hanno una scadenza prevedibile
   const rinnovi = clients
-    .filter((c) => c.data_scadenza && c.stato_pacchetto !== "scaduto" && c.stato_pacchetto !== "gratuito")
+    .filter((c) => c.data_scadenza && c.stato_pacchetto !== "scaduto" && c.stato_pacchetto !== "gratuito" && ["Mensile", "Trimestrale", "Semestrale"].includes(c.piano))
     .sort((a, b) => (a.data_scadenza || "").localeCompare(b.data_scadenza || ""))
     .slice(0, 8);
 
@@ -5145,7 +5179,7 @@ function GuadagniCoach({ clients, onSelect }) {
         </Card>
       </div>
 
-      <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} />
+      <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} onClientiCambiati={onClientiCambiati} />
 
       <Card className="p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Guadagni mensili {oggi.getFullYear()} (netto: incassi − spese)</p>
@@ -5329,7 +5363,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
 
       {vista === "calendario" && <CalendarioAgenda clients={clients} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clients} onSelect={onSelect} />}
-      {vista === "guadagni" && <GuadagniCoach clients={clients} onSelect={onSelect} />}
+      {vista === "guadagni" && <GuadagniCoach clients={clients} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
