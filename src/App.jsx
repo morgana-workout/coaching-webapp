@@ -5105,16 +5105,12 @@ function RicevutaModal({ pagamento, onClose }) {
   const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
 
   return (
-    <div className="ricevuta-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
       <style>{`
         @media print {
-          html, body { height: auto !important; }
           body * { visibility: hidden; }
           .ricevuta-stampa, .ricevuta-stampa * { visibility: visible; }
-          /* Senza queste due righe il contenitore a schermo intero resta nel flusso di stampa
-             (anche se invisibile) e crea uno o due fogli bianchi prima della ricevuta. */
-          .ricevuta-overlay { position: static !important; display: block !important; height: auto !important; }
-          .ricevuta-stampa { position: static !important; width: 100% !important; max-width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+          .ricevuta-stampa { position: fixed; top: 0; left: 0; width: 100%; box-shadow: none !important; }
           .no-print { display: none !important; }
         }
       `}</style>
