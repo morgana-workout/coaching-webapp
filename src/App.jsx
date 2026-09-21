@@ -2193,6 +2193,8 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
             <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
             <option value="A lezione">A lezione (non tocca la scadenza)</option>
             <option value="Variabile">Variabile (non tocca la scadenza)</option>
+            <option value="Pacchetto lezioni Bulb">Pacchetto lezioni Bulb (non tocca la scadenza)</option>
+            <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
             <option value="Gratuito">Gratuito</option>
           </select>
         </div>
@@ -4998,6 +5000,8 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
           <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
           <option value="A lezione">A lezione (non tocca la scadenza)</option>
           <option value="Variabile">Variabile (non tocca la scadenza)</option>
+          <option value="Pacchetto lezioni Bulb">Pacchetto lezioni Bulb (non tocca la scadenza)</option>
+          <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
           <option value="Altro">Altro (non tocca la scadenza)</option>
         </select>
         {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
@@ -5056,7 +5060,7 @@ function RicevutaModal({ pagamento, onClose }) {
           <span className="text-slate-500 text-sm font-medium">Importo pagato</span>
           <span className="text-slate-800 text-2xl font-semibold">{Number(pagamento.importo).toFixed(2)}€</span>
         </div>
-        <p className="text-center text-slate-300 text-[10px] mb-5">Documento riepilogativo non fiscale — dati base, senza P.IVA</p>
+        <p className="text-center text-slate-300 text-[10px] mb-5">Documento riepilogativo non fiscale — dati base</p>
         <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
       </div>
     </div>
