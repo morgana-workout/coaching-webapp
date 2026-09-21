@@ -828,6 +828,9 @@ function analizzaAndamento(ordinati) {
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
+const LABEL_OBIETTIVO = { definizione: "Definizione", mantenimento: "Mantenimento", massa: "Massa", reverse: "Reverse" };
+function labelObiettivo(o) { return LABEL_OBIETTIVO[o] || o; }
+
 function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo) {
   const frasi = [];
   if (tPeso.oscillante) {
@@ -836,6 +839,23 @@ function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo) {
   const pesoTxt = tPeso.direzione === "calo" ? "il peso è sceso" : tPeso.direzione === "aumento" ? "il peso è salito" : tPeso.direzione === "stabile" ? "il peso è rimasto stabile" : null;
   const vitaTxt = tVita.direzione === "calo" ? "la circonferenza vita si è ridotta" : tVita.direzione === "aumento" ? "la circonferenza vita è aumentata" : tVita.direzione === "stabile" ? "la circonferenza vita è rimasta stabile" : null;
   const muscTxt = tMuscolo.direzione === "calo" ? "le circonferenze di braccio/coscia sono leggermente calate" : tMuscolo.direzione === "aumento" ? "le circonferenze di braccio/coscia sono aumentate" : tMuscolo.direzione === "stabile" ? "le circonferenze di braccio/coscia si sono mantenute" : null;
+
+  if (obiettivo === "reverse") {
+    // In reverse diet l'obiettivo è far risalire le calorie in modo controllato dopo una definizione
+    // (o una gara): un aumento graduale di peso/vita qui non è un problema, è il segnale che il
+    // metabolismo si sta riattivando — il messaggio va quindi capovolto rispetto a una definizione.
+    if (tPeso.direzione === "aumento" && (tVita.direzione === "aumento" || tVita.direzione === "stabile")) {
+      frasi.push(`${cap(pesoTxt)}${tVita.direzione === "aumento" ? " e " + vitaTxt : ""}: in una fase di reverse è proprio l'andamento atteso. Le calorie stanno risalendo e il corpo si sta riequilibrando dopo la definizione — non è "ripreso il grasso perso", è il metabolismo che si riattiva.`);
+    } else if (tPeso.direzione === "stabile") {
+      frasi.push("Il peso è rimasto stabile in questa fase di reverse: è normale, può volerci qualche settimana in più prima che si veda la risalita. L'importante è seguire l'aumento calorico programmato con la coach.");
+    } else if (tPeso.direzione === "calo") {
+      frasi.push("Il peso è ancora in calo nonostante la fase di reverse: capita nelle prime settimane, ma se continua parlane con la coach — potrebbe servire un aggiustamento delle calorie.");
+    } else {
+      frasi.push("Servono ancora un paio di check in questa fase di reverse per vedere un trend chiaro.");
+    }
+    if (tMuscolo.direzione === "aumento") frasi.push("Le circonferenze muscolari che crescono sono un ottimo segnale in questa fase.");
+    return frasi.join(" ");
+  }
 
   if (tVita.direzione === "calo" && (tMuscolo.direzione === "stabile" || tMuscolo.direzione === "aumento")) {
     frasi.push(`${cap(vitaTxt)}${muscTxt ? " mentre " + muscTxt : ""}: è il segno di una ricomposizione corporea in corso — il grasso cala e la massa muscolare tiene o cresce, anche se ${pesoTxt || "il peso da solo non racconta tutta la storia"}. La definizione che si vede nelle foto è proprio questo: meno grasso attorno al muscolo che c'è già.`);
@@ -875,28 +895,56 @@ function serieConVariazione(rows, key) {
   });
 }
 
-function AndamentoGenerale({ checkins, obiettivo }) {
-  const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
-  const analisi = analizzaAndamento(ordinati);
-  if (!analisi) return null;
+function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
+  const [vediTutto, setVediTutto] = useState(false);
 
-  const nota = generaNotaAndamento(analisi, obiettivo);
-  const chartDataRaw = ordinati.map((c) => {
-    const vals = [c.braccio_dx_cm, c.coscia_dx_cm].filter((v) => v != null);
-    return {
-      dataLabel: c.data_check ? c.data_check.slice(5).split("-").reverse().join("/") : "",
-      peso: c.peso_kg ?? null,
-      vita: c.sopra_ombelico_cm ?? null,
-      muscolo: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
-    };
-  });
-  let chartData = serieConVariazione(chartDataRaw, "peso");
-  chartData = serieConVariazione(chartData, "vita");
-  chartData = serieConVariazione(chartData, "muscolo");
+  const tutti = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  // Se sappiamo da quando è iniziata la fase attuale (cut, reverse, massa...), l'andamento si legge
+  // solo su quella finestra: mescolare i check di una definizione con quelli di un reverse successivo
+  // darebbe un trend senza senso (es. un netto calo peso seguito da una risalita letti come "stabile").
+  const usaFase = !!obiettivoDal && !vediTutto;
+  const inFase = obiettivoDal ? tutti.filter((c) => c.data_check && c.data_check >= obiettivoDal) : tutti;
+  const finestra = usaFase ? inFase : tutti;
+
+  const analisiFinestra = analizzaAndamento(finestra);
+  const analisiTutti = analizzaAndamento(tutti);
+  if (!analisiTutti) return null; // dati insufficienti anche su tutto lo storico: niente da mostrare
+
+  const chartDataDa = (lista) => {
+    const raw = lista.map((c) => {
+      const vals = [c.braccio_dx_cm, c.coscia_dx_cm].filter((v) => v != null);
+      return {
+        dataLabel: c.data_check ? c.data_check.slice(5).split("-").reverse().join("/") : "",
+        peso: c.peso_kg ?? null,
+        vita: c.sopra_ombelico_cm ?? null,
+        muscolo: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
+      };
+    });
+    let cd = serieConVariazione(raw, "peso");
+    cd = serieConVariazione(cd, "vita");
+    cd = serieConVariazione(cd, "muscolo");
+    return cd;
+  };
+
+  const puntiInsufficientiInFase = usaFase && !analisiFinestra;
+  const analisi = puntiInsufficientiInFase ? analisiTutti : (analisiFinestra || analisiTutti);
+  const chartData = chartDataDa(puntiInsufficientiInFase ? tutti : finestra);
+  const nota = puntiInsufficientiInFase
+    ? `Hai iniziato la fase di ${labelObiettivo(obiettivo).toLowerCase()} il ${obiettivoDal.split("-").reverse().join("/")}: servono almeno due check in questa fase per iniziare a vedere un trend. Sotto, per intanto, lo storico completo.`
+    : generaNotaAndamento(analisi, obiettivo);
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Andamento generale</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">
+          Andamento generale{obiettivoDal && !vediTutto ? ` · fase ${labelObiettivo(obiettivo).toLowerCase()} dal ${obiettivoDal.split("-").reverse().join("/")}` : ""}
+        </p>
+        {obiettivoDal && (
+          <button onClick={() => setVediTutto((v) => !v)} className="text-[11px] text-sky-600 font-medium flex-shrink-0">
+            {vediTutto ? "Solo fase attuale" : "Storico completo"}
+          </button>
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -913,7 +961,7 @@ function AndamentoGenerale({ checkins, obiettivo }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Vita</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Braccio/coscia</span>
       </div>
-      <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
+      <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{obiettivoDal && !vediTutto && !puntiInsufficientiInFase ? " in questa fase" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
       <div className="bg-sky-50 border border-sky-100 rounded-lg p-3">
         <p className="text-sm text-slate-700 leading-relaxed">{nota}</p>
       </div>
@@ -921,7 +969,7 @@ function AndamentoGenerale({ checkins, obiettivo }) {
   );
 }
 
-function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, titolo = "I tuoi progressi" }) {
+function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi" }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
   const dati = [...checkins]
@@ -935,7 +983,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, titolo = "I 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
-      <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} />
+      <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} obiettivoDal={obiettivoDal} />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {opzioni.map((o) => (
           <button key={o.key} onClick={() => setMetrica(o.key)}
@@ -1779,7 +1827,7 @@ function ClientApp({ session }) {
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
-        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} />}
+        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
@@ -3513,9 +3561,23 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           </select>
           <input type="number" defaultValue={client.fase_allenamento || ""} onBlur={(e) => salvaCliente({ fase_allenamento: e.target.value ? Number(e.target.value) : null })} placeholder="Fase (numero)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         </div>
-        <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => salvaCliente({ obiettivo_attuale: e.target.value || null })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">Obiettivo attuale...</option><option value="definizione">Definizione</option><option value="mantenimento">Mantenimento</option><option value="massa">Massa</option>
+        <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => {
+          const nuovo = e.target.value || null;
+          if (nuovo === (client.obiettivo_attuale || null)) return; // niente da fare se non è cambiato
+          // Ogni cambio di obiettivo segna l'inizio di una nuova fase: l'andamento generale nella
+          // scheda progressi guarda da questa data in poi, così un cut seguito da un reverse (o da
+          // una massa) non si mescolano nello stesso trend.
+          salvaCliente({ obiettivo_attuale: nuovo, obiettivo_dal: nuovo ? formatDataLocale(new Date()) : null });
+        }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">Obiettivo attuale...</option>
+          <option value="definizione">Definizione (cut)</option>
+          <option value="mantenimento">Mantenimento</option>
+          <option value="massa">Massa (bulk)</option>
+          <option value="reverse">Reverse (dopo definizione/gara)</option>
         </select>
+        {client.obiettivo_dal && (
+          <p className="text-[11px] text-slate-400">In questa fase dal {client.obiettivo_dal.split("-").reverse().join("/")} — l'andamento generale nella scheda progressi si basa sui check da questa data in poi.</p>
+        )}
       </Card>
 
       <Card className="p-4 space-y-1.5 bg-slate-50">
@@ -4135,7 +4197,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} titolo="Progressi e storico check" />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" />}
 
       {tab === "allenamento" && <DiarioAllenamento clientId={clientId} isAdmin />}
 
@@ -5043,12 +5105,16 @@ function RicevutaModal({ pagamento, onClose }) {
   const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
+    <div className="ricevuta-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
       <style>{`
         @media print {
+          html, body { height: auto !important; }
           body * { visibility: hidden; }
           .ricevuta-stampa, .ricevuta-stampa * { visibility: visible; }
-          .ricevuta-stampa { position: fixed; top: 0; left: 0; width: 100%; box-shadow: none !important; }
+          /* Senza queste due righe il contenitore a schermo intero resta nel flusso di stampa
+             (anche se invisibile) e crea uno o due fogli bianchi prima della ricevuta. */
+          .ricevuta-overlay { position: static !important; display: block !important; height: auto !important; }
+          .ricevuta-stampa { position: static !important; width: 100% !important; max-width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
           .no-print { display: none !important; }
         }
       `}</style>
