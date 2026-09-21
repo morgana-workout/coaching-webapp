@@ -3304,6 +3304,37 @@ function GiornoScheda({ giorno, client, onEliminaGiorno, onRinominaGiorno, onMuo
   );
 }
 
+function LivelloFaseObiettivo({ client, salvaCliente }) {
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Livello e fase</p>
+      <div className="grid grid-cols-2 gap-3">
+        <select defaultValue={client.livello_allenamento || ""} onBlur={(e) => salvaCliente({ livello_allenamento: e.target.value || null })} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">Livello...</option><option value="base">Base</option><option value="intermedia">Intermedia</option><option value="avanzata">Avanzata</option>
+        </select>
+        <input type="number" defaultValue={client.fase_allenamento || ""} onBlur={(e) => salvaCliente({ fase_allenamento: e.target.value ? Number(e.target.value) : null })} placeholder="Fase (numero)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => {
+        const nuovo = e.target.value || null;
+        if (nuovo === (client.obiettivo_attuale || null)) return; // niente da fare se non è cambiato
+        // Ogni cambio di obiettivo segna l'inizio di una nuova fase: l'andamento generale nella
+        // scheda progressi guarda da questa data in poi, così un cut seguito da un reverse (o da
+        // una massa) non si mescolano nello stesso trend.
+        salvaCliente({ obiettivo_attuale: nuovo, obiettivo_dal: nuovo ? formatDataLocale(new Date()) : null });
+      }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        <option value="">Obiettivo attuale...</option>
+        <option value="definizione">Definizione (cut)</option>
+        <option value="mantenimento">Mantenimento</option>
+        <option value="massa">Massa (bulk)</option>
+        <option value="reverse">Reverse (dopo definizione/gara)</option>
+      </select>
+      {client.obiettivo_dal && (
+        <p className="text-[11px] text-slate-400">In questa fase dal {client.obiettivo_dal.split("-").reverse().join("/")} — l'andamento generale nella scheda progressi si basa sui check da questa data in poi.</p>
+      )}
+    </Card>
+  );
+}
+
 function SchedaCoach({ client, checkins, salvaCliente }) {
   const [libreria, setLibreria] = useState([]);
   const [aliasRows, setAliasRows] = useState([]);
@@ -3553,33 +3584,6 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
   return (
     <div className="space-y-5">
-      <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Livello e fase</p>
-        <div className="grid grid-cols-2 gap-3">
-          <select defaultValue={client.livello_allenamento || ""} onBlur={(e) => salvaCliente({ livello_allenamento: e.target.value || null })} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
-            <option value="">Livello...</option><option value="base">Base</option><option value="intermedia">Intermedia</option><option value="avanzata">Avanzata</option>
-          </select>
-          <input type="number" defaultValue={client.fase_allenamento || ""} onBlur={(e) => salvaCliente({ fase_allenamento: e.target.value ? Number(e.target.value) : null })} placeholder="Fase (numero)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-        </div>
-        <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => {
-          const nuovo = e.target.value || null;
-          if (nuovo === (client.obiettivo_attuale || null)) return; // niente da fare se non è cambiato
-          // Ogni cambio di obiettivo segna l'inizio di una nuova fase: l'andamento generale nella
-          // scheda progressi guarda da questa data in poi, così un cut seguito da un reverse (o da
-          // una massa) non si mescolano nello stesso trend.
-          salvaCliente({ obiettivo_attuale: nuovo, obiettivo_dal: nuovo ? formatDataLocale(new Date()) : null });
-        }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">Obiettivo attuale...</option>
-          <option value="definizione">Definizione (cut)</option>
-          <option value="mantenimento">Mantenimento</option>
-          <option value="massa">Massa (bulk)</option>
-          <option value="reverse">Reverse (dopo definizione/gara)</option>
-        </select>
-        {client.obiettivo_dal && (
-          <p className="text-[11px] text-slate-400">In questa fase dal {client.obiettivo_dal.split("-").reverse().join("/")} — l'andamento generale nella scheda progressi si basa sui check da questa data in poi.</p>
-        )}
-      </Card>
-
       <Card className="p-4 space-y-1.5 bg-slate-50">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Ricorda ad ogni sessione (fisso, non modificabile qui)</p>
         <p className="text-slate-600 text-xs"><strong>Riscaldamento 5-10':</strong> {RISCALDAMENTO_STANDARD.join(" · ")}</p>
@@ -4199,7 +4203,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" />}
 
-      {tab === "allenamento" && <DiarioAllenamento clientId={clientId} isAdmin />}
+      {tab === "allenamento" && (
+        <div className="space-y-5">
+          <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
+          <DiarioAllenamento clientId={clientId} isAdmin />
+        </div>
+      )}
 
       {tab === "nutrizione" && (
         <div className="space-y-3">
@@ -5105,12 +5114,16 @@ function RicevutaModal({ pagamento, onClose }) {
   const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
+    <div className="ricevuta-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
       <style>{`
         @media print {
+          html, body { height: auto !important; }
           body * { visibility: hidden; }
           .ricevuta-stampa, .ricevuta-stampa * { visibility: visible; }
-          .ricevuta-stampa { position: fixed; top: 0; left: 0; width: 100%; box-shadow: none !important; }
+          /* Senza queste due righe il contenitore a schermo intero resta nel flusso di stampa
+             (anche se invisibile) e crea uno o due fogli bianchi prima della ricevuta. */
+          .ricevuta-overlay { position: static !important; display: block !important; height: auto !important; }
+          .ricevuta-stampa { position: static !important; width: 100% !important; max-width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
           .no-print { display: none !important; }
         }
       `}</style>
