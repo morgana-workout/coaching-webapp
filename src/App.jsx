@@ -579,6 +579,15 @@ function ClientCheckin({ client, onInviato }) {
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">Nuovo check</h1>
+      <a href="/guida-check-misure-foto.pdf" target="_blank" rel="noopener noreferrer" download
+        className="flex items-center gap-3 bg-sky-50 border border-sky-100 rounded-xl px-4 py-3">
+        <FileText size={20} className="text-sky-500 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-700">Guida misure e foto</p>
+          <p className="text-xs text-slate-500">Come prenderle correttamente prima di inviare il check</p>
+        </div>
+        <span className="text-sky-600 text-xs font-medium flex-shrink-0">Scarica</span>
+      </a>
       <Card className="p-4 space-y-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Misure</p>
         <div className="grid grid-cols-2 gap-3">
@@ -1716,6 +1725,10 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">{checkin ? "Modifica check" : "Aggiungi check"}</p>
+      <a href="/guida-check-misure-foto.pdf" target="_blank" rel="noopener noreferrer" download
+        className="flex items-center gap-2 text-sky-600 text-xs font-medium">
+        <FileText size={14} /> Guida misure e foto (PDF)
+      </a>
       <div><label className="text-xs text-slate-500">Data</label>
         <InputData value={f.data_check} onChange={(e) => setF({ ...f, data_check: e.target.value })} className="mt-1" />
       </div>
