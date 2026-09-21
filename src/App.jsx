@@ -2091,6 +2091,7 @@ function FatturazioneCliente({ clientId }) {
 }
 
 function RegistraPagamento({ client, pagamenti, onRegistrato }) {
+  const [ricevutaPer, setRicevutaPer] = useState(null);
   const [tipo, setTipo] = useState("Mensile");
   const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
   const [importo, setImporto] = useState("");
@@ -2212,12 +2213,16 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                     {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                   </button>
                 )}
+                {p.importo != null && p.stato !== "spesa" && (
+                  <button onClick={() => setRicevutaPer(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-500 px-0.5"><FileText size={13} /></button>
+                )}
                 <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
               </li>
             ))}
           </ul>
         </div>
       )}
+      {ricevutaPer && <RicevutaModal pagamento={{ ...ricevutaPer, clients: client }} onClose={() => setRicevutaPer(null)} />}
     </Card>
   );
 }
@@ -4933,6 +4938,82 @@ function NuovoPagamentoGuadagni({ clients, onSalvato }) {
   );
 }
 
+function RicevutaModal({ pagamento, onClose }) {
+  const numero = pagamento.id.slice(0, 8).toUpperCase();
+  const dataFmt = pagamento.data_pagamento ? pagamento.data_pagamento.split("-").reverse().join("/") : "—";
+  const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .ricevuta-stampa, .ricevuta-stampa * { visibility: visible; }
+          .ricevuta-stampa { position: fixed; top: 0; left: 0; width: 100%; box-shadow: none !important; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+      <div className="ricevuta-stampa bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex justify-between items-start mb-5">
+          <div>
+            <p className="text-slate-800 font-semibold text-lg">Coaching by Morgana</p>
+            <p className="text-slate-400 text-xs">Morgana Tarquino — Personal Trainer</p>
+          </div>
+          <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={18} /></button>
+        </div>
+        <p className="text-center text-slate-500 text-xs uppercase tracking-wide mb-1">Ricevuta di pagamento</p>
+        <p className="text-center text-slate-400 text-xs mb-5">N. {numero} · {dataFmt}</p>
+        <div className="space-y-2 border-t border-b border-slate-100 py-4 mb-4">
+          <div className="flex justify-between text-sm"><span className="text-slate-400">Cliente</span><span className="text-slate-700 font-medium">{nomeCliente}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-slate-400">Descrizione</span><span className="text-slate-700 font-medium text-right">{pagamento.tipo_piano || "—"}</span></div>
+          {pagamento.note && <div className="flex justify-between text-sm"><span className="text-slate-400">Nota</span><span className="text-slate-700 text-right">{pagamento.note}</span></div>}
+          {pagamento.metodo_pagamento && <div className="flex justify-between text-sm"><span className="text-slate-400">Metodo</span><span className="text-slate-700 font-medium">{labelMetodo(pagamento.metodo_pagamento)}</span></div>}
+        </div>
+        <div className="flex justify-between items-center mb-5">
+          <span className="text-slate-500 text-sm font-medium">Importo pagato</span>
+          <span className="text-slate-800 text-2xl font-semibold">{Number(pagamento.importo).toFixed(2)}€</span>
+        </div>
+        <p className="text-center text-slate-300 text-[10px] mb-5">Documento riepilogativo non fiscale — dati base, senza P.IVA</p>
+        <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
+      </div>
+    </div>
+  );
+}
+
+function PagamentoDettaglio({ pagamento, onClose, onSelectCliente }) {
+  const [ricevutaAperta, setRicevutaAperta] = useState(false);
+  const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 space-y-3">
+        <div className="flex justify-between items-start">
+          <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Dettaglio pagamento</p>
+          <button onClick={onClose} className="text-slate-300 hover:text-slate-500"><X size={18} /></button>
+        </div>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-slate-400">Cliente</span><span className="text-slate-700 font-medium">{nomeCliente}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Data</span><span className="text-slate-700">{pagamento.data_pagamento}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Tipo</span><span className="text-slate-700">{pagamento.tipo_piano || "—"}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Importo</span><span className="text-slate-800 font-semibold">{pagamento.importo != null ? `${Number(pagamento.importo).toFixed(2)}€` : "—"}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Metodo</span><span className="text-slate-700">{pagamento.metodo_pagamento ? labelMetodo(pagamento.metodo_pagamento) : "—"}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Stato</span><span className="text-slate-700 capitalize">{pagamento.stato === "spesa" ? "Spesa" : pagamento.stato === "saldato" ? "Saldato" : "Da saldare"}</span></div>
+          {pagamento.note && <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">Nota</span><span className="text-slate-700 text-right">{pagamento.note}</span></div>}
+        </div>
+        <div className="flex gap-2 pt-2">
+          {pagamento.client_id && (
+            <button onClick={() => { onClose(); onSelectCliente(pagamento.client_id); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Vai al cliente</button>
+          )}
+          {pagamento.importo != null && pagamento.stato !== "spesa" && (
+            <button onClick={() => setRicevutaAperta(true)} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium flex items-center justify-center gap-1.5"><FileText size={14} /> Genera ricevuta</button>
+          )}
+        </div>
+      </div>
+      {ricevutaAperta && <RicevutaModal pagamento={pagamento} onClose={() => setRicevutaAperta(false)} />}
+    </div>
+  );
+}
+
 function ImportoMancante({ p, onSalvato }) {
   const [valore, setValore] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -4959,6 +5040,7 @@ function GuadagniCoach({ clients, onSelect }) {
   const [billing, setBilling] = useState([]);
   const [caricando, setCaricando] = useState(true);
   const [filtro, setFiltro] = useState("tutti");
+  const [pagamentoAperto, setPagamentoAperto] = useState(null);
 
   const carica = async () => {
     const { data: pg } = await supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento", { ascending: false });
@@ -5102,7 +5184,7 @@ function GuadagniCoach({ clients, onSelect }) {
 
       {rinnovi.length > 0 && (
         <Card className="p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Prossimi rinnovi</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Prossimi rinnovi (pagamenti programmati)</p>
           <div className="divide-y divide-slate-100">
             {rinnovi.map((c) => {
               const b = billingByClient[c.id];
@@ -5111,7 +5193,7 @@ function GuadagniCoach({ clients, onSelect }) {
                   <div className="min-w-0">
                     <p className="text-sm text-slate-700 font-medium truncate">{c.nome} {c.cognome}</p>
                     <p className="text-xs text-slate-400">
-                      {b?.importo_ricorrente != null ? `${Number(b.importo_ricorrente).toFixed(0)}€` : "—"}
+                      {b?.importo_ricorrente != null ? `${Number(b.importo_ricorrente).toFixed(2)}€` : "Importo non impostato"}
                       {b?.frequenza_pagamento ? ` · ${labelFrequenza(b.frequenza_pagamento)}` : ""}
                       {b?.metodo_pagamento_abituale ? ` · ${labelMetodo(b.metodo_pagamento_abituale)}` : ""}
                     </p>
@@ -5134,7 +5216,7 @@ function GuadagniCoach({ clients, onSelect }) {
           {pagamentiVisibili.length === 0 && <p className="text-center text-slate-400 text-sm py-4">Nessun pagamento.</p>}
           {pagamentiVisibili.map((p) => (
             <div key={p.id} className="flex items-center gap-2 px-3 py-2.5">
-              <button onClick={() => p.client_id && onSelect(p.client_id)} className="flex-1 min-w-0 text-left">
+              <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
                 <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
                 <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : ""}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
               </button>
@@ -5157,15 +5239,18 @@ function GuadagniCoach({ clients, onSelect }) {
           ))}
         </Card>
       </div>
+
+      {pagamentoAperto && (
+        <PagamentoDettaglio pagamento={pagamentoAperto} onClose={() => setPagamentoAperto(null)} onSelectCliente={onSelect} />
+      )}
     </div>
   );
 }
 
-function AdminList({ clients, onSelect, onChanged }) {
+function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
-  const [vista, setVista] = useState("calendario");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
 
   const caricaNonLetteCoach = async () => {
@@ -5349,6 +5434,7 @@ function AdminApp() {
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [backupInCorso, setBackupInCorso] = useState(false);
+  const [vista, setVista] = useState("calendario"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
 
   const carica = async () => {
     try {
@@ -5377,7 +5463,7 @@ function AdminApp() {
       {selectedId ? (
         <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
       ) : (
-        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} />
+        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} vista={vista} setVista={setVista} />
       )}
     </div>
     </PullToRefresh>
