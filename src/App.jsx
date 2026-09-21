@@ -4933,6 +4933,27 @@ function NuovoPagamentoGuadagni({ clients, onSalvato }) {
   );
 }
 
+function ImportoMancante({ p, onSalvato }) {
+  const [valore, setValore] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async () => {
+    if (valore === "" || isNaN(Number(valore))) return;
+    setSalvando(true);
+    await supabase.from("payments").update({ importo: Number(valore) }).eq("id", p.id);
+    setSalvando(false);
+    onSalvato();
+  };
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="€"
+        className="w-16 border border-amber-300 rounded-lg px-1.5 py-1 text-xs" />
+      <button onClick={salva} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={16} /></button>
+    </div>
+  );
+}
+
 function GuadagniCoach({ clients, onSelect }) {
   const [pagamenti, setPagamenti] = useState([]);
   const [billing, setBilling] = useState([]);
@@ -5117,7 +5138,11 @@ function GuadagniCoach({ clients, onSelect }) {
                 <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
                 <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : ""}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
               </button>
-              <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{p.importo != null ? `${Number(p.importo).toFixed(2)}€` : "—"}</span>
+              {p.importo != null ? (
+                <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{Number(p.importo).toFixed(2)}€</span>
+              ) : (
+                <ImportoMancante p={p} onSalvato={carica} />
+              )}
               {p.stato && (
                 p.stato === "spesa" ? (
                   <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-rose-100 text-rose-700">Spesa</span>
