@@ -796,6 +796,49 @@ function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
 /* Analizza la serie storica dei check e produce un giudizio testuale in italiano
    sull'andamento generale (peso, vita, circonferenze muscolari), utile a chi legge
    il grafico senza saperlo interpretare da sola. */
+const SOGLIA_GAP_GIORNI = 45; // oltre questo scarto tra due check consecutivi, si considera un cambio di approccio/fase
+
+function giorniTra(d1, d2) {
+  const a = new Date(d1 + "T00:00:00");
+  const b = new Date(d2 + "T00:00:00");
+  return Math.round((b - a) / 86400000);
+}
+
+function formattaDurata(giorni) {
+  if (giorni >= 60) return `circa ${Math.round(giorni / 30)} mesi`;
+  if (giorni >= 14) return `circa ${Math.round(giorni / 7)} settimane`;
+  return `${giorni} giorni`;
+}
+
+// Trova l'indice del primo check dopo l'ultimo salto temporale importante in una lista ordinata
+// per data. Un check fatto mesi dopo il precedente quasi sempre segna un cambio di approccio
+// (fine di un cut, inizio di un reverse o di una massa) anche se non è stato segnato a mano come
+// nuovo obiettivo — quindi va isolato dal resto della storia invece di mediarci sopra.
+function indiceDopoUltimoSalto(lista, sogliaGiorni = SOGLIA_GAP_GIORNI) {
+  let idx = 0;
+  for (let i = 1; i < lista.length; i++) {
+    if (!lista[i - 1].data_check || !lista[i].data_check) continue;
+    const gap = giorniTra(lista[i - 1].data_check, lista[i].data_check);
+    if (gap >= sogliaGiorni) idx = i;
+  }
+  return idx;
+}
+
+// Confronto diretto fra due soli check (usato quando dopo un salto temporale c'è un solo check
+// recente): stessa forma { direzione, delta, oscillante } di trend(), così può riusare le stesse
+// frasi di generaNotaAndamento senza duplicare la logica di interpretazione.
+function deltaSemplice(v1, v2, soglia) {
+  if (v1 == null || v2 == null) return { direzione: null, delta: null, oscillante: false };
+  const delta = v2 - v1;
+  const direzione = Math.abs(delta) < soglia ? "stabile" : delta < 0 ? "calo" : "aumento";
+  return { direzione, delta, oscillante: false };
+}
+
+function mediaMuscolo(c) {
+  const vals = [c.braccio_dx_cm, c.coscia_dx_cm].filter((v) => v != null);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
 function analizzaAndamento(ordinati) {
   const estrai = (key) => ordinati.map((c) => ({ data: c.data_check, v: c[key] })).filter((p) => p.v != null);
   const peso = estrai("peso_kg");
@@ -831,10 +874,10 @@ function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 const LABEL_OBIETTIVO = { definizione: "Definizione", mantenimento: "Mantenimento", massa: "Massa", reverse: "Reverse" };
 function labelObiettivo(o) { return LABEL_OBIETTIVO[o] || o; }
 
-function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo) {
+function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabel = "nelle ultime settimane") {
   const frasi = [];
   if (tPeso.oscillante) {
-    frasi.push("Il peso ha avuto alti e bassi nelle ultime settimane — è normale, dipende da ritenzione idrica, ciclo, stress o digestione — ma guardando l'insieme dei dati:");
+    frasi.push(`Il peso ha avuto alti e bassi ${finestraLabel} — è normale, dipende da ritenzione idrica, ciclo, stress o digestione — ma guardando l'insieme dei dati:`);
   }
   const pesoTxt = tPeso.direzione === "calo" ? "il peso è sceso" : tPeso.direzione === "aumento" ? "il peso è salito" : tPeso.direzione === "stabile" ? "il peso è rimasto stabile" : null;
   const vitaTxt = tVita.direzione === "calo" ? "la circonferenza vita si è ridotta" : tVita.direzione === "aumento" ? "la circonferenza vita è aumentata" : tVita.direzione === "stabile" ? "la circonferenza vita è rimasta stabile" : null;
@@ -899,49 +942,83 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
   const [vediTutto, setVediTutto] = useState(false);
 
   const tutti = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
-  // Se sappiamo da quando è iniziata la fase attuale (cut, reverse, massa...), l'andamento si legge
-  // solo su quella finestra: mescolare i check di una definizione con quelli di un reverse successivo
-  // darebbe un trend senza senso (es. un netto calo peso seguito da una risalita letti come "stabile").
-  const usaFase = !!obiettivoDal && !vediTutto;
-  const inFase = obiettivoDal ? tutti.filter((c) => c.data_check && c.data_check >= obiettivoDal) : tutti;
-  const finestra = usaFase ? inFase : tutti;
-
-  const analisiFinestra = analizzaAndamento(finestra);
   const analisiTutti = analizzaAndamento(tutti);
   if (!analisiTutti) return null; // dati insufficienti anche su tutto lo storico: niente da mostrare
 
+  const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "—");
   const chartDataDa = (lista) => {
-    const raw = lista.map((c) => {
-      const vals = [c.braccio_dx_cm, c.coscia_dx_cm].filter((v) => v != null);
-      return {
-        dataLabel: c.data_check ? c.data_check.slice(5).split("-").reverse().join("/") : "",
-        peso: c.peso_kg ?? null,
-        vita: c.sopra_ombelico_cm ?? null,
-        muscolo: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,
-      };
-    });
+    const raw = lista.map((c) => ({
+      dataLabel: c.data_check ? c.data_check.slice(5).split("-").reverse().join("/") : "",
+      peso: c.peso_kg ?? null,
+      vita: c.sopra_ombelico_cm ?? null,
+      muscolo: mediaMuscolo(c),
+    }));
     let cd = serieConVariazione(raw, "peso");
     cd = serieConVariazione(cd, "vita");
     cd = serieConVariazione(cd, "muscolo");
     return cd;
   };
 
-  const puntiInsufficientiInFase = usaFase && !analisiFinestra;
-  const analisi = puntiInsufficientiInFase ? analisiTutti : (analisiFinestra || analisiTutti);
-  const chartData = chartDataDa(puntiInsufficientiInFase ? tutti : finestra);
-  const nota = puntiInsufficientiInFase
-    ? `Hai iniziato la fase di ${labelObiettivo(obiettivo).toLowerCase()} il ${obiettivoDal.split("-").reverse().join("/")}: servono almeno due check in questa fase per iniziare a vedere un trend. Sotto, per intanto, lo storico completo.`
-    : generaNotaAndamento(analisi, obiettivo);
+  // 1) Se sappiamo da quando è iniziata la fase attuale (cut, reverse, massa...), si parte da lì.
+  const usaFase = !!obiettivoDal && !vediTutto;
+  const daFase = obiettivoDal ? tutti.filter((c) => c.data_check && c.data_check >= obiettivoDal) : tutti;
+  const base = usaFase ? daFase : tutti;
+
+  // 2) Dentro quella finestra, si cerca comunque l'ultimo salto temporale importante fra due check
+  // consecutivi: un check fatto mesi dopo il precedente segnala quasi sempre un cambio di approccio
+  // (es. fine definizione → reverse, o inizio di una massa) anche se non è stato taggato a mano.
+  const idxSalto = vediTutto ? 0 : indiceDopoUltimoSalto(base);
+  const saltoRilevato = idxSalto > 0;
+  const giorniSalto = saltoRilevato ? giorniTra(base[idxSalto - 1].data_check, base[idxSalto].data_check) : 0;
+  const finestra = saltoRilevato ? base.slice(idxSalto) : base;
+
+  let analisi, nota, chartData, sottotitolo;
+
+  if (finestra.length === 1 && saltoRilevato) {
+    // Caso tipico: l'ultimo check e il precedente sono a mesi di distanza — non c'è un "trend" nel
+    // senso classico, ma un confronto diretto fra due momenti diversi, che va raccontato come tale.
+    const prev = base[idxSalto - 1], cur = base[idxSalto];
+    analisi = {
+      tPeso: deltaSemplice(prev.peso_kg, cur.peso_kg, 0.4),
+      tVita: deltaSemplice(prev.sopra_ombelico_cm, cur.sopra_ombelico_cm, 0.5),
+      tMuscolo: deltaSemplice(mediaMuscolo(prev), mediaMuscolo(cur), 0.5),
+    };
+    const notaBase = generaNotaAndamento(analisi, obiettivo, "rispetto al check precedente");
+    nota = `Tra il check del ${fmtData(prev.data_check)} e quello del ${fmtData(cur.data_check)} sono passati ${formattaDurata(giorniSalto)}: è più un cambio di fase che un trend continuo. ${notaBase}`;
+    chartData = chartDataDa([prev, cur]);
+    sottotitolo = `confronto dopo una pausa di ${formattaDurata(giorniSalto)}`;
+  } else {
+    const analisiFinestra = analizzaAndamento(finestra);
+    const puntiInsufficienti = finestra.length < 2 || !analisiFinestra;
+    analisi = puntiInsufficienti ? analisiTutti : analisiFinestra;
+    chartData = chartDataDa(puntiInsufficienti ? tutti : finestra);
+    if (puntiInsufficienti) {
+      nota = obiettivoDal
+        ? `Hai iniziato la fase di ${labelObiettivo(obiettivo).toLowerCase()} il ${fmtData(obiettivoDal)}: servono almeno due check in questa fase per iniziare a vedere un trend. Sotto, per intanto, lo storico completo.`
+        : "Servono ancora un paio di check per vedere un trend chiaro.";
+      sottotitolo = null;
+    } else {
+      const giorniFinestra = giorniTra(finestra[0].data_check, finestra[finestra.length - 1].data_check);
+      const finestraLabel = giorniFinestra > 150 ? "nel periodo analizzato" : giorniFinestra > 60 ? "negli ultimi mesi" : "nelle ultime settimane";
+      const notaBase = generaNotaAndamento(analisi, obiettivo, finestraLabel);
+      nota = saltoRilevato
+        ? `Sono passati ${formattaDurata(giorniSalto)} dal check del ${fmtData(base[idxSalto - 1].data_check)}: da lì in poi si vede un cambio di approccio, quindi il confronto è fatto solo sui check più recenti. ${notaBase}`
+        : notaBase;
+      sottotitolo = usaFase ? `fase ${labelObiettivo(obiettivo).toLowerCase()} dal ${fmtData(obiettivoDal)}` : saltoRilevato ? `dal ${fmtData(finestra[0].data_check)}` : null;
+    }
+  }
+
+  const mostraToggle = !!obiettivoDal || saltoRilevato || vediTutto;
 
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">
-          Andamento generale{obiettivoDal && !vediTutto ? ` · fase ${labelObiettivo(obiettivo).toLowerCase()} dal ${obiettivoDal.split("-").reverse().join("/")}` : ""}
+          Andamento generale{sottotitolo && !vediTutto ? ` · ${sottotitolo}` : ""}
         </p>
-        {obiettivoDal && (
+        {mostraToggle && (
           <button onClick={() => setVediTutto((v) => !v)} className="text-[11px] text-sky-600 font-medium flex-shrink-0">
-            {vediTutto ? "Solo fase attuale" : "Storico completo"}
+            {vediTutto ? "Solo fase recente" : "Storico completo"}
           </button>
         )}
       </div>
@@ -961,7 +1038,7 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Vita</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Braccio/coscia</span>
       </div>
-      <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{obiettivoDal && !vediTutto && !puntiInsufficientiInFase ? " in questa fase" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
+      <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{sottotitolo && !vediTutto ? " in questa finestra" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
       <div className="bg-sky-50 border border-sky-100 rounded-lg p-3">
         <p className="text-sm text-slate-700 leading-relaxed">{nota}</p>
       </div>
