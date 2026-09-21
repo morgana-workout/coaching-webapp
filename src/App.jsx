@@ -5504,10 +5504,109 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   );
 }
 
+function GrigliaCompletezza({ clients, onSelect }) {
+  const [nutrizione, setNutrizione] = useState({});
+  const [allenamento, setAllenamento] = useState({});
+  const [caricando, setCaricando] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      // Un'unica query per tutti i clienti per ciascuna tabella, poi si riduce in memoria alla
+      // data più recente per client_id — molto più leggero di una query per cliente.
+      const { data: nu } = await supabase.from("nutrition_plans").select("client_id, data_aggiornamento");
+      const nuMap = {};
+      (nu || []).forEach((r) => {
+        if (!r.client_id) return;
+        if (!nuMap[r.client_id] || (r.data_aggiornamento || "") > nuMap[r.client_id]) nuMap[r.client_id] = r.data_aggiornamento;
+      });
+      setNutrizione(nuMap);
+
+      const { data: te } = await supabase.from("training_entries").select("client_id, data");
+      const teMap = {};
+      (te || []).forEach((r) => {
+        if (!r.client_id) return;
+        if (!teMap[r.client_id] || (r.data || "") > teMap[r.client_id]) teMap[r.client_id] = r.data;
+      });
+      setAllenamento(teMap);
+      setCaricando(false);
+    })();
+  }, []);
+
+  if (caricando) return <Spinner />;
+
+  const oggi = formatDataLocale(new Date());
+  const giorniDa = (d) => (d ? Math.round((new Date(oggi + "T00:00:00") - new Date(d + "T00:00:00")) / 86400000) : null);
+
+  const Pallino = ({ stato }) => {
+    // stato: true = presente, false = mancante, null = non applicabile a questo cliente
+    if (stato === null) return <span className="text-slate-300 text-xs">n/d</span>;
+    return <span className={stato ? "text-emerald-500" : "text-rose-400"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
+  };
+
+  const righe = [...clients].sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
+
+  return (
+    <Card className="p-0 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-slate-50 text-slate-500 text-left">
+              <th className="sticky left-0 bg-slate-50 px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
+              <th className="px-2 py-2 font-medium text-center">Scadenza</th>
+              <th className="px-2 py-2 font-medium text-center">Scheda</th>
+              <th className="px-2 py-2 font-medium text-center">Log allen.</th>
+              <th className="px-2 py-2 font-medium text-center">Nutrizione</th>
+              <th className="px-2 py-2 font-medium text-center">Ultimo check</th>
+            </tr>
+          </thead>
+          <tbody>
+            {righe.map((c) => {
+              const cadenzaFissa = ["Mensile", "Trimestrale", "Semestrale"].includes(c.piano);
+              const scadenzaStato = cadenzaFissa ? !!c.data_scadenza : null;
+              const schedaStato = !!(c.link_scheda || c.scheda_pdf_path);
+              const logData = allenamento[c.id];
+              const nutData = nutrizione[c.id];
+              const checkData = c.ultimo_check;
+              return (
+                <tr key={c.id} onClick={() => onSelect(c.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
+                  <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{c.nome} {c.cognome}</td>
+                  <td className="px-2 py-2 text-center"><Pallino stato={scadenzaStato} /></td>
+                  <td className="px-2 py-2 text-center"><Pallino stato={schedaStato} /></td>
+                  <td className="px-2 py-2 text-center">
+                    <Pallino stato={!!logData} />
+                    {logData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(logData)}g fa</div>}
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <Pallino stato={!!nutData} />
+                    {nutData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(nutData)}g fa</div>}
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <Pallino stato={!!checkData} />
+                    {checkData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(checkData)}g fa</div>}
+                  </td>
+                </tr>
+              );
+            })}
+            {righe.length === 0 && (
+              <tr><td colSpan={6} className="text-center text-slate-400 py-6">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-3 text-[11px] text-slate-400 px-3 py-2 border-t border-slate-100">
+        <span className="flex items-center gap-1 text-emerald-500">● presente</span>
+        <span className="flex items-center gap-1 text-rose-400">○ mancante</span>
+        <span>n/d = non si applica (pacchetto senza scadenza fissa)</span>
+      </div>
+    </Card>
+  );
+}
+
 function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
+  const [vistaLista, setVistaLista] = useState("schede");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
 
   const caricaNonLetteCoach = async () => {
@@ -5623,7 +5722,15 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
       )}
 
       <div>
-        <p className="text-sm font-medium text-slate-700 px-1 mb-2">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
+        <div className="flex items-center justify-between px-1 mb-2">
+          <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
+            <button onClick={() => setVistaLista("schede")} className={`px-2.5 py-1 rounded-md text-xs font-medium ${vistaLista === "schede" ? "bg-white text-slate-700 shadow-sm" : "text-slate-500"}`}>Schede</button>
+            <button onClick={() => setVistaLista("griglia")} className={`px-2.5 py-1 rounded-md text-xs font-medium ${vistaLista === "griglia" ? "bg-white text-slate-700 shadow-sm" : "text-slate-500"}`}>Griglia dati</button>
+          </div>
+        </div>
+        {vistaLista === "griglia" && <GrigliaCompletezza clients={visibili} onSelect={onSelect} />}
+        {vistaLista === "schede" && (
         <div className="space-y-2">
           {visibili.map((c) => (
             <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50 border-rose-100" : ""}`}>
@@ -5659,6 +5766,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
             <Card className="p-8 text-center text-slate-400">Nessun cliente corrisponde alla ricerca/filtro.</Card>
           )}
         </div>
+        )}
       </div>
       </>
       )}
