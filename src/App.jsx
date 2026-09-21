@@ -2012,6 +2012,38 @@ function addGiorni(dataStr, giorni) {
   return d.toISOString().slice(0, 10);
 }
 
+const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
+
+// Ricalcola la data di scadenza "da zero" a partire dallo storico reale dei pagamenti a
+// cadenza fissa di un cliente (in ordine di data pagamento), invece di dipendere dalla
+// data reale in cui ogni pagamento e' stato salvato nell'app. Cosi' il risultato resta
+// coerente anche dopo aver aggiunto o cancellato pagamenti (es. doppioni da correggere).
+function ricalcolaScadenzaDaPagamenti(pagamenti) {
+  const validi = (pagamenti || [])
+    .filter((p) => MESI_PER_TIPO_PAGAMENTO[p.tipo_piano])
+    .slice()
+    .sort((a, b) => (a.data_pagamento || "").localeCompare(b.data_pagamento || ""));
+  let scadenza = null;
+  let ultimoTipo = null;
+  for (const p of validi) {
+    const base = (scadenza && scadenza > p.data_pagamento) ? scadenza : p.data_pagamento;
+    scadenza = addMesi(base, MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]);
+    ultimoTipo = p.tipo_piano;
+  }
+  return { scadenza, ultimoTipo };
+}
+
+// Rilegge tutti i pagamenti del cliente dal database e riallinea la scadenza del suo
+// pacchetto di conseguenza. Va richiamata sia dopo aver registrato un nuovo pagamento a
+// cadenza fissa, sia dopo averne cancellato uno, cosi' un doppione eliminato non lascia
+// la scadenza avanzata "a vuoto".
+async function ricalcolaEAggiornaScadenza(clientId) {
+  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano").eq("client_id", clientId);
+  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti);
+  if (!scadenza) return;
+  await supabase.from("clients").update({ piano: ultimoTipo, data_scadenza: scadenza, stato_pacchetto: "attivo" }).eq("id", clientId);
+}
+
 const METODI_PAGAMENTO = [
   { value: "satispay", label: "Satispay" },
   { value: "hype", label: "Hype" },
@@ -2100,7 +2132,6 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   const [nota, setNota] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [fatto, setFatto] = useState(false);
-  const mesiPerTipo = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
   const isGratuito = tipo === "Gratuito";
   const aggiornaScadenza = ["Mensile", "Trimestrale", "Semestrale"].includes(tipo);
 
@@ -2116,15 +2147,12 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
         importo: importo === "" ? null : Number(importo), metodo_pagamento: metodo || null, stato, note: nota || null,
       });
       if (aggiornaScadenza) {
-        const oggi = new Date().toISOString().slice(0, 10);
-        const base = (client.data_scadenza && client.data_scadenza > oggi) ? client.data_scadenza : dataPagamento;
-        const nuovaScadenza = addMesi(base, mesiPerTipo[tipo]);
-        await supabase.from("clients").update({
-          piano: tipo,
-          data_scadenza: nuovaScadenza,
-          data_inizio: client.data_inizio || dataPagamento,
-          stato_pacchetto: "attivo",
-        }).eq("id", client.id);
+        if (!client.data_inizio) {
+          await supabase.from("clients").update({ data_inizio: dataPagamento }).eq("id", client.id);
+        }
+        // Ricalcola dallo storico reale dei pagamenti, non dalla data reale di salvataggio:
+        // cosi' un pagamento inserito in ritardo o di correzione non "salta" mesi a vuoto.
+        await ricalcolaEAggiornaScadenza(client.id);
       }
     }
     setSalvando(false);
@@ -2140,6 +2168,10 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   const elimina = async (p) => {
     if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
     await supabase.from("payments").delete().eq("id", p.id);
+    // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
+      await ricalcolaEAggiornaScadenza(client.id);
+    }
     onRegistrato();
   };
 
@@ -4838,8 +4870,6 @@ async function esportaCarichiCsv() {
   scaricaCsv(`carichi_allenamento_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
-const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
-
 function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
   const [aperto, setAperto] = useState(false);
   const [clientId, setClientId] = useState("");
@@ -4880,15 +4910,12 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
     if (error) { setSalvando(false); setErrore("Errore nel salvataggio, riprova."); return; }
     // Mensile/Trimestrale/Semestrale: la scadenza del pacchetto si aggiorna in automatico, coerente col tipo — mai una data "a caso"
     if (aggiornaScadenza && cliente) {
-      const oggi = new Date().toISOString().slice(0, 10);
-      const base = (cliente.data_scadenza && cliente.data_scadenza > oggi) ? cliente.data_scadenza : dataPagamento;
-      const nuovaScadenza = addMesi(base, MESI_PER_TIPO_PAGAMENTO[tipoPiano]);
-      await supabase.from("clients").update({
-        piano: tipoPiano,
-        data_scadenza: nuovaScadenza,
-        data_inizio: cliente.data_inizio || dataPagamento,
-        stato_pacchetto: "attivo",
-      }).eq("id", clientId);
+      if (!cliente.data_inizio) {
+        await supabase.from("clients").update({ data_inizio: dataPagamento }).eq("id", clientId);
+      }
+      // Ricalcola dallo storico reale dei pagamenti, non dalla data reale di salvataggio:
+      // cosi' un pagamento inserito in ritardo o di correzione non "salta" mesi a vuoto.
+      await ricalcolaEAggiornaScadenza(clientId);
     }
     setSalvando(false);
     reset();
@@ -5149,6 +5176,11 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const elimina = async (p) => {
     if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
     await supabase.from("payments").delete().eq("id", p.id);
+    // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
+      await ricalcolaEAggiornaScadenza(p.client_id);
+      onClientiCambiati?.();
+    }
     carica();
   };
 
