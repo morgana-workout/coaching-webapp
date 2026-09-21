@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -4833,6 +4833,106 @@ async function esportaCarichiCsv() {
   scaricaCsv(`carichi_allenamento_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
+function NuovoPagamentoGuadagni({ clients, onSalvato }) {
+  const [aperto, setAperto] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [tipoPiano, setTipoPiano] = useState("");
+  const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
+  const [importo, setImporto] = useState("");
+  const [metodo, setMetodo] = useState("");
+  const [stato, setStato] = useState("saldato");
+  const [nota, setNota] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const clientiOrdinati = [...clients].sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
+
+  const reset = () => {
+    setClientId(""); setTipoPiano(""); setImporto(""); setMetodo(""); setStato("saldato"); setNota("");
+    setDataPagamento(new Date().toISOString().slice(0, 10));
+  };
+
+  const salva = async () => {
+    setErrore("");
+    if (!clientId) { setErrore("Seleziona un cliente."); return; }
+    if (importo === "" || isNaN(Number(importo))) { setErrore("Inserisci un importo valido."); return; }
+    setSalvando(true);
+    const { error } = await supabase.from("payments").insert({
+      client_id: clientId,
+      data_pagamento: dataPagamento,
+      tipo_piano: tipoPiano || "Pagamento",
+      importo: Number(importo),
+      metodo_pagamento: metodo || null,
+      stato,
+      note: nota || null,
+    });
+    setSalvando(false);
+    if (error) { setErrore("Errore nel salvataggio, riprova."); return; }
+    reset();
+    setAperto(false);
+    onSalvato();
+  };
+
+  if (!aperto) {
+    return (
+      <button onClick={() => setAperto(true)} className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
+        <Plus size={16} /> Nuovo pagamento
+      </button>
+    );
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Nuovo pagamento</p>
+      <div>
+        <label className="text-xs text-slate-500">Cliente</label>
+        <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="">Seleziona cliente…</option>
+          {clientiOrdinati.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Data pagamento</label>
+          <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Importo (€)</label>
+          <input type="number" step="0.01" value={importo} onChange={(e) => setImporto(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 35" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Metodo</label>
+          <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">—</option>
+            {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Stato</label>
+          <select value={stato} onChange={(e) => setStato(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="saldato">Saldato</option>
+            <option value="da_saldare">Da saldare</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Tipo (facoltativo)</label>
+        <input value={tipoPiano} onChange={(e) => setTipoPiano(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. Mensile, A lezione, Coaching online..." />
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Nota (facoltativa)</label>
+        <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. saldo pacchetto..." />
+      </div>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={() => { setAperto(false); setErrore(""); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva"}</button>
+      </div>
+    </Card>
+  );
+}
+
 function GuadagniCoach({ clients, onSelect }) {
   const [pagamenti, setPagamenti] = useState([]);
   const [billing, setBilling] = useState([]);
@@ -4930,6 +5030,8 @@ function GuadagniCoach({ clients, onSelect }) {
           <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(0)}€</p>
         </Card>
       </div>
+
+      <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} />
 
       <Card className="p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Guadagni mensili (ultimi 6 mesi)</p>
