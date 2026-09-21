@@ -2187,6 +2187,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
             <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
             <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
             <option value="A lezione">A lezione (non tocca la scadenza)</option>
+            <option value="Variabile">Variabile (non tocca la scadenza)</option>
             <option value="Gratuito">Gratuito</option>
           </select>
         </div>
@@ -3905,6 +3906,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <option value="Mensile">Mensile</option>
               <option value="Trimestrale">Trimestrale</option>
               <option value="Semestrale">Semestrale</option>
+              <option value="Variabile">Variabile</option>
               <option value="FRIEND">FRIEND</option>
               <option value="Gratuito">Gratuito</option>
             </select>
@@ -4975,6 +4977,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
           <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
           <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
           <option value="A lezione">A lezione (non tocca la scadenza)</option>
+          <option value="Variabile">Variabile (non tocca la scadenza)</option>
           <option value="Altro">Altro (non tocca la scadenza)</option>
         </select>
         {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
