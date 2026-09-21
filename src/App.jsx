@@ -4853,28 +4853,32 @@ function GuadagniCoach({ clients, onSelect }) {
   const oggi = new Date();
   const meseCorrente = oggi.toISOString().slice(0, 7);
   const conImporto = pagamenti.filter((p) => p.importo != null);
-  const saldati = conImporto.filter((p) => p.stato !== "da_saldare");
+  const incassi = conImporto.filter((p) => p.stato === "saldato");
+  const spese = conImporto.filter((p) => p.stato === "spesa");
   const daSaldare = conImporto.filter((p) => p.stato === "da_saldare");
-  const totaleSaldato = saldati.reduce((s, p) => s + Number(p.importo), 0);
+  const nettoRows = conImporto.filter((p) => p.stato === "saldato" || p.stato === "spesa");
+  const totaleIncassato = incassi.reduce((s, p) => s + Number(p.importo), 0);
+  const totaleSpese = spese.reduce((s, p) => s + Number(p.importo), 0);
+  const totaleNetto = totaleIncassato + totaleSpese;
   const totaleDaSaldare = daSaldare.reduce((s, p) => s + Number(p.importo), 0);
-  const guadagnoMese = saldati.filter((p) => (p.data_pagamento || "").slice(0, 7) === meseCorrente).reduce((s, p) => s + Number(p.importo), 0);
+  const guadagnoMese = nettoRows.filter((p) => (p.data_pagamento || "").slice(0, 7) === meseCorrente).reduce((s, p) => s + Number(p.importo), 0);
 
-  // Guadagni mensili — ultimi 6 mesi (solo pagamenti saldati)
+  // Guadagni mensili — ultimi 6 mesi (incassi al netto delle spese)
   const mesi = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(oggi.getFullYear(), oggi.getMonth() - i, 1);
     const chiave = d.toISOString().slice(0, 7);
     mesi.push({ chiave, label: d.toLocaleDateString("it-IT", { month: "short" }), totale: 0 });
   }
-  saldati.forEach((p) => {
+  nettoRows.forEach((p) => {
     const chiave = (p.data_pagamento || "").slice(0, 7);
     const m = mesi.find((x) => x.chiave === chiave);
     if (m) m.totale += Number(p.importo);
   });
 
-  // Per metodo di pagamento (solo saldati)
+  // Per metodo di pagamento (solo incassi saldati, le spese non hanno un metodo)
   const perMetodo = {};
-  saldati.forEach((p) => {
+  incassi.forEach((p) => {
     const k = p.metodo_pagamento || "non specificato";
     perMetodo[k] = (perMetodo[k] || 0) + Number(p.importo);
   });
@@ -4902,18 +4906,28 @@ function GuadagniCoach({ clients, onSelect }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <Card className="p-3">
-          <p className="text-[11px] text-slate-400">Guadagno del mese</p>
+          <p className="text-[11px] text-slate-400">Guadagno del mese (netto)</p>
           <p className="text-lg font-semibold text-slate-800 mt-0.5">{guadagnoMese.toFixed(0)}€</p>
         </Card>
         <Card className="p-3">
-          <p className="text-[11px] text-slate-400">Saldato (totale)</p>
-          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleSaldato.toFixed(0)}€</p>
+          <p className="text-[11px] text-slate-400">Totale netto da inizio anno</p>
+          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleNetto.toFixed(0)}€</p>
+        </Card>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Incassato</p>
+          <p className="text-base font-semibold text-slate-700 mt-0.5">{totaleIncassato.toFixed(0)}€</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Spese (affitto ecc.)</p>
+          <p className="text-base font-semibold text-rose-600 mt-0.5">{totaleSpese.toFixed(0)}€</p>
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Da saldare</p>
-          <p className="text-lg font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(0)}€</p>
+          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(0)}€</p>
         </Card>
       </div>
 
@@ -4970,7 +4984,7 @@ function GuadagniCoach({ clients, onSelect }) {
 
       <div>
         <div className="flex gap-2 mb-2 px-1">
-          {[["tutti", "Tutti"], ["saldato", "Saldati"], ["da_saldare", "Da saldare"]].map(([k, l]) => (
+          {[["tutti", "Tutti"], ["saldato", "Saldati"], ["da_saldare", "Da saldare"], ["spesa", "Spese"]].map(([k, l]) => (
             <button key={k} onClick={() => setFiltro(k)} className={`px-3 py-1 rounded-full text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>{l}</button>
           ))}
         </div>
@@ -4979,14 +4993,18 @@ function GuadagniCoach({ clients, onSelect }) {
           {pagamentiVisibili.map((p) => (
             <div key={p.id} className="flex items-center gap-2 px-3 py-2.5">
               <button onClick={() => p.client_id && onSelect(p.client_id)} className="flex-1 min-w-0 text-left">
-                <p className="text-sm text-slate-700 font-medium truncate">{p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
-                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : ""}{p.note ? ` · ${p.note}` : ""}</p>
+                <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
+                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : ""}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
               </button>
-              <span className="text-sm text-slate-700 font-medium flex-shrink-0">{p.importo != null ? `${Number(p.importo).toFixed(0)}€` : "—"}</span>
+              <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{p.importo != null ? `${Number(p.importo).toFixed(0)}€` : "—"}</span>
               {p.stato && (
-                <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  {p.stato === "saldato" ? "Saldato" : "Da saldare"}
-                </button>
+                p.stato === "spesa" ? (
+                  <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-rose-100 text-rose-700">Spesa</span>
+                ) : (
+                  <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                    {p.stato === "saldato" ? "Saldato" : "Da saldare"}
+                  </button>
+                )
               )}
               <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
             </div>
