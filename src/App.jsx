@@ -2011,6 +2011,11 @@ function addGiorni(dataStr, giorni) {
   d.setDate(d.getDate() + giorni);
   return d.toISOString().slice(0, 10);
 }
+// Formatta una Date usando i componenti locali (anno/mese/giorno), mai toISOString()
+// che converte in UTC e puo' sfasare il giorno di uno in fusi orari come Europe/Rome.
+function formatDataLocale(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
 
@@ -4441,11 +4446,12 @@ function CalendarioAgenda({ clients, onSelect }) {
 
   const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
 
-  const domenicaDi = (ds) => {
-    // La settimana del promemoria messaggi inizia (e si azzera) la domenica.
+  const sabatoDi = (ds) => {
+    // La settimana del promemoria messaggi inizia (e si azzera) il sabato.
     const d = new Date(ds + "T00:00:00");
-    d.setDate(d.getDate() - d.getDay());
-    return d.toISOString().slice(0, 10);
+    const diff = (d.getDay() + 1) % 7; // giorni trascorsi dall'ultimo sabato (0 se oggi è sabato)
+    d.setDate(d.getDate() - diff);
+    return formatDataLocale(d);
   };
 
   const eventi = [];
@@ -4493,7 +4499,7 @@ function CalendarioAgenda({ clients, onSelect }) {
       eventi.push({ data: ds, ora: "18:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (18:00–19:00)", clientId: null });
     }
     if (giornoSettimana === 5) {
-      const settimana = domenicaDi(ds);
+      const settimana = sabatoDi(ds);
       const inviateSettimana = new Set(promemoriaRighe.filter((r) => r.settimana === settimana && r.inviato).map((r) => r.client_id));
       const mancanti = clients.filter((c) => !inviateSettimana.has(c.id));
       eventi.push({
@@ -4675,18 +4681,17 @@ function InviaNotaForm({ clients, onFatto }) {
   );
 }
 
-function domenicaSettimanaCorrente() {
-  // Restituisce la domenica di inizio della settimana corrente: il promemoria messaggi
-  // si azzera esattamente alla domenica (non al lunedì).
+function sabatoSettimanaCorrente() {
+  // Restituisce il sabato di inizio della settimana corrente: il promemoria messaggi
+  // si azzera esattamente al sabato, per la nuova settimana di contatti.
   const oggi = new Date();
-  const diff = -oggi.getDay(); // getDay(): 0 = domenica ... 6 = sabato
-  const domenica = new Date(oggi);
-  domenica.setDate(oggi.getDate() + diff);
-  return domenica.toISOString().slice(0, 10);
+  const diff = (oggi.getDay() + 1) % 7; // getDay(): 0 = domenica ... 6 = sabato
+  const sabato = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() - diff);
+  return formatDataLocale(sabato);
 }
 
 function PromemoriaMessaggi({ clients }) {
-  const settimana = useMemo(() => domenicaSettimanaCorrente(), []);
+  const settimana = useMemo(() => sabatoSettimanaCorrente(), []);
   const [stato, setStato] = useState({});
   const [caricando, setCaricando] = useState(true);
 
@@ -4714,7 +4719,12 @@ function PromemoriaMessaggi({ clients }) {
   const online = clients.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido");
 
   const Gruppo = ({ titolo, sottotitolo, elenco }) => {
-    const mancanti = elenco.filter((c) => !stato[c.id]).length;
+    // Mostra solo le clienti non ancora spuntate: quelle già contattate escono dalla lista
+    // (restano comunque recuperabili con "Mostra le già contattate", in caso di tap per sbaglio).
+    const [mostraFatte, setMostraFatte] = useState(false);
+    const daContattare = elenco.filter((c) => !stato[c.id]);
+    const contattate = elenco.filter((c) => !!stato[c.id]);
+    const visibili = mostraFatte ? elenco : daContattare;
     return (
       <div>
         <div className="flex items-baseline justify-between px-1 mb-2">
@@ -4723,7 +4733,8 @@ function PromemoriaMessaggi({ clients }) {
         </div>
         <Card className="p-1 divide-y divide-slate-100">
           {elenco.length === 0 && <p className="text-center text-slate-400 text-sm py-3">Nessuna cliente in questo gruppo.</p>}
-          {elenco.map((c) => {
+          {elenco.length > 0 && daContattare.length === 0 && !mostraFatte && <p className="text-center text-emerald-600 text-sm py-3">Tutte le clienti contattate questa settimana ✓</p>}
+          {visibili.map((c) => {
             const fatto = !!stato[c.id];
             return (
               <button key={c.id} onClick={() => toggle(c.id, fatto)} className="w-full flex items-center gap-3 px-2 py-2.5 text-left">
@@ -4736,7 +4747,16 @@ function PromemoriaMessaggi({ clients }) {
             );
           })}
         </Card>
-        {mancanti > 0 && <p className="text-[11px] text-amber-600 mt-1 px-1">{mancanti} da contattare questa settimana</p>}
+        <div className="flex items-center justify-between mt-1 px-1">
+          {daContattare.length > 0 ? (
+            <p className="text-[11px] text-amber-600">{daContattare.length} da contattare questa settimana</p>
+          ) : <span />}
+          {contattate.length > 0 && (
+            <button onClick={() => setMostraFatte((v) => !v)} className="text-[11px] text-slate-400 underline">
+              {mostraFatte ? "Nascondi le contattate" : `Mostra le ${contattate.length} già contattate`}
+            </button>
+          )}
+        </div>
       </div>
     );
   };
