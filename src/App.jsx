@@ -5075,6 +5075,26 @@ async function esportaCarichiCsv() {
   scaricaCsv(`carichi_allenamento_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
+function esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare, mesi, metodiOrdinati }) {
+  const righe = [
+    ["Prospetto guadagni", `Esportato il ${formatDataLocale(new Date())}`],
+    [],
+    ["Riepilogo", ""],
+    ["Guadagno del mese (netto)", guadagnoMese.toFixed(2)],
+    [`Totale netto da inizio ${oggi.getFullYear()}`, totaleNetto.toFixed(2)],
+    ["Incassato", totaleIncassato.toFixed(2)],
+    ["Spese (affitto ecc.)", totaleSpese.toFixed(2)],
+    ["Da saldare", totaleDaSaldare.toFixed(2)],
+    [],
+    [`Guadagni mensili ${oggi.getFullYear()} (netto: incassi − spese)`, ""],
+    ...mesi.map((m) => [m.label, m.totale.toFixed(2)]),
+    [],
+    ["Per metodo di pagamento (saldato)", ""],
+    ...metodiOrdinati.map(([k, v]) => [labelMetodo(k) === k ? k : labelMetodo(k), v.toFixed(2)]),
+  ];
+  scaricaCsv(`prospetto-guadagni-${formatDataLocale(new Date())}.csv`, righe);
+}
+
 function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
   const [aperto, setAperto] = useState(false);
   const [clientId, setClientId] = useState("");
@@ -5422,6 +5442,11 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(2)}€</p>
         </Card>
       </div>
+      <button
+        onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare, mesi, metodiOrdinati })}
+        className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
+        ⬇ Scarica prospetto guadagni (CSV)
+      </button>
 
       <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} onClientiCambiati={onClientiCambiati} />
 
@@ -5646,7 +5671,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
   );
 }
 
-function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
+function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
@@ -5714,12 +5739,6 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
       {mostraForm && (
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
-
-      <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
-        <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
-        <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
-      </div>
 
       <div className="grid grid-cols-4 gap-2">
         <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-xs font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
@@ -5814,6 +5833,18 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista }) {
       </div>
       </>
       )}
+
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Esportazioni e backup</p>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
+          <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
+          <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
+          <button onClick={onBackup} disabled={backupInCorso} className="col-span-2 border border-slate-200 bg-white text-slate-500 text-xs font-medium rounded-lg py-2 disabled:opacity-50">
+            {backupInCorso ? "Esporto..." : "📦 Backup completo"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5874,17 +5905,13 @@ function AdminApp() {
     <div className="min-h-screen bg-slate-50">
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span>
-        <div className="flex items-center gap-3">
-          <button onClick={() => esportaBackupCompleto(setBackupInCorso)} disabled={backupInCorso} className="text-slate-400 flex items-center gap-1 text-xs disabled:opacity-50">
-            {backupInCorso ? "Esporto..." : "📦 Backup completo"}
-          </button>
-          <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
-        </div>
+        <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
       </div>
       {selectedId ? (
         <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
       ) : (
-        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} vista={vista} setVista={setVista} />
+        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} vista={vista} setVista={setVista}
+          backupInCorso={backupInCorso} onBackup={() => esportaBackupCompleto(setBackupInCorso)} />
       )}
     </div>
     </PullToRefresh>
