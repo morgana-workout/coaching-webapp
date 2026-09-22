@@ -1314,7 +1314,8 @@ function EsercizioNome({ id, nome, onSaved }) {
   };
   return (
     <textarea ref={ref} value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva} rows={1}
-      className="w-full min-w-0 border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 resize-none leading-snug overflow-hidden" />
+      style={{ width: "100%", minWidth: 0 }}
+      className="border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 resize-none leading-snug overflow-hidden" />
   );
 }
 
@@ -1413,15 +1414,17 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
         <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
       ) : (
         <Card className="overflow-x-auto">
-          <table className="text-sm table-fixed">
+          {/* Colonna esercizio senza "sticky": su alcuni browser mobile, sticky su una cella
+              di tabella rompe il calcolo della larghezza della colonna e il testo finisce
+              per andare a capo una lettera per riga. Larghezze in pixel via style inline,
+              indipendenti dal motore di layout della tabella, per essere sicuri che vengano
+              rispettate su tutti i browser. */}
+          <table className="text-sm" style={{ tableLayout: "fixed" }}>
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
-                {/* table-fixed: le larghezze di questa riga fissano quelle di tutta la colonna,
-                    evitando che il layout "auto" restringa la colonna esercizio in modo
-                    imprevedibile (bug noto di combinare sticky + colonne senza larghezza fissa). */}
-                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 w-[240px] max-w-[240px]">Esercizio</th>
+                <th className="text-left px-3 py-2" style={{ width: 220, minWidth: 220, maxWidth: 220 }}>Esercizio</th>
                 {date.map((d) => (
-                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap w-32 max-w-[8rem]">
+                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap" style={{ width: 128, minWidth: 128, maxWidth: 128 }}>
                     <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
                       className="bg-transparent border-0 text-xs text-slate-500 uppercase text-center w-full focus:outline-none focus:bg-white rounded" />
                   </th>
@@ -1431,7 +1434,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
             <tbody>
               {esercizi.map((es) => (
                 <tr key={es.id} className="border-t border-slate-100 align-top">
-                  <td className="px-3 py-2 sticky left-0 bg-white w-[240px] max-w-[240px]">
+                  <td className="px-3 py-2" style={{ width: 220, minWidth: 220, maxWidth: 220 }}>
                     <div className="flex items-center gap-1">
                       <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
                       <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
