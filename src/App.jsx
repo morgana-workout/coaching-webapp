@@ -1413,14 +1413,17 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
         <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
       ) : (
         <Card className="overflow-x-auto">
-          <table className="text-sm">
+          <table className="text-sm table-fixed">
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
+                {/* table-fixed: le larghezze di questa riga fissano quelle di tutta la colonna,
+                    evitando che il layout "auto" restringa la colonna esercizio in modo
+                    imprevedibile (bug noto di combinare sticky + colonne senza larghezza fissa). */}
                 <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 w-[240px] max-w-[240px]">Esercizio</th>
                 {date.map((d) => (
-                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap">
+                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap w-32 max-w-[8rem]">
                     <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
-                      className="bg-transparent border-0 text-xs text-slate-500 uppercase text-center w-28 focus:outline-none focus:bg-white rounded" />
+                      className="bg-transparent border-0 text-xs text-slate-500 uppercase text-center w-full focus:outline-none focus:bg-white rounded" />
                   </th>
                 ))}
               </tr>
