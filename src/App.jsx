@@ -5507,6 +5507,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
 function GrigliaCompletezza({ clients, onSelect }) {
   const [nutrizione, setNutrizione] = useState({});
   const [allenamento, setAllenamento] = useState({});
+  const [ultimiCheck, setUltimiCheck] = useState({});
   const [caricando, setCaricando] = useState(true);
 
   useEffect(() => {
@@ -5529,6 +5530,17 @@ function GrigliaCompletezza({ clients, onSelect }) {
       });
       setAllenamento(teMap);
 
+      // Ultimo check: va preso dalla data di riferimento (data_check) più recente presente nei
+      // check effettivamente caricati, non dal campo client.ultimo_check (che può restare
+      // disallineato se un check viene modificato o eliminato dopo il salvataggio).
+      const { data: ck } = await supabase.from("checkins").select("client_id, data_check");
+      const ckMap = {};
+      (ck || []).forEach((r) => {
+        if (!r.client_id || !r.data_check) return;
+        if (!ckMap[r.client_id] || r.data_check > ckMap[r.client_id]) ckMap[r.client_id] = r.data_check;
+      });
+      setUltimiCheck(ckMap);
+
       setCaricando(false);
     })();
   }, []);
@@ -5537,9 +5549,6 @@ function GrigliaCompletezza({ clients, onSelect }) {
 
   const oggi = formatDataLocale(new Date());
   const giorniDa = (d) => (d ? Math.round((new Date(oggi + "T00:00:00") - new Date(d + "T00:00:00")) / 86400000) : null);
-  // Positivo = giorni ancora mancanti (data futura), negativo = giorni di ritardo (data passata).
-  const giorniA = (d) => (d ? Math.round((new Date(d + "T00:00:00") - new Date(oggi + "T00:00:00")) / 86400000) : null);
-  const formattaDataBreve = (d) => (d ? d.split("-").reverse().join("/") : null);
 
   const Pallino = ({ stato }) => {
     // stato: true = presente, false = mancante, null = non applicabile a questo cliente
@@ -5547,11 +5556,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
     return <span className={stato ? "text-emerald-500" : "text-rose-400"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
   };
 
-  // Solo clienti online/ibrido: i clienti BULB (in presenza) non seguono scadenze a cadenza
-  // fissa né check periodici nello stesso modo, quindi non hanno senso in questa griglia.
-  const righe = [...clients]
-    .filter((c) => c.tipo_servizio !== "presenza")
-    .sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
+  const righe = [...clients].sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
 
   return (
     <Card className="p-0 overflow-hidden">
@@ -5564,28 +5569,21 @@ function GrigliaCompletezza({ clients, onSelect }) {
               <th className="px-2 py-2 font-medium text-center">Scheda</th>
               <th className="px-2 py-2 font-medium text-center">Log allen.</th>
               <th className="px-2 py-2 font-medium text-center">Nutrizione</th>
-              <th className="px-2 py-2 font-medium text-center">Prossimo check</th>
+              <th className="px-2 py-2 font-medium text-center">Ultimo check</th>
             </tr>
           </thead>
           <tbody>
             {righe.map((c) => {
               const cadenzaFissa = ["Mensile", "Trimestrale", "Semestrale"].includes(c.piano);
+              const scadenzaStato = cadenzaFissa ? !!c.data_scadenza : null;
               const schedaStato = !!(c.link_scheda || c.scheda_pdf_path);
               const logData = allenamento[c.id];
               const nutData = nutrizione[c.id];
-              const giorniMancantiCheck = giorniA(c.prossimo_check);
+              const checkData = ultimiCheck[c.id] || null;
               return (
                 <tr key={c.id} onClick={() => onSelect(c.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
                   <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{c.nome} {c.cognome}</td>
-                  <td className="px-2 py-2 text-center">
-                    {!cadenzaFissa ? (
-                      <span className="text-slate-300 text-xs">n/d</span>
-                    ) : c.data_scadenza ? (
-                      <span className="text-slate-600 whitespace-nowrap">{formattaDataBreve(c.data_scadenza)}</span>
-                    ) : (
-                      <span className="text-rose-400">○ mancante</span>
-                    )}
-                  </td>
+                  <td className="px-2 py-2 text-center"><Pallino stato={scadenzaStato} /></td>
                   <td className="px-2 py-2 text-center"><Pallino stato={schedaStato} /></td>
                   <td className="px-2 py-2 text-center">
                     <Pallino stato={!!logData} />
@@ -5596,16 +5594,8 @@ function GrigliaCompletezza({ clients, onSelect }) {
                     {nutData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(nutData)}g fa</div>}
                   </td>
                   <td className="px-2 py-2 text-center">
-                    {c.prossimo_check ? (
-                      <>
-                        <span className={`font-medium whitespace-nowrap ${giorniMancantiCheck < 0 ? "text-rose-500" : giorniMancantiCheck <= 3 ? "text-amber-500" : "text-slate-600"}`}>
-                          {giorniMancantiCheck < 0 ? `${Math.abs(giorniMancantiCheck)}g di ritardo` : giorniMancantiCheck === 0 ? "oggi" : `tra ${giorniMancantiCheck}g`}
-                        </span>
-                        <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(c.prossimo_check)}</div>
-                      </>
-                    ) : (
-                      <span className="text-slate-300 text-xs">n/d</span>
-                    )}
+                    <Pallino stato={!!checkData} />
+                    {checkData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(checkData)}g fa</div>}
                   </td>
                 </tr>
               );
