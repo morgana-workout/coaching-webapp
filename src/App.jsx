@@ -1294,14 +1294,27 @@ function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste,
 
 function EsercizioNome({ id, nome, onSaved }) {
   const [val, setVal] = useState(nome);
+  const ref = React.useRef(null);
+
+  // Si auto-ridimensiona in altezza in base al contenuto, così un nome lungo (o una
+  // superserie con più esercizi) resta sempre leggibile per intero su più righe
+  // invece di essere tagliato dentro un riquadro a altezza fissa.
+  const ridimensiona = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => { ridimensiona(); }, [val]);
+
   const salva = async () => {
     if (val === nome || !val.trim()) { setVal(nome); return; }
     await supabase.from("training_exercises").update({ nome: val }).eq("id", id);
     onSaved();
   };
   return (
-    <textarea value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva} rows={2}
-      className="w-full min-w-0 border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 resize-none leading-snug" />
+    <textarea ref={ref} value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva} rows={1}
+      className="w-full min-w-0 border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 resize-none leading-snug overflow-hidden" />
   );
 }
 
@@ -1403,7 +1416,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
           <table className="text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
-                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 w-[210px] max-w-[210px]">Esercizio</th>
+                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 w-[240px] max-w-[240px]">Esercizio</th>
                 {date.map((d) => (
                   <th key={d} className="text-center px-2 py-2 whitespace-nowrap">
                     <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
@@ -1415,7 +1428,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
             <tbody>
               {esercizi.map((es) => (
                 <tr key={es.id} className="border-t border-slate-100 align-top">
-                  <td className="px-3 py-2 sticky left-0 bg-white w-[210px] max-w-[210px]">
+                  <td className="px-3 py-2 sticky left-0 bg-white w-[240px] max-w-[240px]">
                     <div className="flex items-center gap-1">
                       <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
                       <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
