@@ -1324,7 +1324,9 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
   };
   useEffect(() => { carica(); }, [giorno.id]);
 
-  const date = [...new Set(entries.map((e) => e.data))].sort();
+  // Più recenti per prime: così le nuove date compaiono subito dopo la colonna esercizio,
+  // ed è più comodo segnare i carichi appena inseriti senza scorrere fino in fondo.
+  const date = [...new Set(entries.map((e) => e.data))].sort().reverse();
 
   const aggiungiEsercizio = async () => {
     if (!nuovoEsercizio.trim()) return;
@@ -1338,7 +1340,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
   const aggiungiData = async () => {
     if (esercizi.length === 0) { alert("Aggiungi prima almeno un esercizio."); return; }
     const nuovaData = prompt("Data del nuovo allenamento (gg/mm/aaaa oppure lascia vuoto per oggi):");
-    let d = new Date().toISOString().slice(0, 10);
+    let d = formatDataLocale(new Date());
     if (nuovaData) {
       const parti = nuovaData.split("/");
       if (parti.length === 3) d = `${parti[2]}-${parti[1].padStart(2, "0")}-${parti[0].padStart(2, "0")}`;
