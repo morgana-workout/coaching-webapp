@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
@@ -5231,16 +5232,17 @@ function RicevutaModal({ pagamento, onClose }) {
   const dataFmt = pagamento.data_pagamento ? pagamento.data_pagamento.split("-").reverse().join("/") : "—";
   const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
 
-  return (
+  // Renderizzata fuori dall'albero React (direttamente in <body>, non dentro #root) tramite
+  // un portale: così in stampa basta nascondere #root per intero, senza lasciarsi dietro
+  // tutto il resto della pagina (grafici, liste, ecc.) ancora presente nel flusso — anche se
+  // invisibile — che altrimenti genera pagine bianche prima della ricevuta e la spezza a metà.
+  return createPortal(
     <div className="ricevuta-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
       <style>{`
         @media print {
           html, body { height: auto !important; }
-          body * { visibility: hidden; }
-          .ricevuta-stampa, .ricevuta-stampa * { visibility: visible; }
-          /* Senza queste due righe il contenitore a schermo intero resta nel flusso di stampa
-             (anche se invisibile) e crea uno o due fogli bianchi prima della ricevuta. */
-          .ricevuta-overlay { position: static !important; display: block !important; height: auto !important; }
+          #root { display: none !important; }
+          .ricevuta-overlay { position: static !important; display: block !important; height: auto !important; background: white !important; }
           .ricevuta-stampa { position: static !important; width: 100% !important; max-width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
           .no-print { display: none !important; }
         }
@@ -5268,7 +5270,8 @@ function RicevutaModal({ pagamento, onClose }) {
         <p className="text-center text-slate-300 text-[10px] mb-5">Documento riepilogativo non fiscale — dati base</p>
         <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
