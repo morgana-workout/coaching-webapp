@@ -2010,6 +2010,10 @@ function ClientApprofondimenti() {
           </a>
         ))}
       </div>
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-400 font-medium px-1 mb-2">Account</p>
+        <CambiaPasswordPropria />
+      </div>
     </div>
   );
 }
@@ -2629,6 +2633,18 @@ function InvitaClienteForm({ client, onInvitato }) {
   const [errore, setErrore] = useState("");
   const [link, setLink] = useState("");
   const [copiato, setCopiato] = useState(false);
+  const [mostraImposta, setMostraImposta] = useState(false);
+  const [nuovaPassword, setNuovaPassword] = useState("");
+  const [confermaPassword, setConfermaPassword] = useState("");
+  const [fattoImposta, setFattoImposta] = useState(false);
+
+  const chiamaFunzione = async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return supabase.functions.invoke("invite-client", {
+      body,
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+  };
 
   const generaLink = async (azione) => {
     if (!email) { setErrore("Inserisci un'email."); return; }
@@ -2636,14 +2652,29 @@ function InvitaClienteForm({ client, onInvitato }) {
     setErrore("");
     setLink("");
     setCopiato(false);
-    const { data: { session } } = await supabase.auth.getSession();
-    const { data, error } = await supabase.functions.invoke("invite-client", {
-      body: { client_id: client.id, email, azione },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
+    setFattoImposta(false);
+    const { data, error } = await chiamaFunzione({ client_id: client.id, email, azione });
     setGenerando("");
     if (error || data?.error) { setErrore(data?.error || error.message); return; }
     setLink(data.link);
+    onInvitato();
+  };
+
+  const impostaPassword = async (e) => {
+    e.preventDefault();
+    if (!email) { setErrore("Inserisci un'email."); return; }
+    if (nuovaPassword.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
+    if (nuovaPassword !== confermaPassword) { setErrore("Le due password non coincidono."); return; }
+    setGenerando("imposta");
+    setErrore("");
+    setLink("");
+    setFattoImposta(false);
+    const { data, error } = await chiamaFunzione({ client_id: client.id, email, azione: "imposta", password: nuovaPassword });
+    setGenerando("");
+    if (error || data?.error) { setErrore(data?.error || error.message); return; }
+    setNuovaPassword("");
+    setConfermaPassword("");
+    setFattoImposta(true);
     onInvitato();
   };
 
@@ -2658,6 +2689,9 @@ function InvitaClienteForm({ client, onInvitato }) {
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="grid grid-cols-1 gap-2">
+        <button onClick={() => { setMostraImposta((v) => !v); setErrore(""); setLink(""); }} className="bg-emerald-500 text-white text-sm font-medium rounded-lg py-2">
+          {mostraImposta ? "Annulla" : "Imposta tu la password (senza link)"}
+        </button>
         <button onClick={() => generaLink("crea")} disabled={!!generando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
           {generando === "crea" ? "Genero..." : "Genera link per creare account e password"}
         </button>
@@ -2665,10 +2699,25 @@ function InvitaClienteForm({ client, onInvitato }) {
           {generando === "reset" ? "Genero..." : "Genera link per reimpostare la password"}
         </button>
       </div>
-      <p className="text-slate-400 text-xs">
-        "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
-      </p>
+      {mostraImposta && (
+        <form onSubmit={impostaPassword} className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+          <input type="password" placeholder="Nuova password (almeno 6 caratteri)" value={nuovaPassword} onChange={(e) => setNuovaPassword(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <input type="password" placeholder="Ripeti la password" value={confermaPassword} onChange={(e) => setConfermaPassword(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <button disabled={generando === "imposta"} className="w-full bg-emerald-600 text-white text-sm font-medium rounded-lg py-2">
+            {generando === "imposta" ? "Salvo..." : "Salva questa password per la cliente"}
+          </button>
+          <p className="text-emerald-700 text-[11px]">Funziona sia se la cliente ha già un account con questa email (le cambia la password), sia se non ce l'ha ancora (glielo crea). Comunicagliela tu, di persona o come preferisci: qui non parte nessuna email.</p>
+        </form>
+      )}
+      {!mostraImposta && (
+        <p className="text-slate-400 text-xs">
+          "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
+        </p>
+      )}
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {fattoImposta && <p className="text-emerald-600 text-xs">Password salvata ✓ — comunicala alla cliente.</p>}
       {link && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
           <p className="text-emerald-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
@@ -2679,6 +2728,59 @@ function InvitaClienteForm({ client, onInvitato }) {
         </div>
       )}
     </div>
+  );
+}
+
+function CambiaPasswordPropria() {
+  const [aperto, setAperto] = useState(false);
+  const [password, setPassword] = useState("");
+  const [conferma, setConferma] = useState("");
+  const [errore, setErrore] = useState("");
+  const [fatto, setFatto] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    setFatto(false);
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
+    if (password !== conferma) { setErrore("Le due password non coincidono."); return; }
+    setSalvando(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setSalvando(false);
+    if (error) { setErrore(error.message); return; }
+    setPassword("");
+    setConferma("");
+    setFatto(true);
+  };
+
+  if (!aperto) {
+    return (
+      <Card className="p-4">
+        <button onClick={() => setAperto(true)} className="w-full text-left flex items-center justify-between">
+          <span className="text-sm font-medium text-slate-700">Cambia password</span>
+          <span className="text-slate-300 text-xs">Modifica ›</span>
+        </button>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cambia password</p>
+      <form onSubmit={salva} className="space-y-2">
+        <input type="password" placeholder="Nuova password (almeno 6 caratteri)" value={password} onChange={(e) => setPassword(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <input type="password" placeholder="Ripeti la nuova password" value={conferma} onChange={(e) => setConferma(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+        {fatto && <p className="text-emerald-600 text-xs">Password aggiornata ✓</p>}
+        <div className="flex gap-2">
+          <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-lg py-2">{salvando ? "Salvo..." : "Salva nuova password"}</button>
+          <button type="button" onClick={() => setAperto(false)} className="px-4 rounded-lg border border-slate-200 text-sm text-slate-500">Chiudi</button>
+        </div>
+      </form>
+    </Card>
   );
 }
 
@@ -6155,6 +6257,11 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
             {backupInCorso ? "Esporto..." : "📦 Backup completo"}
           </button>
         </div>
+      </div>
+
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Il tuo account</p>
+        <CambiaPasswordPropria />
       </div>
     </div>
   );
