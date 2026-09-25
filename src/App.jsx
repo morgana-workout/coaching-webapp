@@ -229,38 +229,36 @@ function Registrazione({ onTornaAlLogin }) {
     if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
     if (password !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla."); return; }
     setCaricando(true);
-    // Tutto il profilo va nei metadati dell'utente di autenticazione (non nella tabella clients,
-    // a cui a questo punto potremmo non avere ancora accesso se il progetto richiede la conferma
-    // email prima di aprire una sessione): la scheda cliente viene creata da questi dati al primo
-    // accesso vero e proprio, in ClientApp, qualunque sia il momento in cui arriva.
-    const { data, error } = await supabase.auth.signUp({
-      email, password,
-      options: {
-        data: {
-          nome: nome.trim(), cognome: cognome.trim(), data_nascita: dataNascita, citta: citta.trim(),
-          altezza_cm: Number(altezza), peso_kg: Number(peso), livello_attivita: livelloAttivita, tipo_lavoro: tipoLavoro.trim(),
-        },
+    // Creazione account + scheda cliente in un solo passaggio lato server (edge function con
+    // permessi da admin): niente email di conferma da aspettare, l'account è subito utilizzabile
+    // e la scheda compare da subito nella lista clienti del coach.
+    const { data: risultato, error: erroreFunzione } = await supabase.functions.invoke("self-signup", {
+      body: {
+        email: email.trim(), password,
+        nome: nome.trim(), cognome: cognome.trim(), data_nascita: dataNascita, citta: citta.trim(),
+        altezza_cm: Number(altezza), peso_kg: Number(peso), livello_attivita: livelloAttivita, tipo_lavoro: tipoLavoro.trim(),
       },
     });
-    setCaricando(false);
-    if (error) {
-      setErrore(error.message === "User already registered" ? "Esiste già un account con questa email." : "Errore nella registrazione, riprova.");
+    if (erroreFunzione || risultato?.error) {
+      setCaricando(false);
+      setErrore(risultato?.error || "Errore nella registrazione, riprova.");
       return;
     }
-    if (!data.session) {
-      // Il progetto richiede la conferma via email prima di poter accedere: la scheda cliente
-      // viene creata automaticamente al primo accesso, dopo la conferma (vedi ClientApp).
+    // Account creato: accediamo subito con le credenziali appena scelte. Il resto dell'app se ne
+    // accorge da sola (onAuthStateChange) e passa a ClientApp con la scheda già pronta.
+    const { error: erroreLogin } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setCaricando(false);
+    if (erroreLogin) {
+      setErrore("Account creato ma l'accesso automatico non è riuscito: torna al login e accedi con la password che hai scelto.");
       setInviata(true);
     }
-    // Se invece la sessione è già attiva, il resto dell'app se ne accorge da sola
-    // (onAuthStateChange) e passa subito a ClientApp, che crea la scheda cliente al volo.
   };
 
   if (inviata) {
     return (
       <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3 text-center">
-        <p className="text-white text-sm font-medium">Controlla la tua email ✉️</p>
-        <p className="text-slate-400 text-sm">Ti abbiamo mandato un link di conferma a <span className="text-slate-200">{email}</span>. Aprilo, poi torna qui e accedi con la password che hai appena scelto.</p>
+        <p className="text-white text-sm font-medium">Account creato ✅</p>
+        <p className="text-slate-400 text-sm">Torna al login e accedi con l'email e la password che hai appena scelto.</p>
         <button onClick={onTornaAlLogin} className="text-sky-400 text-sm font-medium pt-1">← Torna al login</button>
       </div>
     );
@@ -2051,6 +2049,7 @@ function ClientApp({ session }) {
         peso_kg: meta.peso_kg ?? null,
         livello_attivita: meta.livello_attivita || null,
         tipo_lavoro: meta.tipo_lavoro || null,
+        registrato_da_solo: true,
       }).select().single();
       c = creato || null;
     }
@@ -5164,7 +5163,7 @@ function PromemoriaMessaggi({ clients }) {
   );
 }
 
-function CentroNotificheCoach({ clients, onSelect }) {
+function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
@@ -5193,7 +5192,24 @@ function CentroNotificheCoach({ clients, onSelect }) {
 
   return (
     <div className="space-y-5">
-      <PromemoriaMessaggi clients={clients} />
+      {nuoveDaCompletare.length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Nuove clienti registrate — da completare ({nuoveDaCompletare.length})</p>
+          <div className="space-y-2">
+            {nuoveDaCompletare.map((c) => (
+              <button key={c.id} onClick={() => onSelect(c.id)} className="w-full text-left">
+                <Card className="p-3 flex items-center justify-between bg-amber-50/60 border-amber-200">
+                  <div>
+                    <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                    <p className="text-slate-500 text-xs">Si è registrata da sola — manca ancora pacchetto e prezzo</p>
+                  </div>
+                  <span className="text-[10px] font-medium text-amber-700 bg-amber-100 rounded-full px-2 py-0.5 flex-shrink-0">nuova</span>
+                </Card>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div>
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Richieste lezione/call ({richieste.length})</p>
@@ -5239,6 +5255,8 @@ function CentroNotificheCoach({ clients, onSelect }) {
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
         <InviaNotaForm clients={clients} onFatto={() => {}} />
       </div>
+
+      <PromemoriaMessaggi clients={clients} />
     </div>
   );
 }
@@ -5979,6 +5997,10 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const clientiAttivi = clients.filter((c) => !c.archiviato);
   const clientiArchiviati = clients.filter((c) => c.archiviato);
 
+  // Clienti che si sono registrate da sole e a cui manca ancora il pacchetto/prezzo: compaiono
+  // qui finché non vengono completate dalla scheda cliente (impostando il piano).
+  const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano);
+
   const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
   const scaduti = clientiAttivi.filter((c) => c.stato_pacchetto === "scaduto");
@@ -6034,15 +6056,15 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-xs font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
         <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-xs font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
           Notifiche
-          {nonLetteCoach > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach}</span>
+          {(nonLetteCoach + nuoveDaCompletare.length) > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length}</span>
           )}
         </button>
         <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-xs font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
       </div>
 
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
-      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} onSelect={onSelect} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "lista" && (
         <>
