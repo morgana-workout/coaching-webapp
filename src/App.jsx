@@ -140,6 +140,7 @@ function StatoBadge({ stato }) {
 /* LOGIN                                                               */
 /* ------------------------------------------------------------------ */
 function Login({ erroreLink }) {
+  const [vista, setVista] = useState("accedi"); // "accedi" | "registrati"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errore, setErrore] = useState("");
@@ -169,24 +170,147 @@ function Login({ erroreLink }) {
           <h1 className="text-white text-2xl font-semibold tracking-tight">Coaching by Morgana</h1>
           <p className="text-slate-400 text-sm mt-1">Il tuo spazio di allenamento, sempre con te</p>
         </div>
-        <form onSubmit={entra} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
-          <input
-            type="email" placeholder="Email" value={email} required
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-          />
-          <input
-            type="password" placeholder="Password" value={password} required
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-          />
-          {errore && <p className="text-rose-400 text-xs">{errore}</p>}
-          <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
-            {caricando ? "Accesso in corso..." : "Accedi"}
-          </button>
-        </form>
+
+        {vista === "registrati" ? (
+          <Registrazione onTornaAlLogin={() => setVista("accedi")} />
+        ) : (
+          <>
+            <form onSubmit={entra} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
+              <input
+                type="email" placeholder="Email" value={email} required
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+              <input
+                type="password" placeholder="Password" value={password} required
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+              {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+              <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
+                {caricando ? "Accesso in corso..." : "Accedi"}
+              </button>
+            </form>
+            <button onClick={() => setVista("registrati")} className="w-full text-center text-slate-400 text-sm mt-5">
+              Sei nuova/o? <span className="text-sky-400 font-medium">Crea il tuo account</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function Registrazione({ onTornaAlLogin }) {
+  const [nome, setNome] = useState("");
+  const [cognome, setCognome] = useState("");
+  const [dataNascita, setDataNascita] = useState("");
+  const [citta, setCitta] = useState("");
+  const [altezza, setAltezza] = useState("");
+  const [peso, setPeso] = useState("");
+  const [livelloAttivita, setLivelloAttivita] = useState("");
+  const [tipoLavoro, setTipoLavoro] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confermaPassword, setConfermaPassword] = useState("");
+  const [errore, setErrore] = useState("");
+  const [caricando, setCaricando] = useState(false);
+  const [inviata, setInviata] = useState(false);
+
+  const registrati = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    if (!nome.trim()) { setErrore("Inserisci il tuo nome."); return; }
+    if (!dataNascita) { setErrore("Inserisci la tua data di nascita."); return; }
+    if (!citta.trim()) { setErrore("Inserisci la tua città di domicilio."); return; }
+    if (!altezza || !peso) { setErrore("Inserisci altezza e peso."); return; }
+    if (!livelloAttivita) { setErrore("Seleziona quanti passi fai in media al giorno."); return; }
+    if (!tipoLavoro.trim()) { setErrore("Inserisci il tuo tipo di lavoro."); return; }
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
+    if (password !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla."); return; }
+    setCaricando(true);
+    // Tutto il profilo va nei metadati dell'utente di autenticazione (non nella tabella clients,
+    // a cui a questo punto potremmo non avere ancora accesso se il progetto richiede la conferma
+    // email prima di aprire una sessione): la scheda cliente viene creata da questi dati al primo
+    // accesso vero e proprio, in ClientApp, qualunque sia il momento in cui arriva.
+    const { data, error } = await supabase.auth.signUp({
+      email, password,
+      options: {
+        data: {
+          nome: nome.trim(), cognome: cognome.trim(), data_nascita: dataNascita, citta: citta.trim(),
+          altezza_cm: Number(altezza), peso_kg: Number(peso), livello_attivita: livelloAttivita, tipo_lavoro: tipoLavoro.trim(),
+        },
+      },
+    });
+    setCaricando(false);
+    if (error) {
+      setErrore(error.message === "User already registered" ? "Esiste già un account con questa email." : "Errore nella registrazione, riprova.");
+      return;
+    }
+    if (!data.session) {
+      // Il progetto richiede la conferma via email prima di poter accedere: la scheda cliente
+      // viene creata automaticamente al primo accesso, dopo la conferma (vedi ClientApp).
+      setInviata(true);
+    }
+    // Se invece la sessione è già attiva, il resto dell'app se ne accorge da sola
+    // (onAuthStateChange) e passa subito a ClientApp, che crea la scheda cliente al volo.
+  };
+
+  if (inviata) {
+    return (
+      <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3 text-center">
+        <p className="text-white text-sm font-medium">Controlla la tua email ✉️</p>
+        <p className="text-slate-400 text-sm">Ti abbiamo mandato un link di conferma a <span className="text-slate-200">{email}</span>. Aprilo, poi torna qui e accedi con la password che hai appena scelto.</p>
+        <button onClick={onTornaAlLogin} className="text-sky-400 text-sm font-medium pt-1">← Torna al login</button>
+      </div>
+    );
+  }
+
+  const campoClass = "w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400";
+
+  return (
+    <form onSubmit={registrati} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <input type="text" placeholder="Nome" value={nome} required onChange={(e) => setNome(e.target.value)} className={campoClass} />
+        <input type="text" placeholder="Cognome" value={cognome} onChange={(e) => setCognome(e.target.value)} className={campoClass} />
+      </div>
+
+      <div>
+        <label className="text-slate-400 text-xs pl-1">Data di nascita</label>
+        <input type="date" value={dataNascita} required onChange={(e) => setDataNascita(e.target.value)} className={`${campoClass} mt-1`} style={{ colorScheme: "dark" }} />
+      </div>
+
+      <input type="text" placeholder="Città di domicilio" value={citta} required onChange={(e) => setCitta(e.target.value)} className={campoClass} />
+
+      <div className="grid grid-cols-2 gap-3">
+        <input type="number" step="0.1" placeholder="Altezza (cm)" value={altezza} required onChange={(e) => setAltezza(e.target.value)} className={campoClass} />
+        <input type="number" step="0.1" placeholder="Peso (kg)" value={peso} required onChange={(e) => setPeso(e.target.value)} className={campoClass} />
+      </div>
+
+      <div>
+        <label className="text-slate-400 text-xs pl-1">Quanti passi fai in media al giorno?</label>
+        <select value={livelloAttivita} required onChange={(e) => setLivelloAttivita(e.target.value)} className={`${campoClass} mt-1`}>
+          <option value="" disabled>Seleziona...</option>
+          {LIVELLI_ATTIVITA.map((l) => <option key={l.value} value={l.value}>{l.label} ({l.descrizione})</option>)}
+        </select>
+      </div>
+
+      <input type="text" placeholder="Tipo di lavoro (es. impiegata, insegnante...)" value={tipoLavoro} required onChange={(e) => setTipoLavoro(e.target.value)} className={campoClass} />
+
+      <div className="border-t border-slate-700 pt-3 space-y-3">
+        <input type="email" placeholder="Email" value={email} required onChange={(e) => setEmail(e.target.value)} className={campoClass} />
+        <input type="password" placeholder="Password (almeno 6 caratteri)" value={password} required onChange={(e) => setPassword(e.target.value)} className={campoClass} />
+        <input type="password" placeholder="Conferma password" value={confermaPassword} required onChange={(e) => setConfermaPassword(e.target.value)} className={campoClass} />
+      </div>
+
+      {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+      <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
+        {caricando ? "Creo l'account..." : "Crea account"}
+      </button>
+      <button type="button" onClick={onTornaAlLogin} className="w-full text-center text-slate-400 text-sm pt-1">
+        Hai già un account? <span className="text-sky-400 font-medium">Accedi</span>
+      </button>
+    </form>
   );
 }
 
@@ -210,10 +334,11 @@ const LIVELLI_ATTIVITA = [
 ];
 
 function ProfiloCliente({ client, onAggiornato }) {
-  const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari);
+  const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari || client.citta || client.peso_kg || client.tipo_lavoro);
   const [modifica, setModifica] = useState(!profiloGiaCompilato);
   const [form, setForm] = useState({
-    data_nascita: client.data_nascita || "", altezza_cm: client.altezza_cm || "",
+    data_nascita: client.data_nascita || "", altezza_cm: client.altezza_cm || "", peso_kg: client.peso_kg || "",
+    citta: client.citta || "", tipo_lavoro: client.tipo_lavoro || "",
     livello_attivita: client.livello_attivita || "", note_particolari: client.note_particolari || "",
   });
   const [salvando, setSalvando] = useState(false);
@@ -225,6 +350,9 @@ function ProfiloCliente({ client, onAggiornato }) {
       p_altezza_cm: form.altezza_cm ? Number(form.altezza_cm) : null,
       p_livello_attivita: form.livello_attivita || null,
       p_note_particolari: form.note_particolari || null,
+      p_citta: form.citta || null,
+      p_peso_kg: form.peso_kg ? Number(form.peso_kg) : null,
+      p_tipo_lavoro: form.tipo_lavoro || null,
     });
     setSalvando(false);
     setModifica(false);
@@ -233,6 +361,7 @@ function ProfiloCliente({ client, onAggiornato }) {
 
   if (!modifica) {
     const livello = LIVELLI_ATTIVITA.find((l) => l.value === client.livello_attivita);
+    const eta = calcolaEta(client.data_nascita);
     return (
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
@@ -240,9 +369,12 @@ function ProfiloCliente({ client, onAggiornato }) {
           <button onClick={() => setModifica(true)} className="text-sky-600 text-xs font-medium">Modifica</button>
         </div>
         <div className="text-sm text-slate-700 space-y-1">
-          {client.data_nascita && <p>Data di nascita: {client.data_nascita.split("-").reverse().join("/")}</p>}
+          {client.data_nascita && <p>Data di nascita: {client.data_nascita.split("-").reverse().join("/")}{eta != null ? ` (${eta} anni)` : ""}</p>}
+          {client.citta && <p>Città di domicilio: {client.citta}</p>}
           {client.altezza_cm && <p>Altezza: {client.altezza_cm} cm</p>}
-          {livello && <p>Attività quotidiana: {livello.label}</p>}
+          {client.peso_kg && <p>Peso: {client.peso_kg} kg</p>}
+          {livello && <p>Passi al giorno: {livello.label} ({livello.descrizione})</p>}
+          {client.tipo_lavoro && <p>Tipo di lavoro: {client.tipo_lavoro}</p>}
           {client.note_particolari && <p className="text-slate-500">Segni particolari: {client.note_particolari}</p>}
         </div>
       </Card>
@@ -258,17 +390,34 @@ function ProfiloCliente({ client, onAggiornato }) {
           className="mt-1" />
       </div>
       <div>
-        <label className="text-xs text-slate-500">Altezza (cm)</label>
-        <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
+        <label className="text-xs text-slate-500">Città di domicilio</label>
+        <input type="text" value={form.citta} onChange={(e) => setForm({ ...form, citta: e.target.value })}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Altezza (cm)</label>
+          <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Peso (kg)</label>
+          <input type="number" step="0.1" value={form.peso_kg} onChange={(e) => setForm({ ...form, peso_kg: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
       <div>
-        <label className="text-xs text-slate-500">Tipo di lavoro / attività quotidiana</label>
+        <label className="text-xs text-slate-500">Quanti passi fai in media al giorno?</label>
         <select value={form.livello_attivita} onChange={(e) => setForm({ ...form, livello_attivita: e.target.value })}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
           <option value="">Seleziona...</option>
           {LIVELLI_ATTIVITA.map((l) => <option key={l.value} value={l.value}>{l.label} ({l.descrizione})</option>)}
         </select>
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Tipo di lavoro</label>
+        <input type="text" value={form.tipo_lavoro} onChange={(e) => setForm({ ...form, tipo_lavoro: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. impiegata, insegnante..." />
       </div>
       <div>
         <label className="text-xs text-slate-500">Segni particolari (infortuni, condizioni da segnalare...)</label>
@@ -1881,7 +2030,30 @@ function ClientApp({ session }) {
     try {
       await conTimeout(supabase.rpc("sincronizza_stati_check"));
     } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
-    const { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).single();
+    let { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).maybeSingle();
+    if (!c) {
+      // Primo accesso dopo un'auto-registrazione: la scheda cliente non esiste ancora,
+      // la creiamo ora usando nome/cognome inseriti in fase di registrazione (salvati sull'utente
+      // di autenticazione), così Morgana la trova già pronta da compilare con pacchetto e dati.
+      const meta = session.user.user_metadata || {};
+      const codiceGenerato = `c${Math.random().toString(36).slice(2, 8)}`;
+      const { data: creato } = await supabase.from("clients").insert({
+        user_id: session.user.id,
+        codice: codiceGenerato,
+        nome: meta.nome || "Nuova cliente",
+        cognome: meta.cognome || "",
+        email: session.user.email || null,
+        tipo_servizio: "online",
+        data_nascita: meta.data_nascita || null,
+        eta: calcolaEta(meta.data_nascita) ?? null,
+        citta: meta.citta || null,
+        altezza_cm: meta.altezza_cm ?? null,
+        peso_kg: meta.peso_kg ?? null,
+        livello_attivita: meta.livello_attivita || null,
+        tipo_lavoro: meta.tipo_lavoro || null,
+      }).select().single();
+      c = creato || null;
+    }
     setClient(c);
     if (c) {
       const { data: ck } = await supabase.from("checkins").select("*").eq("client_id", c.id).order("data_check", { ascending: true });
