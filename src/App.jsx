@@ -4984,15 +4984,10 @@ function CalendarioAgenda({ clients, onSelect }) {
     }
   });
 
-  // Fasce fisse dedicate ai messaggi clienti, dal lunedì al venerdì (no weekend)
+  // Promemoria di fine settimana (venerdì): chi manca ancora da contattare
   for (let g = 1; g <= giorniNelMese; g++) {
     const ds = dataStr(g);
     const giornoSettimana = new Date(ds + "T00:00:00").getDay(); // 0 = domenica ... 6 = sabato
-    const feriale = giornoSettimana >= 1 && giornoSettimana <= 5;
-    if (feriale) {
-      eventi.push({ data: ds, ora: "08:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (08:00–09:00)", clientId: null });
-      eventi.push({ data: ds, ora: "18:00", tipo: "messaggi", nome: "Messaggi clienti", label: "Finestra dedicata ai messaggi (18:00–19:00)", clientId: null });
-    }
     if (giornoSettimana === 5) {
       const settimana = sabatoDi(ds);
       const inviateSettimana = new Set(promemoriaRighe.filter((r) => r.settimana === settimana && r.inviato).map((r) => r.client_id));
