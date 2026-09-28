@@ -5423,6 +5423,7 @@ function esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIn
 
 function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
   const [aperto, setAperto] = useState(false);
+  const [modo, setModo] = useState("guadagno"); // "guadagno" | "spesa"
   const [clientId, setClientId] = useState("");
   const [tipoPiano, setTipoPiano] = useState("Mensile");
   const [tipoLibero, setTipoLibero] = useState("");
@@ -5435,18 +5436,41 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
   const [errore, setErrore] = useState("");
 
   const clientiOrdinati = [...clients].sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
-  const aggiornaScadenza = ["Mensile", "Trimestrale", "Semestrale"].includes(tipoPiano);
+  const aggiornaScadenza = modo === "guadagno" && ["Mensile", "Trimestrale", "Semestrale"].includes(tipoPiano);
 
   const reset = () => {
     setClientId(""); setTipoPiano("Mensile"); setTipoLibero(""); setImporto(""); setMetodo(""); setStato("saldato"); setNota("");
     setDataPagamento(new Date().toISOString().slice(0, 10));
   };
 
+  const apri = (m) => { reset(); setModo(m); setAperto(true); setErrore(""); };
+
   const salva = async () => {
     setErrore("");
-    if (!clientId) { setErrore("Seleziona un cliente."); return; }
-    if (importo === "" || isNaN(Number(importo))) { setErrore("Inserisci un importo valido."); return; }
+    if (modo === "guadagno" && !clientId) { setErrore("Seleziona un cliente."); return; }
+    if (importo === "" || isNaN(Number(importo)) || Number(importo) <= 0) { setErrore("Inserisci un importo valido."); return; }
     setSalvando(true);
+
+    if (modo === "spesa") {
+      // Le uscite (affitto, attrezzatura, ecc.) non sono legate a nessuna cliente: importo negativo
+      // cosi' entra direttamente nel calcolo del netto (incassi + spese) senza altra logica.
+      const { error } = await supabase.from("payments").insert({
+        client_id: null,
+        data_pagamento: dataPagamento,
+        tipo_piano: "Spesa",
+        importo: -Math.abs(Number(importo)),
+        metodo_pagamento: null,
+        stato: "spesa",
+        note: nota || null,
+      });
+      setSalvando(false);
+      if (error) { setErrore("Errore nel salvataggio, riprova."); return; }
+      reset();
+      setAperto(false);
+      onSalvato();
+      return;
+    }
+
     const cliente = clients.find((c) => c.id === clientId);
     const etichettaTipo = tipoPiano === "Altro" ? (tipoLibero || "Pagamento") : tipoPiano;
     const { error } = await supabase.from("payments").insert({
@@ -5477,76 +5501,114 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
 
   if (!aperto) {
     return (
-      <button onClick={() => setAperto(true)} className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
-        <Plus size={16} /> Nuovo pagamento
-      </button>
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => apri("guadagno")} className="flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
+          <Plus size={16} /> Nuovo pagamento
+        </button>
+        <button onClick={() => apri("spesa")} className="flex items-center justify-center gap-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl py-2.5 text-sm font-medium">
+          <Plus size={16} /> Nuova spesa
+        </button>
+      </div>
     );
   }
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Nuovo pagamento</p>
-      <div>
-        <label className="text-xs text-slate-500">Cliente</label>
-        <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          <option value="">Seleziona cliente…</option>
-          {clientiOrdinati.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
-        </select>
+      <div className="flex items-center gap-2 bg-slate-100 rounded-xl p-1">
+        <button onClick={() => setModo("guadagno")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "guadagno" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
+          + Guadagno
+        </button>
+        <button onClick={() => setModo("spesa")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "spesa" ? "bg-white text-rose-600 shadow-sm" : "text-slate-500"}`}>
+          − Spesa
+        </button>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs text-slate-500">Data pagamento</label>
-          <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Importo (€)</label>
-          <input type="number" step="0.01" value={importo} onChange={(e) => setImporto(e.target.value)}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 35" />
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Metodo</label>
-          <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-            <option value="">—</option>
-            {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Stato</label>
-          <select value={stato} onChange={(e) => setStato(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-            <option value="saldato">Saldato</option>
-            <option value="da_saldare">Da saldare</option>
-          </select>
-        </div>
-      </div>
-      <div>
-        <label className="text-xs text-slate-500">Tipo</label>
-        <select value={tipoPiano} onChange={(e) => setTipoPiano(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          <option value="Mensile">Mensile (+1 mese di scadenza)</option>
-          <option value="Trimestrale">Trimestrale (+3 mesi di scadenza)</option>
-          <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
-          <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
-          <option value="A lezione">A lezione (non tocca la scadenza)</option>
-          <option value="Variabile">Variabile (non tocca la scadenza)</option>
-          <option value="Pacchetto lezioni Bulb">Pacchetto lezioni Bulb (non tocca la scadenza)</option>
-          <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
-          <option value="Altro">Altro (non tocca la scadenza)</option>
-        </select>
-        {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
-      </div>
-      {tipoPiano === "Altro" && (
-        <div>
-          <label className="text-xs text-slate-500">Specifica tipo</label>
-          <input value={tipoLibero} onChange={(e) => setTipoLibero(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. Coaching online, saldo pacchetto..." />
-        </div>
+      <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> {modo === "spesa" ? "Nuova spesa" : "Nuovo pagamento"}</p>
+
+      {modo === "spesa" ? (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500">Data</label>
+              <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Importo (€)</label>
+              <input type="number" step="0.01" min="0" value={importo} onChange={(e) => setImporto(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 50" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Descrizione</label>
+            <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. affitto palestra, attrezzatura..." />
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            <label className="text-xs text-slate-500">Cliente</label>
+            <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">Seleziona cliente…</option>
+              {clientiOrdinati.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500">Data pagamento</label>
+              <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Importo (€)</label>
+              <input type="number" step="0.01" value={importo} onChange={(e) => setImporto(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 35" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Metodo</label>
+              <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="">—</option>
+                {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Stato</label>
+              <select value={stato} onChange={(e) => setStato(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="saldato">Saldato</option>
+                <option value="da_saldare">Da saldare</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Tipo</label>
+            <select value={tipoPiano} onChange={(e) => setTipoPiano(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="Mensile">Mensile (+1 mese di scadenza)</option>
+              <option value="Trimestrale">Trimestrale (+3 mesi di scadenza)</option>
+              <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
+              <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
+              <option value="A lezione">A lezione (non tocca la scadenza)</option>
+              <option value="Variabile">Variabile (non tocca la scadenza)</option>
+              <option value="Pacchetto lezioni Bulb">Pacchetto lezioni Bulb (non tocca la scadenza)</option>
+              <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
+              <option value="Altro">Altro (non tocca la scadenza)</option>
+            </select>
+            {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
+          </div>
+          {tipoPiano === "Altro" && (
+            <div>
+              <label className="text-xs text-slate-500">Specifica tipo</label>
+              <input value={tipoLibero} onChange={(e) => setTipoLibero(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. Coaching online, saldo pacchetto..." />
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-slate-500">Nota (facoltativa)</label>
+            <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. saldo pacchetto..." />
+          </div>
+        </>
       )}
-      <div>
-        <label className="text-xs text-slate-500">Nota (facoltativa)</label>
-        <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. saldo pacchetto..." />
-      </div>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={() => { setAperto(false); setErrore(""); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
-        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva"}</button>
+        <button onClick={salva} disabled={salvando} className={`flex-1 text-white rounded-xl py-2 text-sm font-medium ${modo === "spesa" ? "bg-rose-600" : "bg-slate-800"}`}>
+          {salvando ? "Salvo..." : modo === "spesa" ? "Salva spesa" : "Salva"}
+        </button>
       </div>
     </Card>
   );
