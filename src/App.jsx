@@ -6137,19 +6137,228 @@ function GrigliaCompletezza({ clients, onSelect }) {
   );
 }
 
+function CandidatureCoach({ onClientiCambiati }) {
+  const [candidature, setCandidature] = useState([]);
+  const [caricato, setCaricato] = useState(false);
+  const [mostraArchivio, setMostraArchivio] = useState(false);
+  const [inLavorazione, setInLavorazione] = useState(null);
+
+  const carica = async () => {
+    const { data } = await supabase.from("candidature").select("*").order("created_at", { ascending: false });
+    setCandidature(data || []);
+    setCaricato(true);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const aggiornaStato = async (id, stato) => {
+    await supabase.from("candidature").update({ stato }).eq("id", id);
+    carica();
+  };
+
+  const calcolaEta = (dataNascita) => {
+    if (!dataNascita) return null;
+    const oggi = new Date();
+    const nascita = new Date(dataNascita);
+    let eta = oggi.getFullYear() - nascita.getFullYear();
+    const m = oggi.getMonth() - nascita.getMonth();
+    if (m < 0 || (m === 0 && oggi.getDate() < nascita.getDate())) eta--;
+    return eta;
+  };
+  const etichettaCondizione = (value) => (value === "altro" ? "Altro" : CONDIZIONI_SALUTE.find((c) => c.value === value)?.label || value);
+  const ETICHETTE_SERVIZIO = { online: "Online", presenza: "In presenza", ibrido: "Ibrido" };
+  const ETICHETTE_OBIETTIVO = { definizione: "Definizione", mantenimento: "Ricomposizione corporea", massa: "Aumento massa" };
+  const ETICHETTE_LIVELLO = { base: "Alle prime armi", intermedia: "Intermedia", avanzata: "Avanzata" };
+  const ETICHETTE_ATTIVITA = { sedentario: "Sedentaria", intermedio: "Moderatamente attiva", attivo: "Molto attiva" };
+
+  const visibili = candidature.filter((c) =>
+    mostraArchivio ? (c.stato === "archiviata" || c.stato === "convertita") : (c.stato === "nuova" || c.stato === "contattata")
+  );
+
+  if (!caricato) return <p className="text-slate-400 text-sm px-1">Carico...</p>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-sm font-medium text-slate-700">{mostraArchivio ? "Archivio candidature" : "Nuove candidature"}</p>
+        <button onClick={() => setMostraArchivio(!mostraArchivio)} className="text-xs text-slate-500 underline">
+          {mostraArchivio ? "Torna alle attive" : "Vedi archivio"}
+        </button>
+      </div>
+
+      {visibili.length === 0 && (
+        <Card className="p-4 text-center text-slate-400 text-sm">Nessuna candidatura {mostraArchivio ? "in archivio" : "da vedere per ora"}.</Card>
+      )}
+
+      {visibili.map((c) => (
+        <Card key={c.id} className="p-4 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-medium text-slate-800">{c.nome} {c.cognome}</p>
+              <p className="text-xs text-slate-500">
+                {calcolaEta(c.data_nascita) ? `${calcolaEta(c.data_nascita)} anni · ` : ""}
+                {ETICHETTE_SERVIZIO[c.tipo_servizio] || c.tipo_servizio}
+                {c.sede_abituale ? ` · ${c.sede_abituale}` : ""}
+              </p>
+            </div>
+            {c.stato === "contattata" && <Badge className="bg-sky-50 text-sky-600">Contattata</Badge>}
+            {c.stato === "convertita" && <Badge className="bg-emerald-50 text-emerald-600">Diventata cliente</Badge>}
+            {c.stato === "archiviata" && <Badge className="bg-slate-100 text-slate-500">Archiviata</Badge>}
+          </div>
+
+          <div className="text-sm text-slate-600 space-y-0.5">
+            <p>
+              <a href={`mailto:${c.email}`} className="text-sky-600">{c.email}</a>
+              {c.telefono ? " · " : ""}
+              {c.telefono && <a href={`tel:${c.telefono}`} className="text-sky-600">{c.telefono}</a>}
+            </p>
+            {c.obiettivo_attuale && <p>Obiettivo: {ETICHETTE_OBIETTIVO[c.obiettivo_attuale] || c.obiettivo_attuale}</p>}
+            {c.livello_allenamento && <p>Livello: {ETICHETTE_LIVELLO[c.livello_allenamento] || c.livello_allenamento}</p>}
+            {c.livello_attivita && <p>Attività quotidiana: {ETICHETTE_ATTIVITA[c.livello_attivita] || c.livello_attivita}</p>}
+            {(c.altezza_cm || c.peso_kg) && (
+              <p>{c.altezza_cm ? `${c.altezza_cm} cm` : ""}{c.altezza_cm && c.peso_kg ? " · " : ""}{c.peso_kg ? `${c.peso_kg} kg` : ""}</p>
+            )}
+            {c.citta && <p>Città: {c.citta}</p>}
+            {c.tipo_lavoro && <p>Lavoro: {c.tipo_lavoro}</p>}
+            {c.problematiche_salute?.length > 0 && (
+              <p className="text-amber-700">⚠ {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
+            )}
+            {c.note && <p className="italic text-slate-500">"{c.note}"</p>}
+            <p className="text-[11px] text-slate-400">Candidatura del {new Date(c.created_at).toLocaleDateString("it-IT")}</p>
+          </div>
+
+          {!mostraArchivio && inLavorazione !== c.id && (
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setInLavorazione(c.id)} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-xs font-medium">Trasforma in cliente</button>
+              {c.stato === "nuova" && (
+                <button onClick={() => aggiornaStato(c.id, "contattata")} className="px-3 rounded-xl border border-slate-200 text-xs text-slate-600">Contattata</button>
+              )}
+              <button onClick={() => aggiornaStato(c.id, "archiviata")} className="px-3 rounded-xl border border-slate-200 text-xs text-slate-500">Archivia</button>
+            </div>
+          )}
+
+          {inLavorazione === c.id && (
+            <AccettaCandidaturaForm
+              candidatura={c}
+              onAnnulla={() => setInLavorazione(null)}
+              onCreato={() => { setInLavorazione(null); carica(); onClientiCambiati?.(); }}
+            />
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
+  const [f, setF] = useState({
+    codice: "", tipo_servizio: candidatura.tipo_servizio || "online", pacchetto_lezioni: "", piano: "",
+    data_inizio: new Date().toISOString().slice(0, 10), data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "",
+  });
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const campo = (label, key, type = "text") => (
+    <div>
+      <label className="text-xs text-slate-500">{label}</label>
+      <input type={type} value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })}
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+    </div>
+  );
+
+  const salva = async () => {
+    if (!f.codice.trim()) { setErrore("Il codice è obbligatorio."); return; }
+    setSalvando(true);
+    setErrore("");
+    const payload = {
+      codice: f.codice.trim(), nome: candidatura.nome, cognome: candidatura.cognome || null,
+      email: candidatura.email || null, telefono: candidatura.telefono || null,
+      tipo_servizio: f.tipo_servizio, pacchetto_lezioni: f.pacchetto_lezioni || null, piano: f.piano || null,
+      data_inizio: f.data_inizio || null, data_scadenza: f.data_scadenza || null, stato_pacchetto: f.stato_pacchetto,
+      link_scheda: f.link_scheda || null,
+      data_nascita: candidatura.data_nascita || null, sesso: candidatura.sesso || null,
+      altezza_cm: candidatura.altezza_cm || null, peso_kg: candidatura.peso_kg || null,
+      citta: candidatura.citta || null, tipo_lavoro: candidatura.tipo_lavoro || null,
+      livello_attivita: candidatura.livello_attivita || null, livello_allenamento: candidatura.livello_allenamento || null,
+      obiettivo_attuale: candidatura.obiettivo_attuale || null, sede_abituale: candidatura.sede_abituale || null,
+      problematiche_salute: candidatura.problematiche_salute || null,
+      problematiche_salute_note: candidatura.problematiche_salute_note || null,
+      note_particolari: candidatura.note || null,
+    };
+    const { error } = await supabase.from("clients").insert(payload);
+    if (error) { setSalvando(false); setErrore("Errore: " + error.message); return; }
+    await supabase.from("candidature").update({ stato: "convertita" }).eq("id", candidatura.id);
+    setSalvando(false);
+    onCreato();
+  };
+
+  return (
+    <div className="space-y-3 pt-2 border-t border-slate-100">
+      <p className="text-xs text-slate-500">Completa solo i dati commerciali — il resto arriva già dalla candidatura.</p>
+      <div>
+        <label className="text-xs text-slate-500">Tipo di servizio</label>
+        <select value={f.tipo_servizio} onChange={(e) => setF({ ...f, tipo_servizio: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="online">ONLINE (coaching a distanza)</option>
+          <option value="presenza">BULB (lezioni 1:1 in presenza)</option>
+          <option value="ibrido">IBRIDO (online + BULB)</option>
+        </select>
+      </div>
+      {(f.tipo_servizio === "presenza" || f.tipo_servizio === "ibrido") && (
+        <div>
+          <label className="text-xs text-slate-500">Pacchetto lezioni</label>
+          <select value={f.pacchetto_lezioni} onChange={(e) => setF({ ...f, pacchetto_lezioni: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">— (lo imposti dopo)</option>
+            <option value="1">1 lezione</option>
+            <option value="4">4 lezioni (1 al mese)</option>
+            <option value="8">8 lezioni (2 al mese)</option>
+            <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
+            <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
+          </select>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        {campo("Codice (es. c10)", "codice")}
+        {(f.tipo_servizio === "online" || f.tipo_servizio === "ibrido") && campo("Piano", "piano")}
+        {campo("Data inizio", "data_inizio", "date")}
+        {campo("Data scadenza", "data_scadenza", "date")}
+      </div>
+      {(f.tipo_servizio === "online" || f.tipo_servizio === "ibrido") && campo("Link scheda", "link_scheda")}
+      <div>
+        <label className="text-xs text-slate-500">Stato pacchetto</label>
+        <select value={f.stato_pacchetto} onChange={(e) => setF({ ...f, stato_pacchetto: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="attivo">attivo</option>
+          <option value="in scadenza">in scadenza</option>
+          <option value="scaduto">scaduto</option>
+          <option value="in attivazione">in attivazione</option>
+          <option value="gratuito">gratuito</option>
+        </select>
+      </div>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </div>
+  );
+}
+
 function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
   const [vistaLista, setVistaLista] = useState("schede");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
+  const [candidatureNuove, setCandidatureNuove] = useState(0);
 
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
     setNonLetteCoach((r || 0) + (c || 0));
   };
-  useEffect(() => { caricaNonLetteCoach(); }, [vista]);
+  const caricaCandidatureNuove = async () => {
+    const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
+    setCandidatureNuove(count || 0);
+  };
+  useEffect(() => { caricaNonLetteCoach(); caricaCandidatureNuove(); }, [vista]);
 
   // I clienti archiviati (percorso non attivo) restano fuori da liste, calendario, promemoria e
   // rinnovi finché non vengono riattivati — ma restano recuperabili con "Mostra archiviati".
@@ -6210,21 +6419,28 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-4 gap-2">
-        <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-xs font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
-        <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-xs font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
-        <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-xs font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+      <div className="grid grid-cols-5 gap-1.5">
+        <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
+        <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
+        <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
           Notifiche
           {(nonLetteCoach + nuoveDaCompletare.length) > 0 && (
             <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length}</span>
           )}
         </button>
-        <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-xs font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
+        <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
+        <button onClick={() => setVista("candidature")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "candidature" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Candidature
+          {candidatureNuove > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{candidatureNuove}</span>
+          )}
+        </button>
       </div>
 
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
+      {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
       {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
