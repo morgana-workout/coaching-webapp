@@ -531,6 +531,22 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         </Card>
       )}
 
+      {isOnline && (client.scheda_pdf_path || client.link_scheda) && (
+        <button
+          onClick={async () => {
+            if (client.scheda_pdf_path) {
+              const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
+              if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+            } else {
+              window.open(client.link_scheda, "_blank");
+            }
+          }}
+          className="w-full bg-slate-800 text-white rounded-2xl p-4 flex items-center gap-3"
+        >
+          <Dumbbell size={22} /><span className="font-medium text-sm">Scheda</span>
+        </button>
+      )}
+
       {isBulb && pacchettoSingolo && (
         <Card className="p-5">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione</span>
@@ -578,37 +594,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         </div>
       )}
 
-      {menu.length > 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          {menu.map((m) => (
-            <button key={m.key} onClick={() => onApri(m.key)}
-              className="relative bg-white border border-slate-200 shadow-sm rounded-2xl min-h-[104px] p-4 flex flex-col items-start justify-between text-left active:bg-slate-50">
-              <span className="relative text-sky-500">
-                <m.icon size={28} />
-                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
-              </span>
-              <span className="font-medium text-slate-800 text-sm leading-tight">{m.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="grid grid-cols-2 gap-3">
-        {isOnline && (client.scheda_pdf_path || client.link_scheda) && (
-          <button
-            onClick={async () => {
-              if (client.scheda_pdf_path) {
-                const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
-                if (data?.signedUrl) window.open(data.signedUrl, "_blank");
-              } else {
-                window.open(client.link_scheda, "_blank");
-              }
-            }}
-            className="bg-slate-800 text-white rounded-2xl p-4 flex flex-col items-start gap-2"
-          >
-            <Dumbbell size={20} /><span className="font-medium text-sm">Scheda</span>
-          </button>
-        )}
         {isBulb && (
           <button onClick={() => setPrenotaAperto(true)} className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
             <Phone size={20} /><span className="font-medium text-sm">Prenota lezione</span>
@@ -2107,13 +2093,13 @@ function ClientApp({ session }) {
   const isOnlineNav = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const nav = [
     { key: "home", label: "Home", icon: Home },
-    ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
-    ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
-    ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
-    { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Macros", icon: Apple }] : []),
+    ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
     ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
+    ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
+    { key: "progressi", label: "Progressi", icon: TrendingUp },
+    ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
   ];
 
@@ -2125,13 +2111,7 @@ function ClientApp({ session }) {
             <ArrowLeft size={18} /> Home
           </button>
         ) : (
-          {tab !== "home" ? (
-          <button onClick={() => setTab("home")} className="flex items-center gap-1 text-sky-600 text-sm font-medium py-1 pr-3">
-            <ArrowLeft size={18} /> Home
-          </button>
-        ) : (
           <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
-        )}
         )}
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
       </div>
