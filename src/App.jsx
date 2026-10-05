@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
+import DiarioKcal from "./DiarioKcal";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
@@ -80,6 +81,7 @@ function PullToRefresh({ onRefresh, children, ownScroll = false, className = "" 
   const [aggiornando, setAggiornando] = useState(false);
   const startY = React.useRef(null);
   const scrollRef = React.useRef(null);
+import DiarioKcal from "./DiarioKcal";
 
   const inCima = () => (ownScroll ? (scrollRef.current?.scrollTop ?? 0) <= 0 : window.scrollY <= 0);
 
