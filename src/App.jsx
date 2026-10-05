@@ -484,7 +484,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   );
 }
 
-function ClientHome({ client, onAggiornato }) {
+function ClientHome({ client, onAggiornato, menu = [], onApri }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
@@ -560,6 +560,21 @@ function ClientHome({ client, onAggiornato }) {
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 text-sm">
           <AlertCircle size={18} />
           Il tuo coaching scade il {client.data_scadenza}
+        </div>
+      )}
+
+      {menu.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          {menu.map((m) => (
+            <button key={m.key} onClick={() => onApri(m.key)}
+              className="relative bg-white border border-slate-200 shadow-sm rounded-2xl min-h-[104px] p-4 flex flex-col items-start justify-between text-left active:bg-slate-50">
+              <span className="relative text-sky-500">
+                <m.icon size={28} />
+                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
+              </span>
+              <span className="font-medium text-slate-800 text-sm leading-tight">{m.label}</span>
+            </button>
+          ))}
         </div>
       )}
 
@@ -892,7 +907,7 @@ function HistoryTable({ checkins, sesso }) {
 
 /* Tabella 2 — valori calcolati, righe = indicatori, colonne = date (per confronto rapido) */
 function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
-  const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const ordinati = [...checkins].sort((a, b) => (b.data_check || "").localeCompare(a.data_check || ""));
   if (ordinati.length === 0) return null;
 
   const righe = [
@@ -1187,9 +1202,6 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Braccio/coscia</span>
       </div>
       <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{sottotitolo && !vediTutto ? " in questa finestra" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
-      <div className="bg-sky-50 border border-sky-100 rounded-lg p-3">
-        <p className="text-sm text-slate-700 leading-relaxed">{nota}</p>
-      </div>
     </Card>
   );
 }
@@ -2086,18 +2098,24 @@ function ClientApp({ session }) {
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Nutrizione", icon: Apple }] : []),
-    ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Kcal", icon: Flame }] : []),
+    ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
   ];
 
   return (
     <div className="h-[100dvh] flex flex-col bg-slate-50 max-w-md mx-auto">
       <div className="flex items-center justify-between px-5 pt-5 flex-shrink-0">
-        <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
+        {tab !== "home" ? (
+          <button onClick={() => setTab("home")} className="flex items-center gap-1 text-sky-600 text-sm font-medium py-1 pr-3">
+            <ArrowLeft size={18} /> Home
+          </button>
+        ) : (
+          <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
+        )}
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
       </div>
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
-        {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
+        {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
@@ -2107,17 +2125,6 @@ function ClientApp({ session }) {
         {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
-      <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around overflow-x-auto py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-        {nav.map((n) => (
-          <button key={n.key} onClick={() => setTab(n.key)} className={`relative flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] flex-shrink-0 ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
-            <span className="relative">
-              <n.icon size={24} />
-              {!!n.badge && <span className="absolute -top-1 -right-1.5 bg-rose-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{n.badge}</span>}
-            </span>
-            {n.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
