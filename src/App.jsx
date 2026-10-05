@@ -2086,6 +2086,7 @@ function ClientApp({ session }) {
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Nutrizione", icon: Apple }] : []),
+    ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Kcal", icon: Flame }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
   ];
 
@@ -2103,6 +2104,7 @@ function ClientApp({ session }) {
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
+        {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
       <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around overflow-x-auto py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
@@ -4356,6 +4358,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "progressi", label: "Progressi" },
     { key: "allenamento", label: "Allenamento" },
     { key: "nutrizione", label: "Nutrizione" },
+    { key: "kcal", label: "Alimentazione" },
     { key: "note", label: "Note" },
   ];
 
@@ -4460,6 +4463,13 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <span className="text-sm text-slate-700">Sezione nutrizione visibile alla cliente</span>
             <button onClick={() => salvaCliente({ nutrizione_attiva: client.nutrizione_attiva === false })}
               className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              <span className="w-5 h-5 bg-white rounded-full block" />
+            </button>
+          </div>
+          <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+            <span className="text-sm text-slate-700">Diario Kcal visibile alla cliente</span>
+            <button onClick={() => salvaCliente({ kcal_attivo: client.kcal_attivo === false })}
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.kcal_attivo !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
           </div>
@@ -4627,6 +4637,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica} />
         </div>
       )}
+
+      {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
 
       {tab === "note" && (
         <div className="space-y-3">
