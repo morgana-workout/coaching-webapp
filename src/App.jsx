@@ -81,8 +81,6 @@ function PullToRefresh({ onRefresh, children, ownScroll = false, className = "" 
   const [aggiornando, setAggiornando] = useState(false);
   const startY = React.useRef(null);
   const scrollRef = React.useRef(null);
-import DiarioKcal from "./DiarioKcal";
-
   const inCima = () => (ownScroll ? (scrollRef.current?.scrollTop ?? 0) <= 0 : window.scrollY <= 0);
 
   const onTouchStart = (e) => {
