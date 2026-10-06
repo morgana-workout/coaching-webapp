@@ -4564,6 +4564,24 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <label className="text-slate-400 text-xs">Oppure carica la scheda come PDF</label>
             <SchedaPdfUpload client={client} onCaricato={carica} />
           </div>
+          {(client.scheda_pdf_path || client.link_scheda) && (
+            <div className="col-span-2">
+              <button
+                onClick={async () => {
+                  if (client.scheda_pdf_path) {
+                    const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
+                    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                    else alert("Non riesco ad aprire il PDF della scheda.");
+                  } else {
+                    window.open(client.link_scheda, "_blank");
+                  }
+                }}
+                className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+              >
+                <Dumbbell size={16} /> Apri scheda della cliente
+              </button>
+            </div>
+          )}
           <div className="col-span-2">
             <FatturazioneCliente clientId={clientId} />
           </div>
