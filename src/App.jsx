@@ -1661,11 +1661,17 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   const [giornoAttivo, setGiornoAttivo] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [importando, setImportando] = useState(false);
+  const [archiviati, setArchiviati] = useState([]);
+  const [schedaAperta, setSchedaAperta] = useState(null);
+  const [giornoArchAttivo, setGiornoArchAttivo] = useState(null);
 
   const carica = async () => {
     const { data } = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
-    setGiorni(data || []);
-    if (data && data.length > 0 && !giornoAttivo) setGiornoAttivo(data[0].id);
+    const tutti = data || [];
+    const attivi = tutti.filter((g) => !g.scheda_archiviata);
+    setGiorni(attivi);
+    setArchiviati(tutti.filter((g) => g.scheda_archiviata));
+    if (attivi.length > 0 && !giornoAttivo) setGiornoAttivo(attivi[0].id);
     setCaricando(false);
   };
   useEffect(() => { carica(); }, [clientId]);
@@ -1793,17 +1799,12 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   };
 
   const sostituisciConNuovaScheda = async (file) => {
-    if (giorni.length > 0 && !confirm(`Questo esporterà in un file tutto il diario attuale (${giorni.length} giorno/i), poi eliminerà TUTTI i giorni esistenti prima di importare la nuova scheda dal CSV. Vuoi procedere?`)) return;
+    if (giorni.length > 0 && !confirm("Il diario attuale (" + giorni.length + " giorno/i) verrà chiuso e archiviato come scheda T.N, con tutti i carichi registrati. Poi importo la nuova scheda dal CSV. Vuoi procedere?")) return;
     setImportando(true);
     if (giorni.length > 0) {
-      await esportaLogCompleto(giorni);
-      for (const g of giorni) {
-        const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", g.id);
-        const idsEsercizi = (es || []).map((e) => e.id);
-        if (idsEsercizi.length) await supabase.from("training_entries").delete().in("exercise_id", idsEsercizi);
-        await supabase.from("training_exercises").delete().eq("training_day_id", g.id);
-        await supabase.from("training_days").delete().eq("id", g.id);
-      }
+      const numeri = archiviati.map((g) => parseInt((g.scheda_archiviata || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+      const etichetta = "T." + ((numeri.length ? Math.max(...numeri) : 0) + 1);
+      await supabase.from("training_days").update({ scheda_archiviata: etichetta }).in("id", giorni.map((g) => g.id));
       setGiorni([]);
       setGiornoAttivo(null);
     }
@@ -1846,7 +1847,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
           </label>
           <label className={`w-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-            🔄 Sostituisci con nuova scheda (esporta e ripulisci i giorni attuali)
+            🔄 Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) sostituisciConNuovaScheda(e.target.files[0]); e.target.value = ""; }} />
           </label>
         </div>
@@ -1859,6 +1860,41 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       {giornoAttivo && (
         <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} />
       )}
+
+      {archiviati.length > 0 && (() => {
+        const gruppi = {};
+        archiviati.forEach((g) => { (gruppi[g.scheda_archiviata] = gruppi[g.scheda_archiviata] || []).push(g); });
+        const num = (s) => parseInt((s || "").replace(/\D/g, ""), 10) || 0;
+        const etichette = Object.keys(gruppi).sort((a, b) => num(a) - num(b));
+        return (
+          <div className="space-y-2 pt-2">
+            <p className="text-xs uppercase tracking-wide text-slate-400 font-medium">Schede archiviate</p>
+            {etichette.map((et) => (
+              <Card key={et} className="p-3">
+                <button onClick={() => { setSchedaAperta(schedaAperta === et ? null : et); setGiornoArchAttivo(null); }} className="w-full flex justify-between items-center text-sm text-slate-700">
+                  <span className="font-medium">{et} <span className="text-slate-400 font-normal">· {gruppi[et].length} giorno/i · chiusa</span></span>
+                  <ChevronRight size={16} className={schedaAperta === et ? "rotate-90" : ""} />
+                </button>
+                {schedaAperta === et && (
+                  <div className="mt-3 space-y-3">
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {gruppi[et].map((g) => (
+                        <button key={g.id} onClick={() => setGiornoArchAttivo(g.id)}
+                          className={"px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 " + (giornoArchAttivo === g.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600")}>
+                          {g.nome}
+                        </button>
+                      ))}
+                    </div>
+                    {giornoArchAttivo && gruppi[et].find((g) => g.id === giornoArchAttivo) && (
+                      <GiornoAllenamento key={giornoArchAttivo} clientId={clientId} giorno={gruppi[et].find((g) => g.id === giornoArchAttivo)} onGiornoRinominato={carica} />
+                    )}
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
