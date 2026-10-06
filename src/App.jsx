@@ -4398,6 +4398,16 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
           <div>
+            <label className="text-slate-400 text-xs">Nome</label>
+            <input defaultValue={client.nome || ""} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== client.nome) salvaCliente({ nome: v }); }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Cognome</label>
+            <input defaultValue={client.cognome || ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (client.cognome || "")) salvaCliente({ cognome: v || null }); }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
             <label className="text-slate-400 text-xs">Piano</label>
             <select defaultValue={client.piano || ""} onBlur={(e) => salvaCliente({ piano: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
