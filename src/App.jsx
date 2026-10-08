@@ -487,6 +487,12 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
 function ClientHome({ client, onAggiornato, menu = [], onApri }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
+  const richiestaRef = React.useRef(null);
+  useEffect(() => {
+    if ((prenotaAperto || inviata) && richiestaRef.current) {
+      setTimeout(() => richiestaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    }
+  }, [prenotaAperto, inviata]);
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
   const [prossimaLezione, setProssimaLezione] = useState(undefined);
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
@@ -615,12 +621,14 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         </div>
       )}
 
-      {prenotaAperto && !inviata && (
-        <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
-      )}
-      {inviata && (
-        <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
-      )}
+      <div ref={richiestaRef}>
+        {prenotaAperto && !inviata && (
+          <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
+        )}
+        {inviata && (
+          <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
+        )}
+      </div>
 
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
     </div>
