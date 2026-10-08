@@ -446,7 +446,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
       stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
     }).select().single();
-    if (creato && !extra) await collegaLezionePacchetto(client.id, creato);
+    // il collegamento al pacchetto avviene solo quando Morgana approva la richiesta
     setInviando(false);
     onFatto();
   };
@@ -1916,6 +1916,7 @@ function NotificheCliente({ client }) {
   const accetta = async (n) => {
     if (n.calendar_event_id) {
       await supabase.from("calendar_events").update({ data: n.proposta_data, ora: n.proposta_ora, luogo: n.proposta_luogo, stato: "confermato" }).eq("id", n.calendar_event_id);
+      await sincronizzaLezionePacchetto(n.calendar_event_id);
     }
     await supabase.from("notifiche").update({ stato: "accettata" }).eq("id", n.id);
     carica();
@@ -1988,6 +1989,7 @@ function LeMieLezioni({ client }) {
       if (!conferma) return;
     }
     await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa" }).eq("id", e.id);
+    if (inTempo) await scollegaLezionePacchetto(e.id);
     carica();
   };
 
@@ -3139,11 +3141,31 @@ function LezioniPacchetto({ client, onCompletato }) {
 }
 
 async function collegaLezionePacchetto(clientId, evento) {
+  if (!evento || evento.tipo !== "lezione") return;
+  const { data: gia } = await supabase.from("lezioni_svolte").select("id").eq("calendar_event_id", evento.id).limit(1).maybeSingle();
+  if (gia) {
+    await supabase.from("lezioni_svolte").update({ data: evento.data, ora: evento.ora || null }).eq("id", gia.id);
+    return;
+  }
+  const { data: pacc } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", clientId).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+  if (!pacc) return;
   const { data: libera } = await supabase.from("lezioni_svolte")
-    .select("id").eq("client_id", clientId).is("calendar_event_id", null).order("numero").limit(1).maybeSingle();
+    .select("id").eq("pacchetto_id", pacc.id).eq("fatta", false).is("calendar_event_id", null).order("numero").limit(1).maybeSingle();
   if (libera) {
     await supabase.from("lezioni_svolte").update({ data: evento.data, ora: evento.ora || null, calendar_event_id: evento.id }).eq("id", libera.id);
+  } else {
+    const { data: ultima } = await supabase.from("lezioni_svolte").select("numero").eq("pacchetto_id", pacc.id).order("numero", { ascending: false }).limit(1).maybeSingle();
+    await supabase.from("lezioni_svolte").insert({ client_id: clientId, pacchetto_id: pacc.id, numero: (ultima?.numero || 0) + 1, fatta: false, data: evento.data, ora: evento.ora || null, calendar_event_id: evento.id });
   }
+}
+async function scollegaLezionePacchetto(eventoId) {
+  await supabase.from("lezioni_svolte").update({ data: null, ora: null, calendar_event_id: null }).eq("calendar_event_id", eventoId).eq("fatta", false);
+}
+async function sincronizzaLezionePacchetto(eventoId) {
+  const { data: ev } = await supabase.from("calendar_events").select("*").eq("id", eventoId).single();
+  if (!ev || ev.tipo !== "lezione") return;
+  if (ev.stato === "confermato") await collegaLezionePacchetto(ev.client_id, ev);
+  else if (ev.stato === "annullata" || ev.stato === "richiesta") await scollegaLezionePacchetto(ev.id);
 }
 
 function RigaStato({ label, valore, presente }) {
@@ -4970,12 +4992,14 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
       ? { data: f.data, ora: f.ora || null, titolo: f.titolo.trim() || evento.titolo, nota: f.nota || null }
       : { data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato };
     await supabase.from("calendar_events").update(payload).eq("id", evento.id);
+    if (!isPersonale) await sincronizzaLezionePacchetto(evento.id);
     setSalvando(false);
     onSalvato();
   };
   const elimina = async () => {
     if (!confirm("Eliminare definitivamente questo evento?")) return;
     setSalvando(true);
+    await scollegaLezionePacchetto(evento.id);
     await supabase.from("calendar_events").delete().eq("id", evento.id);
     setSalvando(false);
     onSalvato();
@@ -5380,8 +5404,8 @@ function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onCha
   };
   useEffect(() => { carica(); }, []);
 
-  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); carica(); };
-  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); carica(); };
+  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); await sincronizzaLezionePacchetto(id); carica(); };
+  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); carica(); };
   const segnaRevisionato = async (id) => {
     await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
     try {
