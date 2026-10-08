@@ -5625,7 +5625,6 @@ function ChatMessaggi({ clientId, ruolo, onLetti }) {
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
-  const [messaggiNuovi, setMessaggiNuovi] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
   const [caricando, setCaricando] = useState(true);
 
@@ -5634,10 +5633,6 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
     setRichieste(r || []);
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
     setCheckDaRivedere(c || []);
-    const { data: mm } = await supabase.from("messaggi").select("client_id, testo, foto_path, created_at, clients(nome, cognome)").eq("mittente", "cliente").eq("letto", false).order("created_at", { ascending: false });
-    const perCliente = {};
-    (mm || []).forEach((m) => { if (!perCliente[m.client_id]) perCliente[m.client_id] = { ...m, n: 0 }; perCliente[m.client_id].n += 1; });
-    setMessaggiNuovi(Object.values(perCliente));
     setCaricando(false);
   };
   useEffect(() => { carica(); }, []);
@@ -5665,21 +5660,6 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
                 <button onClick={() => onSelect(v.cliente.id)} className="w-full text-left">
                   <p className="font-medium text-slate-700 text-sm">{v.cliente.nome} {v.cliente.cognome}</p>
                   <p className="text-slate-500 text-xs">{v.marker === "promemoria_pacchetto" ? "Pacchetto in scadenza il " : "Check previsto il "}{v.data.split("-").reverse().join("/")}</p>
-                </button>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-      {messaggiNuovi.length > 0 && (
-        <div>
-          <p className="text-xs uppercase tracking-wide text-sky-600 font-medium mb-2 px-1">Messaggi dalle clienti ({messaggiNuovi.length})</p>
-          <div className="space-y-2">
-            {messaggiNuovi.map((m) => (
-              <Card key={m.client_id} className="p-3">
-                <button onClick={() => onSelect(m.client_id, "chat")} className="w-full text-left">
-                  <p className="font-medium text-slate-700 text-sm">{m.clients?.nome} {m.clients?.cognome} <span className="text-sky-600 text-xs font-normal">· {m.n} nuov{m.n === 1 ? "o" : "i"}</span></p>
-                  <p className="text-slate-500 text-xs truncate">{m.testo || "📷 Foto"}</p>
                 </button>
               </Card>
             ))}
@@ -6753,7 +6733,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
     const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
     setChatNonLette(m || 0);
-    setNonLetteCoach((r || 0) + (c || 0) + (m || 0));
+    setNonLetteCoach((r || 0) + (c || 0));
   };
   const caricaCandidatureNuove = async () => {
     const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
