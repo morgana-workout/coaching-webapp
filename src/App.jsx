@@ -2395,7 +2395,7 @@ const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
 // coerente anche dopo aver aggiunto o cancellato pagamenti (es. doppioni da correggere).
 function ricalcolaScadenzaDaPagamenti(pagamenti) {
   const validi = (pagamenti || [])
-    .filter((p) => MESI_PER_TIPO_PAGAMENTO[p.tipo_piano])
+    .filter((p) => MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.stato === "saldato")
     .slice()
     .sort((a, b) => (a.data_pagamento || "").localeCompare(b.data_pagamento || ""));
   let scadenza = null;
@@ -2413,10 +2413,13 @@ function ricalcolaScadenzaDaPagamenti(pagamenti) {
 // cadenza fissa, sia dopo averne cancellato uno, cosi' un doppione eliminato non lascia
 // la scadenza avanzata "a vuoto".
 async function ricalcolaEAggiornaScadenza(clientId) {
-  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano").eq("client_id", clientId);
+  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato").eq("client_id", clientId);
   const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti);
   if (!scadenza) return;
-  await supabase.from("clients").update({ piano: ultimoTipo, data_scadenza: scadenza, stato_pacchetto: "attivo" }).eq("id", clientId);
+  const oggiStr = formatDataLocale(new Date());
+  const giorniAScadenza = Math.round((new Date(scadenza + "T00:00:00") - new Date(oggiStr + "T00:00:00")) / 86400000);
+  const statoPacchetto = giorniAScadenza < 0 ? "scaduto" : giorniAScadenza <= 7 ? "in scadenza" : "attivo";
+  await supabase.from("clients").update({ piano: ultimoTipo, data_scadenza: scadenza, stato_pacchetto: statoPacchetto }).eq("id", clientId);
 }
 
 const METODI_PAGAMENTO = [
@@ -2511,6 +2514,7 @@ function AccontoDaSaldare({ p, onSalvato }) {
     await supabase.from("payments").update(
       completato ? { importo_saldato: Number(p.importo), stato: "saldato" } : { importo_saldato: nuovoSaldato }
     ).eq("id", p.id);
+    if (completato && MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
     setSalvando(false);
     setValore("");
     onSalvato();
@@ -2566,6 +2570,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
 
   const cambiaStato = async (p) => {
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) await ricalcolaEAggiornaScadenza(client.id);
     onRegistrato();
   };
   const elimina = async (p) => {
@@ -5779,6 +5784,7 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
       ? { importo_saldato: Number(pag.importo), stato: "saldato" }
       : { importo_saldato: nuovoSaldato };
     const { error } = await supabase.from("payments").update(aggiornamento).eq("id", pag.id);
+    if (!error && completato && MESI_PER_TIPO_PAGAMENTO[pag.tipo_piano] && pag.client_id) await ricalcolaEAggiornaScadenza(pag.client_id);
     setSalvandoAcconto(false);
     if (error) { setErroreAcconto("Errore nel salvataggio, riprova."); return; }
     setPag({ ...pag, ...aggiornamento });
@@ -5946,6 +5952,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const cambiaStato = async (p) => {
     if (p.stato === "spesa") return; // le spese non si alternano tra saldato/da saldare
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
     carica();
   };
   const elimina = async (p) => {
