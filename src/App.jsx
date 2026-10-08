@@ -556,24 +556,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         </button>
       )}
 
-      {isBulb && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione</span>
-        </button>
-      )}
-
-      {isSoloOnline && (
-        <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota call</span>
-        </a>
-      )}
-
-      {!isBulb && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione in presenza</span>
-        </button>
-      )}
-
       {isBulb && pacchettoSingolo && (
         <Card className="p-5">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione</span>
@@ -619,6 +601,24 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
             </button>
           ))}
         </div>
+      )}
+
+      {isBulb && (
+        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione</span>
+        </button>
+      )}
+
+      {isSoloOnline && (
+        <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Phone size={22} /><span className="font-medium text-sm">Prenota call</span>
+        </a>
+      )}
+
+      {!isBulb && (
+        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione in presenza</span>
+        </button>
       )}
 
       <div ref={richiestaRef}>
