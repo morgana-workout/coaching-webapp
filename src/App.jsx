@@ -562,7 +562,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         </a>
       )}
 
-      {isSoloOnline && (
+      {!isBulb && (
         <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
           <Phone size={22} /><span className="font-medium text-sm">Prenota lezione in presenza</span>
         </button>
@@ -616,7 +616,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
       )}
 
       {prenotaAperto && !inviata && (
-        <PrenotaLezioneForm client={client} extra={isSoloOnline} onFatto={() => setInviata(true)} />
+        <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
       )}
       {inviata && (
         <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
