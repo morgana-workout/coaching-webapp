@@ -7,8 +7,14 @@
     <link rel="icon" type="image/png" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="MorGainz" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#8EBDED" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { theme: { extend: { colors: {
+        sky: { 50: "#F1F7FD", 100: "#E1EEFB", 200: "#C9E0F7", 300: "#A9CDF1", 400: "#8EBDED", 500: "#4F8FD0", 600: "#3F78B3", 700: "#2F5E8E" },
+        slate: { 50: "#FFFCF2", 100: "#FBF3D9", 700: "#34567F", 800: "#27466D", 900: "#1B3350" }
+      } } } };
+    </script>
   </head>
   <body>
     <div id="root"></div>
