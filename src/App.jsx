@@ -5,7 +5,7 @@ import DiarioKcal from "./DiarioKcal";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -2087,6 +2087,7 @@ function ClientApp({ session }) {
   const [pianoStorico, setPianoStorico] = useState([]);
   const [caricando, setCaricando] = useState(true);
   const [nonLette, setNonLette] = useState(0);
+  const [chatNonLetti, setChatNonLetti] = useState(0);
 
   const carica = async () => {
     setCaricando(true);
@@ -2128,6 +2129,8 @@ function ClientApp({ session }) {
       setPianoStorico(nuStorico || []);
       const { count } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("stato", "inviata");
       setNonLette(count || 0);
+      const { count: chatCount } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("mittente", "coach").eq("letto", false);
+      setChatNonLetti(chatCount || 0);
     }
     setCaricando(false);
   };
@@ -2142,6 +2145,7 @@ function ClientApp({ session }) {
   const nav = [
     { key: "home", label: "Home", icon: Home },
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
+    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
     ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Macros", icon: Apple }] : []),
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
     ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
@@ -2168,6 +2172,7 @@ function ClientApp({ session }) {
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
+        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} /></div>}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
@@ -4467,6 +4472,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "allenamento", label: "Allenamento" },
     { key: "nutrizione", label: "Nutrizione" },
     { key: "kcal", label: "Alimentazione" },
+    { key: "chat", label: "Chat" },
     { key: "note", label: "Note" },
   ];
 
@@ -4708,6 +4714,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </Card>
       )}
 
+      {tab === "chat" && <ChatMessaggi clientId={clientId} ruolo="coach" onLetti={() => onChanged?.()} />}
       {tab === "lezioni" && <LezioniPacchetto client={client} onCompletato={carica} />}
 
       {tab === "scheda" && <SchedaCoach client={client} checkins={checkins} salvaCliente={salvaCliente} />}
@@ -5410,9 +5417,120 @@ function PromemoriaMessaggi({ clients }) {
   );
 }
 
+function ChatMessaggi({ clientId, ruolo, onLetti }) {
+  const [msgs, setMsgs] = useState([]);
+  const [testo, setTesto] = useState("");
+  const [foto, setFoto] = useState(null);
+  const [invio, setInvio] = useState(false);
+  const [urls, setUrls] = useState({});
+  const [errore, setErrore] = useState("");
+  const [caricato, setCaricato] = useState(false);
+  const fineRef = React.useRef(null);
+  const altro = ruolo === "coach" ? "cliente" : "coach";
+
+  const carica = async () => {
+    const { data, error } = await supabase.from("messaggi").select("*").eq("client_id", clientId).order("created_at", { ascending: true });
+    if (error) { setErrore("La chat non è ancora attiva: serve completare l'attivazione nel database."); setCaricato(true); return; }
+    setErrore("");
+    setMsgs(data || []);
+    setCaricato(true);
+    if ((data || []).some((m) => m.mittente === altro && !m.letto)) {
+      await supabase.rpc("segna_messaggi_letti", { p_client_id: clientId });
+      onLetti?.();
+    }
+  };
+  useEffect(() => {
+    carica();
+    const t = setInterval(carica, 8000);
+    return () => clearInterval(t);
+  }, [clientId]);
+
+  useEffect(() => {
+    msgs.filter((m) => m.foto_path && !urls[m.foto_path]).forEach(async (m) => {
+      const { data } = await supabase.storage.from("progress-photos").createSignedUrl(m.foto_path, 3600);
+      if (data?.signedUrl) setUrls((u) => ({ ...u, [m.foto_path]: data.signedUrl }));
+    });
+  }, [msgs]);
+
+  useEffect(() => {
+    if (msgs.length && fineRef.current) fineRef.current.scrollIntoView({ block: "end" });
+  }, [msgs.length]);
+
+  const invia = async () => {
+    if (!testo.trim() && !foto) return;
+    setInvio(true);
+    setErrore("");
+    try {
+      let foto_path = null;
+      if (foto) {
+        const ext = (foto.name.split(".").pop() || "jpg").toLowerCase();
+        foto_path = `${clientId}/chat/${Date.now()}.${ext}`;
+        const { error: e1 } = await supabase.storage.from("progress-photos").upload(foto_path, foto);
+        if (e1) throw e1;
+      }
+      const { error } = await supabase.from("messaggi").insert({ client_id: clientId, mittente: ruolo, testo: testo.trim() || null, foto_path });
+      if (error) throw error;
+      setTesto("");
+      setFoto(null);
+      await carica();
+    } catch (e) {
+      setErrore("Messaggio non inviato: " + (e.message || "riprova"));
+    }
+    setInvio(false);
+  };
+
+  const orario = (iso) => {
+    const d = new Date(iso);
+    return `${d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })} ${d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+        {caricato && msgs.length === 0 && !errore && <Card className="p-4 text-center text-slate-400 text-sm">Nessun messaggio ancora. Scrivi il primo!</Card>}
+        {msgs.map((m) => {
+          const mio = m.mittente === ruolo;
+          return (
+            <div key={m.id} className={`flex ${mio ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${mio ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-700"}`}>
+                {m.foto_path && (urls[m.foto_path]
+                  ? <a href={urls[m.foto_path]} target="_blank" rel="noreferrer"><img src={urls[m.foto_path]} alt="" className="rounded-xl mb-1 max-h-60" /></a>
+                  : <p className="text-xs opacity-60 mb-1">Carico la foto...</p>)}
+                {m.testo && <p className="whitespace-pre-wrap break-words">{m.testo}</p>}
+                <p className={`text-[10px] mt-1 ${mio ? "text-slate-300" : "text-slate-400"}`}>{orario(m.created_at)}</p>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={fineRef} />
+      </div>
+      {errore && <p className="text-rose-500 text-xs px-1">{errore}</p>}
+      {foto && (
+        <div className="flex items-center justify-between bg-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600">
+          <span className="truncate">Foto: {foto.name}</span>
+          <button onClick={() => setFoto(null)} className="text-slate-400 ml-2"><X size={14} /></button>
+        </div>
+      )}
+      <div className="flex items-end gap-2">
+        <label className="flex-shrink-0 w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
+          <Camera size={18} />
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { setFoto(e.target.files?.[0] || null); e.target.value = ""; }} />
+        </label>
+        <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={1} placeholder="Scrivi un messaggio..."
+          className="flex-1 min-w-0 border border-slate-200 rounded-2xl px-3 py-2 text-sm resize-none" />
+        <button onClick={invia} disabled={invio || (!testo.trim() && !foto)}
+          className="flex-shrink-0 w-10 h-10 rounded-full bg-sky-500 text-white flex items-center justify-center disabled:opacity-40">
+          <Send size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onChanged }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
+  const [messaggiNuovi, setMessaggiNuovi] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
   const [caricando, setCaricando] = useState(true);
 
@@ -5421,6 +5539,10 @@ function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onCha
     setRichieste(r || []);
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
     setCheckDaRivedere(c || []);
+    const { data: mm } = await supabase.from("messaggi").select("client_id, testo, foto_path, created_at, clients(nome, cognome)").eq("mittente", "cliente").eq("letto", false).order("created_at", { ascending: false });
+    const perCliente = {};
+    (mm || []).forEach((m) => { if (!perCliente[m.client_id]) perCliente[m.client_id] = { ...m, n: 0 }; perCliente[m.client_id].n += 1; });
+    setMessaggiNuovi(Object.values(perCliente));
     setCaricando(false);
   };
   useEffect(() => { carica(); }, []);
@@ -5439,6 +5561,21 @@ function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onCha
 
   return (
     <div className="space-y-5">
+      {messaggiNuovi.length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wide text-sky-600 font-medium mb-2 px-1">Messaggi dalle clienti ({messaggiNuovi.length})</p>
+          <div className="space-y-2">
+            {messaggiNuovi.map((m) => (
+              <Card key={m.client_id} className="p-3">
+                <button onClick={() => onSelect(m.client_id, "chat")} className="w-full text-left">
+                  <p className="font-medium text-slate-700 text-sm">{m.clients?.nome} {m.clients?.cognome} <span className="text-sky-600 text-xs font-normal">· {m.n} nuov{m.n === 1 ? "o" : "i"}</span></p>
+                  <p className="text-slate-500 text-xs truncate">{m.testo || "📷 Foto"}</p>
+                </button>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
       {nuoveDaCompletare.length > 0 && (
         <div>
           <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Nuove clienti registrate — da completare ({nuoveDaCompletare.length})</p>
@@ -6503,7 +6640,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
-    setNonLetteCoach((r || 0) + (c || 0));
+    const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+    setNonLetteCoach((r || 0) + (c || 0) + (m || 0));
   };
   const caricaCandidatureNuove = async () => {
     const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
