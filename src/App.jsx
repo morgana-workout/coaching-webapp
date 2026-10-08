@@ -2374,12 +2374,12 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
 function addMesi(dataStr, mesi) {
   const d = new Date(dataStr + "T00:00:00");
   d.setMonth(d.getMonth() + mesi);
-  return d.toISOString().slice(0, 10);
+  return formatDataLocale(d);
 }
 function addGiorni(dataStr, giorni) {
   const d = new Date(dataStr + "T00:00:00");
   d.setDate(d.getDate() + giorni);
-  return d.toISOString().slice(0, 10);
+  return formatDataLocale(d);
 }
 // Formatta una Date usando i componenti locali (anno/mese/giorno), mai toISOString()
 // che converte in UTC e puo' sfasare il giorno di uno in fusi orari come Europe/Rome.
