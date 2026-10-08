@@ -523,8 +523,11 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
           </div>
           <div className="flex items-end justify-between">
             <div>
-              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check || "—"}</p>
-              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check || "—"}</p>
+              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
+              {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
+                <p className="text-rose-500 text-sm font-medium mt-1">Scaduto: invia il tuo check</p>
+              )}
+              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
             </div>
             <Clock className="text-sky-500" size={32} />
           </div>
@@ -6429,6 +6432,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
   const [vistaLista, setVistaLista] = useState("schede");
+  const [ordinamento, setOrdinamento] = useState("check");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
   const [candidatureNuove, setCandidatureNuove] = useState(0);
 
@@ -6468,7 +6472,12 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   };
 
   const baseVisibili = filtro === "archiviati" ? clientiArchiviati : clientiAttivi;
-  let visibili = [...baseVisibili].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+  const chiaveData = (d) => d || "9999-12-31";
+  let visibili = [...baseVisibili].sort((a, b) => {
+    if (ordinamento === "check") return chiaveData(a.prossimo_check).localeCompare(chiaveData(b.prossimo_check));
+    if (ordinamento === "scadenza") return chiaveData(a.data_scadenza).localeCompare(chiaveData(b.data_scadenza));
+    return (a.ordine ?? 9999) - (b.ordine ?? 9999);
+  });
   if (ricerca.trim()) {
     const q = ricerca.trim().toLowerCase();
     visibili = visibili.filter((c) => `${c.nome} ${c.cognome} ${c.codice}`.toLowerCase().includes(q));
@@ -6479,7 +6488,15 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   if (filtro === "online") visibili = visibili.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido");
   if (filtro === "presenza") visibili = visibili.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido");
 
-  const riordinabile = !ricerca.trim() && filtro === "tutti";
+  const riordinabile = !ricerca.trim() && filtro === "tutti" && ordinamento === "manuale";
+  const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "—");
+  const statoScad = (d) => {
+    if (!d) return { classe: "", testo: "" };
+    const g = Math.round((new Date(d + "T00:00:00") - new Date(new Date().toISOString().slice(0, 10) + "T00:00:00")) / 86400000);
+    if (g < 0) return { classe: "text-rose-500 font-medium", testo: " (scaduto da " + Math.abs(g) + "g)" };
+    if (g <= 7) return { classe: "text-amber-500 font-medium", testo: g === 0 ? " (oggi)" : " (tra " + g + "g)" };
+    return { classe: "text-slate-600", testo: " (tra " + g + "g)" };
+  };
 
   const filtriBtn = (key, label, count, colore) => (
     <button onClick={() => setFiltro(filtro === key ? "tutti" : key)}
@@ -6556,6 +6573,11 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       <div>
         <div className="flex items-center justify-between px-1 mb-2">
           <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
+          <select value={ordinamento} onChange={(e) => setOrdinamento(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white">
+            <option value="check">Ordine: prossimo check</option>
+            <option value="scadenza">Ordine: scadenza pacchetto</option>
+            <option value="manuale">Ordine: manuale</option>
+          </select>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
             <button onClick={() => setVistaLista("schede")} className={`px-2.5 py-1 rounded-md text-xs font-medium ${vistaLista === "schede" ? "bg-white text-slate-700 shadow-sm" : "text-slate-500"}`}>Schede</button>
             <button onClick={() => setVistaLista("griglia")} className={`px-2.5 py-1 rounded-md text-xs font-medium ${vistaLista === "griglia" ? "bg-white text-slate-700 shadow-sm" : "text-slate-500"}`}>Griglia dati</button>
@@ -6581,11 +6603,13 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
                     </Badge>
                     {c.archiviato && <Badge className="flex-shrink-0 bg-slate-200 text-slate-500">ARCHIVIATO</Badge>}
                   </div>
-                  <p className="text-slate-500 text-xs mt-0.5 ">
-                    {c.tipo_servizio === "presenza"
-                      ? `${c.piano || "—"} · ${c.pacchetto_lezioni ? c.pacchetto_lezioni + " lezioni" : "pacchetto non impostato"}`
-                      : `${c.piano || "—"} · Prossimo check: ${c.prossimo_check || "—"}`}
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    {c.piano || "—"}{c.tipo_servizio === "presenza" ? " · " + (c.pacchetto_lezioni ? c.pacchetto_lezioni + " lezioni" : "pacchetto non impostato") : ""}
                   </p>
+                  {c.tipo_servizio !== "presenza" && (
+                    <p className="text-xs mt-0.5 text-slate-500">Ultimo check: {fmtData(c.ultimo_check)} · Prossimo: <span className={statoScad(c.prossimo_check).classe}>{fmtData(c.prossimo_check)}{statoScad(c.prossimo_check).testo}</span></p>
+                  )}
+                  <p className="text-xs mt-0.5 text-slate-500">Scadenza pacchetto: <span className={statoScad(c.data_scadenza).classe}>{fmtData(c.data_scadenza)}{statoScad(c.data_scadenza).testo}</span></p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <StatoBadge stato={c.stato_check} />
