@@ -164,9 +164,7 @@ function Login({ erroreLink }) {
           </div>
         )}
         <div className="text-center mb-10">
-          <div className="w-14 h-14 rounded-2xl bg-slate-700 mx-auto mb-4 flex items-center justify-center">
-            <Dumbbell className="text-sky-300" size={26} />
-          </div>
+          <img src="/logo.png" alt="MorGainz" className="h-32 w-auto mx-auto mb-4 rounded-3xl bg-white p-3" />
           <h1 className="text-white text-2xl font-semibold tracking-tight">Coaching by Morgana</h1>
           <p className="text-slate-400 text-sm mt-1">Il tuo spazio di allenamento, sempre con te</p>
         </div>
@@ -2166,7 +2164,7 @@ function ClientApp({ session }) {
             <ArrowLeft size={18} /> Home
           </button>
         ) : (
-          <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
+          <img src="/logo.png" alt="MorGainz" className="h-11 w-auto" />
         )}
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
       </div>
@@ -7004,7 +7002,7 @@ function AdminApp() {
     <PullToRefresh onRefresh={carica}>
     <div className="min-h-screen bg-slate-50">
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
-        <span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span>
+        <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
         <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
       </div>
       {selectedId ? (
@@ -7044,7 +7042,7 @@ function ImpostaPassword({ onFatto }) {
     <div className="min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-slate-700 mx-auto mb-4 flex items-center justify-center"><Dumbbell className="text-sky-300" size={26} /></div>
+          <img src="/logo.png" alt="MorGainz" className="h-28 w-auto mx-auto mb-4 rounded-3xl bg-white p-3" />
           <h1 className="text-white text-xl font-semibold">Benvenuta!</h1>
           <p className="text-slate-400 text-sm mt-1">Crea una password per accedere da qui in poi con email e password.</p>
         </div>
