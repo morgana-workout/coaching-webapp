@@ -5424,6 +5424,68 @@ function PromemoriaMessaggi({ clients }) {
   );
 }
 
+function ChatCoach({ clients, onChanged }) {
+  const [aperta, setAperta] = useState(null);
+  const [ultimi, setUltimi] = useState({});
+  const [ricerca, setRicerca] = useState("");
+  const carica = async () => {
+    const { data } = await supabase.from("messaggi").select("client_id, mittente, testo, foto_path, letto, created_at").order("created_at", { ascending: false }).limit(1000);
+    const m = {};
+    (data || []).forEach((x) => {
+      if (!m[x.client_id]) m[x.client_id] = { ultimo: x, nuovi: 0 };
+      if (x.mittente === "cliente" && !x.letto) m[x.client_id].nuovi += 1;
+    });
+    setUltimi(m);
+  };
+  useEffect(() => { carica(); }, [aperta]);
+
+  if (aperta) {
+    const c = clients.find((x) => x.id === aperta);
+    return (
+      <div className="space-y-3">
+        <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutte le chat</button>
+        <p className="text-lg font-semibold text-slate-800">{c?.nome} {c?.cognome}</p>
+        <ChatMessaggi clientId={aperta} ruolo="coach" onLetti={() => onChanged?.()} />
+      </div>
+    );
+  }
+
+  const q = ricerca.trim().toLowerCase();
+  const lista = clients
+    .filter((c) => !q || `${c.nome} ${c.cognome}`.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const ua = ultimi[a.id]?.ultimo?.created_at || "";
+      const ub = ultimi[b.id]?.ultimo?.created_at || "";
+      if (ua !== ub) return ub.localeCompare(ua);
+      return `${a.nome} ${a.cognome}`.localeCompare(`${b.nome} ${b.cognome}`);
+    });
+  return (
+    <div className="space-y-3">
+      <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente..."
+        className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
+      <div className="space-y-2">
+        {lista.map((c) => {
+          const u = ultimi[c.id];
+          return (
+            <Card key={c.id} className="p-3">
+              <button onClick={() => setAperta(c.id)} className="w-full text-left flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                  <p className="text-slate-500 text-xs truncate">
+                    {u ? `${u.ultimo.mittente === "coach" ? "Tu: " : ""}${u.ultimo.testo || "📷 Foto"}` : "Nessun messaggio"}
+                  </p>
+                </div>
+                {u?.nuovi > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
+                <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+              </button>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Promemoria del giorno prima (scadenza pacchetto e check) — calcolati sui dati della cliente.
 function promemoriaCliente(c, oggi = formatDataLocale(new Date())) {
   const domani = addGiorni(oggi, 1);
@@ -6683,12 +6745,14 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const [vistaLista, setVistaLista] = useState("schede");
   const [ordinamento, setOrdinamento] = useState("check");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
+  const [chatNonLette, setChatNonLette] = useState(0);
   const [candidatureNuove, setCandidatureNuove] = useState(0);
 
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
     const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+    setChatNonLette(m || 0);
     setNonLetteCoach((r || 0) + (c || 0) + (m || 0));
   };
   const caricaCandidatureNuove = async () => {
@@ -6770,7 +6834,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
         <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
         <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
         <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
@@ -6786,11 +6850,18 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
             <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{candidatureNuove}</span>
           )}
         </button>
+        <button onClick={() => setVista("chat")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "chat" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Chat
+          {chatNonLette > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{chatNonLette}</span>
+          )}
+        </button>
       </div>
 
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
+      {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
       {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
       {vista === "lista" && (
         <>
