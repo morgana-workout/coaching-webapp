@@ -2961,7 +2961,7 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
           {lezione.fatta && <CheckCircle2 size={16} className="text-white" />}
         </button>
         <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
-        <InputData value={data} onChange={(e) => { const v = e.target.value; setData(v); setSalvato(false); if (!v) { setOra(""); salva({ data: "", ora: "" }); } }} className="flex-1" />
+        <InputData value={data} onChange={(e) => { const v = e.target.value; setData(v); setSalvato(false); if (!v) { setOra(""); salva({ data: "", ora: "" }); } }} className="flex-1" onBlur={(e) => { if (!e.target.value && (lezione.data || lezione.calendar_event_id)) { setOra(""); salva({ data: "", ora: "" }); } }} />
         <select value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
           <option value="">--:--</option>
           {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -2974,6 +2974,12 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
           className={`flex-1 rounded-lg py-2 text-xs font-medium ${modificato ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-400"}`}>
           {salvando ? "Salvo..." : "Salva"}
         </button>
+        {(lezione.data || lezione.calendar_event_id) && (
+          <button onClick={() => { setData(""); setOra(""); salva({ data: "", ora: "" }); }} disabled={salvando}
+            className="rounded-lg py-2 px-3 text-xs font-medium bg-rose-50 text-rose-600 flex-shrink-0">
+            Elimina appuntamento
+          </button>
+        )}
         {salvato && !modificato && <span className="text-emerald-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
       </div>
     </Card>
