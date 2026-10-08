@@ -5346,7 +5346,7 @@ function PromemoriaMessaggi({ clients }) {
   );
 }
 
-function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect }) {
+function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onChanged }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
@@ -5380,15 +5380,13 @@ function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect }) {
           <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Nuove clienti registrate — da completare ({nuoveDaCompletare.length})</p>
           <div className="space-y-2">
             {nuoveDaCompletare.map((c) => (
-              <button key={c.id} onClick={() => onSelect(c.id)} className="w-full text-left">
-                <Card className="p-3 flex items-center justify-between bg-amber-50/60 border-amber-200">
-                  <div>
+              <Card key={c.id} className="p-3 flex items-center gap-3 bg-amber-50/60 border-amber-200">
+                <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 text-left">
                     <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
                     <p className="text-slate-500 text-xs">Si è registrata da sola — manca ancora pacchetto e prezzo</p>
-                  </div>
-                  <span className="text-[10px] font-medium text-amber-700 bg-amber-100 rounded-full px-2 py-0.5 flex-shrink-0">nuova</span>
-                </Card>
-              </button>
+                </button>
+                <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
+              </Card>
             ))}
           </div>
         </div>
@@ -6454,7 +6452,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
 
   // Clienti che si sono registrate da sole e a cui manca ancora il pacchetto/prezzo: compaiono
   // qui finché non vengono completate dalla scheda cliente (impostando il piano).
-  const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano);
+  const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano && !c.notifica_vista);
 
   const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
@@ -6538,7 +6536,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       </div>
 
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
-      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
       {vista === "lista" && (
