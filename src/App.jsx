@@ -2393,17 +2393,28 @@ const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
 // cadenza fissa di un cliente (in ordine di data pagamento), invece di dipendere dalla
 // data reale in cui ogni pagamento e' stato salvato nell'app. Cosi' il risultato resta
 // coerente anche dopo aver aggiunto o cancellato pagamenti (es. doppioni da correggere).
-function ricalcolaScadenzaDaPagamenti(pagamenti) {
+function mesiDelPagamento(p, pianoCliente) {
+  if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) return MESI_PER_TIPO_PAGAMENTO[p.tipo_piano];
+  if (/coaching online/i.test(p.tipo_piano || "")) {
+    const m = /(\d+)\s*mes/i.exec(p.note || "");
+    if (m) return Number(m[1]);
+    return MESI_PER_TIPO_PAGAMENTO[pianoCliente] || 0;
+  }
+  return 0;
+}
+function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
   const validi = (pagamenti || [])
-    .filter((p) => MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.stato === "saldato")
+    .filter((p) => p.stato === "saldato" && mesiDelPagamento(p, pianoCliente) > 0)
     .slice()
     .sort((a, b) => (a.data_pagamento || "").localeCompare(b.data_pagamento || ""));
   let scadenza = null;
   let ultimoTipo = null;
   for (const p of validi) {
-    const base = (scadenza && scadenza > p.data_pagamento) ? scadenza : p.data_pagamento;
-    scadenza = addMesi(base, MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]);
-    ultimoTipo = p.tipo_piano;
+    let base = p.data_pagamento;
+    if (!scadenza && dataInizio && dataInizio > base) base = dataInizio;
+    if (scadenza && scadenza > base) base = scadenza;
+    scadenza = addMesi(base, mesiDelPagamento(p, pianoCliente));
+    ultimoTipo = MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] ? p.tipo_piano : pianoCliente;
   }
   return { scadenza, ultimoTipo };
 }
@@ -2413,13 +2424,16 @@ function ricalcolaScadenzaDaPagamenti(pagamenti) {
 // cadenza fissa, sia dopo averne cancellato uno, cosi' un doppione eliminato non lascia
 // la scadenza avanzata "a vuoto".
 async function ricalcolaEAggiornaScadenza(clientId) {
-  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato").eq("client_id", clientId);
-  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti);
+  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note").eq("client_id", clientId);
+  const { data: cli } = await supabase.from("clients").select("piano, data_inizio").eq("id", clientId).single();
+  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio);
   if (!scadenza) return;
   const oggiStr = formatDataLocale(new Date());
   const giorniAScadenza = Math.round((new Date(scadenza + "T00:00:00") - new Date(oggiStr + "T00:00:00")) / 86400000);
   const statoPacchetto = giorniAScadenza < 0 ? "scaduto" : giorniAScadenza <= 7 ? "in scadenza" : "attivo";
-  await supabase.from("clients").update({ piano: ultimoTipo, data_scadenza: scadenza, stato_pacchetto: statoPacchetto }).eq("id", clientId);
+  const aggiornamento = { data_scadenza: scadenza, stato_pacchetto: statoPacchetto };
+  if (ultimoTipo) aggiornamento.piano = ultimoTipo;
+  await supabase.from("clients").update(aggiornamento).eq("id", clientId);
 }
 
 const METODI_PAGAMENTO = [
