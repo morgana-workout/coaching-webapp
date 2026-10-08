@@ -2917,28 +2917,35 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
   const [salvato, setSalvato] = useState(false);
   const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "").slice(0, 5) || nota !== (lezione.nota || "");
 
-  const salva = async () => {
+  const salva = async (ov = {}) => {
+    const dataV = "data" in ov ? ov.data : data;
+    const oraV = "ora" in ov ? ov.ora : ora;
     setSalvando(true);
     setSalvato(false);
-    const campi = { data: data || null, ora: ora || null, nota: nota || null };
+    const campi = { data: dataV || null, ora: dataV ? (oraV || null) : null, nota: nota || null };
     await supabase.from("lezioni_svolte").update(campi).eq("id", lezione.id);
 
     // Rileggiamo dal database lo stato reale del collegamento, invece di fidarci
     // di un valore potenzialmente non aggiornato, per evitare eventi duplicati o mancanti.
     const { data: rigaAttuale } = await supabase.from("lezioni_svolte").select("calendar_event_id").eq("id", lezione.id).single();
     let calendarEventId = rigaAttuale?.calendar_event_id || null;
-    if (data) {
+    if (dataV) {
       if (calendarEventId) {
-        await supabase.from("calendar_events").update({ data, ora: ora || null }).eq("id", calendarEventId);
+        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null }).eq("id", calendarEventId);
       } else {
         const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
-          client_id: client.id, tipo: "lezione", data, ora: ora || null, luogo: client.sede_abituale || null, stato: "confermato",
+          client_id: client.id, tipo: "lezione", data: dataV, ora: oraV || null, luogo: client.sede_abituale || null, stato: "confermato",
         }).select().single();
         if (nuovoEvento) {
           calendarEventId = nuovoEvento.id;
           await supabase.from("lezioni_svolte").update({ calendar_event_id: calendarEventId }).eq("id", lezione.id);
         }
       }
+    } else if (calendarEventId) {
+      // Data cancellata: l'appuntamento sparisce anche dal calendario, come se lo eliminassi
+      await supabase.from("lezioni_svolte").update({ calendar_event_id: null }).eq("id", lezione.id);
+      await supabase.from("calendar_events").delete().eq("id", calendarEventId);
+      calendarEventId = null;
     }
 
     setSalvando(false);
@@ -2954,8 +2961,8 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
           {lezione.fatta && <CheckCircle2 size={16} className="text-white" />}
         </button>
         <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
-        <InputData value={data} onChange={(e) => { setData(e.target.value); setSalvato(false); }} className="flex-1" />
-        <select value={ora} onChange={(e) => { setOra(e.target.value); setSalvato(false); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
+        <InputData value={data} onChange={(e) => { const v = e.target.value; setData(v); setSalvato(false); if (!v) { setOra(""); salva({ data: "", ora: "" }); } }} className="flex-1" />
+        <select value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
           <option value="">--:--</option>
           {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -2963,7 +2970,7 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
       <input value={nota} onChange={(e) => { setNota(e.target.value); setSalvato(false); }} placeholder="Nota sulla lezione"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
       <div className="flex items-center gap-2">
-        <button onClick={salva} disabled={salvando || !modificato}
+        <button onClick={() => salva()} disabled={salvando || !modificato}
           className={`flex-1 rounded-lg py-2 text-xs font-medium ${modificato ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-400"}`}>
           {salvando ? "Salvo..." : "Salva"}
         </button>
