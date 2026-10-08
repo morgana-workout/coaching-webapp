@@ -2148,7 +2148,6 @@ function ClientApp({ session }) {
   const nav = [
     { key: "home", label: "Home", icon: Home },
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
-    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
     ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Macros", icon: Apple }] : []),
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
     ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
@@ -2156,6 +2155,7 @@ function ClientApp({ session }) {
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
+    { key: "chat", label: "Chat", icon: MessageCircle, badge: chatNonLetti },
   ];
 
   return (
