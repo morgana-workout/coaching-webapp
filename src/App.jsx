@@ -457,7 +457,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
       {extra && (
         <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 text-xs">
-          Questa lezione in presenza ha un costo aggiuntivo di 30€, da saldare direttamente con Morgana.
+          Questa lezione in presenza ha un costo aggiuntivo se non hai acquistato in precedenza un pacchetto lezioni.
         </div>
       )}
       <InputData value={data} onChange={(e) => setData(e.target.value)} />
@@ -5119,7 +5119,7 @@ function CalendarioAgenda({ clients, onSelect }) {
     if (e.stato === "annullata") pezzi.push("annullata");
     if (e.stato === "persa") pezzi.push("persa");
     if (e.fuori_disponibilita) pezzi.push("eccezione (fuori orario standard)");
-    if (e.extra_euro) pezzi.push(`+${e.extra_euro}€ da riscuotere`);
+    if (e.extra_euro) pezzi.push("costo aggiuntivo da riscuotere");
     if (e.nota) pezzi.push(e.nota);
     eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
 
@@ -5464,7 +5464,7 @@ function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onCha
             <Card key={r.id} className="p-3 space-y-2">
               <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
                 <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
-                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? ` — +${r.extra_euro}€` : ""}</p>
+                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
               </button>
               {proponiPer === r.id ? (
                 <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
