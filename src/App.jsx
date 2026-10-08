@@ -1918,6 +1918,8 @@ function NotificheCliente({ client }) {
     const { data } = await supabase.from("notifiche").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
     setNotifiche(data || []);
     setCaricando(false);
+    const daLeggere = (data || []).filter((n) => n.tipo === "nota" && n.stato === "inviata" && (n.proposta_luogo || "").startsWith("promemoria"));
+    if (daLeggere.length) await supabase.from("notifiche").update({ stato: "letta" }).in("id", daLeggere.map((n) => n.id));
   };
   useEffect(() => { carica(); }, [client.id]);
 
@@ -1961,7 +1963,7 @@ function NotificheCliente({ client }) {
             </>
           ) : (
             <>
-              <p className="font-medium text-slate-700 text-sm">Nota da Morgana</p>
+              <p className="font-medium text-slate-700 text-sm">{n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota da Morgana"}</p>
               <p className="text-slate-600 text-sm">{n.messaggio}</p>
             </>
           )}
@@ -2127,6 +2129,7 @@ function ClientApp({ session }) {
       setPiano(nu);
       const { data: nuStorico } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: true });
       setPianoStorico(nuStorico || []);
+      try { await generaPromemoriCliente(c); } catch (e) { /* non blocca mai il caricamento */ }
       const { count } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("stato", "inviata");
       setNonLette(count || 0);
       const { count: chatCount } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("mittente", "coach").eq("letto", false);
@@ -4604,8 +4607,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data scadenza</label>
-            <InputData defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
+            <InputData key={client.data_scadenza || "nessuna"} defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
               className="mt-1" />
+            {client.data_scadenza && (
+              <button onClick={() => { if (confirm("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
+                className="mt-2 text-rose-600 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
+            )}
           </div>
           <div>
             <label className="text-slate-400 text-xs">Altezza (cm)</label>
@@ -5417,6 +5424,32 @@ function PromemoriaMessaggi({ clients }) {
   );
 }
 
+// Promemoria del giorno prima (scadenza pacchetto e check) — calcolati sui dati della cliente.
+function promemoriaCliente(c, oggi = formatDataLocale(new Date())) {
+  const domani = addGiorni(oggi, 1);
+  const fmt = (d) => d.split("-").reverse().join("/");
+  const voci = [];
+  if (c.data_scadenza && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto" && (c.data_scadenza === domani || c.data_scadenza === oggi)) {
+    voci.push({
+      marker: "promemoria_pacchetto", data: c.data_scadenza,
+      messaggio: `Il tuo pacchetto è in scadenza il ${fmt(c.data_scadenza)}. Per proseguire serenamente il tuo percorso senza interruzioni, ti chiedo gentilmente di procedere al saldo. Grazie per la collaborazione!`,
+    });
+  }
+  if (c.tipo_servizio !== "presenza" && c.prossimo_check && (c.prossimo_check === domani || c.prossimo_check === oggi)) {
+    voci.push({
+      marker: "promemoria_check", data: c.prossimo_check,
+      messaggio: `Il tuo prossimo check è previsto il ${fmt(c.prossimo_check)}. Ti ricordo di inviarmi misure e foto: mi servono per aggiornare al meglio il tuo percorso. Grazie!`,
+    });
+  }
+  return voci;
+}
+async function generaPromemoriCliente(c) {
+  for (const v of promemoriaCliente(c)) {
+    const { data: esiste } = await supabase.from("notifiche").select("id").eq("client_id", c.id).eq("tipo", "nota").eq("proposta_luogo", v.marker).eq("proposta_data", v.data).limit(1).maybeSingle();
+    if (!esiste) await supabase.from("notifiche").insert({ client_id: c.id, tipo: "nota", messaggio: v.messaggio, proposta_data: v.data, proposta_luogo: v.marker, stato: "inviata" });
+  }
+}
+
 function ChatMessaggi({ clientId, ruolo, onLetti }) {
   const [msgs, setMsgs] = useState([]);
   const [testo, setTesto] = useState("");
@@ -5527,7 +5560,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti }) {
   );
 }
 
-function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onChanged }) {
+function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
   const [messaggiNuovi, setMessaggiNuovi] = useState([]);
@@ -5561,6 +5594,21 @@ function CentroNotificheCoach({ clients, nuoveDaCompletare = [], onSelect, onCha
 
   return (
     <div className="space-y-5">
+      {promemoriaDomani.length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Promemoria di domani ({promemoriaDomani.length})</p>
+          <div className="space-y-2">
+            {promemoriaDomani.map((v) => (
+              <Card key={v.cliente.id + v.marker} className="p-3">
+                <button onClick={() => onSelect(v.cliente.id)} className="w-full text-left">
+                  <p className="font-medium text-slate-700 text-sm">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="text-slate-500 text-xs">{v.marker === "promemoria_pacchetto" ? "Pacchetto in scadenza il " : "Check previsto il "}{v.data.split("-").reverse().join("/")}</p>
+                </button>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
       {messaggiNuovi.length > 0 && (
         <div>
           <p className="text-xs uppercase tracking-wide text-sky-600 font-medium mb-2 px-1">Messaggi dalle clienti ({messaggiNuovi.length})</p>
@@ -6658,6 +6706,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   // qui finché non vengono completate dalla scheda cliente (impostando il piano).
   const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano && !c.notifica_vista);
 
+  const promemoriaDomani = clientiAttivi.flatMap((c) => promemoriaCliente(c).map((v) => ({ ...v, cliente: c })));
   const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
   const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
   const scaduti = clientiAttivi.filter((c) => c.stato_pacchetto === "scaduto");
@@ -6726,8 +6775,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
         <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
           Notifiche
-          {(nonLetteCoach + nuoveDaCompletare.length) > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length}</span>
+          {(nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length) > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length}</span>
           )}
         </button>
         <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
@@ -6740,7 +6789,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       </div>
 
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
-      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
       {vista === "lista" && (
