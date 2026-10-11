@@ -1446,9 +1446,10 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   const [idA, setIdA] = useState("");
   const [idB, setIdB] = useState("");
   const [urls, setUrls] = useState({});
-  const [zoom, setZoom] = useState(1);
-  const [px, setPx] = useState(50);
-  const [py, setPy] = useState(40);
+  const VISTA0 = { z: 1, x: 50, y: 40 };
+  const [vista, setVista] = useState({ Prima: VISTA0, Dopo: VISTA0 });
+  const [insieme, setInsieme] = useState(false);
+  const cambia = (titolo, patch) => setVista((v) => (insieme ? { Prima: { ...v.Prima, ...patch }, Dopo: { ...v.Dopo, ...patch } } : { ...v, [titolo]: { ...v[titolo], ...patch } }));
   const [grande, setGrande] = useState(null);
   const [note, setNote] = useState({});
   const [salvata, setSalvata] = useState("");
@@ -1486,7 +1487,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   };
   const Cursore = ({ label, valore, set, min, max, step }) => (
     <label className="flex items-center gap-2 text-xs text-slate-500">
-      <span className="w-20 flex-shrink-0">{label}</span>
+      <span className="w-11 flex-shrink-0">{label}</span>
       <input type="range" min={min} max={max} step={step} value={valore} onChange={(e) => set(Number(e.target.value))} className="flex-1 accent-sky-500" />
     </label>
   );
@@ -1512,8 +1513,13 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                   </select>
                   <div onClick={() => urls[c?.id] && setGrande(urls[c.id])} className="relative w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer">
                     {urls[c?.id]
-                      ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="absolute inset-0 w-full h-full object-cover" style={{ transform: `scale(${zoom})`, transformOrigin: `${px}% ${py}%` }} />
+                      ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="absolute inset-0 w-full h-full object-cover" style={{ transform: `scale(${vista[titolo].z})`, transformOrigin: `${vista[titolo].x}% ${vista[titolo].y}%` }} />
                       : <span className="text-slate-300 text-xs">Caricamento...</span>}
+                  </div>
+                  <div className="space-y-1 bg-slate-50 rounded-lg p-2">
+                    <Cursore label={`${String(vista[titolo].z).replace(".", ",")}×`} valore={vista[titolo].z} set={(n) => cambia(titolo, { z: n })} min={1} max={3} step={0.1} />
+                    {vista[titolo].z > 1 && <Cursore label="↔" valore={vista[titolo].x} set={(n) => cambia(titolo, { x: n })} min={0} max={100} step={1} />}
+                    {vista[titolo].z > 1 && <Cursore label="↕" valore={vista[titolo].y} set={(n) => cambia(titolo, { y: n })} min={0} max={100} step={1} />}
                   </div>
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
                   {isAdmin ? (
@@ -1532,11 +1538,9 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
               ))}
             </div>
             <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
-              <Cursore label={`Zoom ${String(zoom).replace(".", ",")}×`} valore={zoom} set={setZoom} min={1} max={3} step={0.1} />
-              {zoom > 1 && <Cursore label="Sposta ↔" valore={px} set={setPx} min={0} max={100} step={1} />}
-              {zoom > 1 && <Cursore label="Sposta ↕" valore={py} set={setPy} min={0} max={100} step={1} />}
-              {zoom > 1 && <button onClick={() => { setZoom(1); setPx(50); setPy(40); }} className="text-[11px] text-slate-400 underline">Torna alla vista intera</button>}
-              <p className="text-[11px] text-slate-400">Lo zoom vale per entrambe le foto, così il confronto resta allineato. Tocca una foto per aprirla a schermo intero.</p>
+              <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
+              <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
+              <p className="text-[11px] text-slate-400">Regola zoom (×) e posizione (↔ ↕) di ogni foto per renderle simili. Tocca una foto per aprirla a schermo intero.</p>
             </div>
             {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
           </>
