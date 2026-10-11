@@ -2537,6 +2537,7 @@ const METODI_PAGAMENTO = [
   { value: "altro", label: "Altro" },
 ];
 const FREQUENZE_PAGAMENTO = [
+  { value: "settimanale", label: "Settimanale" },
   { value: "mensile", label: "Mensile" },
   { value: "trimestrale", label: "Trimestrale" },
   { value: "semestrale", label: "Semestrale" },
@@ -6493,6 +6494,17 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   clients.forEach((c) => {
     if (c.archiviato || c.stato_pacchetto === "gratuito") return;
     if (pagMese(c.id, (p) => p.stato === "da_saldare")) return; // già presente tra i da saldare
+    const bs = billingByClient[c.id];
+    if (bs?.frequenza_pagamento === "settimanale" && Number(bs.importo_ricorrente) > 0) {
+      // Paga ogni settimana lo stesso importo: previste tutte le scadenze settimanali dall'ultimo pagamento a fine mese
+      const ultima = pagamenti.filter((p) => p.client_id === c.id && p.stato === "saldato" && p.data_pagamento).map((p) => p.data_pagamento).sort().pop();
+      if (!ultima) return;
+      const fineMese = formatDataLocale(new Date(oggi.getFullYear(), oggi.getMonth() + 1, 0));
+      const scadenze = [];
+      for (let d = addGiorni(ultima, 7); d <= fineMese; d = addGiorni(d, 7)) { if (nelMese(d)) scadenze.push(d); }
+      if (scadenze.length) previsti.push({ chiave: `${c.id}-sett`, cliente: c, titolo: `${scadenze.length} pagament${scadenze.length === 1 ? "o" : "i"} settimanal${scadenze.length === 1 ? "e" : "i"} da ${Number(bs.importo_ricorrente).toFixed(0)}€`, data: scadenze[0], importo: scadenze.length * Number(bs.importo_ricorrente) });
+      return;
+    }
     if (nelMese(c.data_scadenza) && c.stato_pacchetto !== "scaduto" && TIPI_ONLINE.includes(c.piano) && !pagMese(c.id, (p) => TIPI_ONLINE.includes(p.tipo_piano))) {
       const b = billingByClient[c.id];
       const imp = b?.importo_ricorrente != null && Number(b.importo_ricorrente) > 0 ? Number(b.importo_ricorrente) : ultimoImporto(c.id, (p) => p.tipo_piano === c.piano);
