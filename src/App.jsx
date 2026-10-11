@@ -2537,7 +2537,6 @@ const METODI_PAGAMENTO = [
   { value: "altro", label: "Altro" },
 ];
 const FREQUENZE_PAGAMENTO = [
-  { value: "settimanale", label: "Settimanale" },
   { value: "mensile", label: "Mensile" },
   { value: "trimestrale", label: "Trimestrale" },
   { value: "semestrale", label: "Semestrale" },
@@ -6408,7 +6407,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
     setBilling(bl || []);
     try {
       setPacchettiAttivi(await leggiTutto(() => supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, stato").eq("stato", "attivo").order("id")));
-      setLezioniPacchetti(await leggiTutto(() => supabase.from("lezioni_svolte").select("pacchetto_id, numero, data").not("pacchetto_id", "is", null).order("id")));
+      setLezioniPacchetti(await leggiTutto(() => supabase.from("lezioni_svolte").select("pacchetto_id, client_id, numero, data").not("pacchetto_id", "is", null).order("id")));
     } catch (e) { /* senza questi dati restano solo i rinnovi online */ }
     setCaricando(false);
   };
@@ -6495,14 +6494,16 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
     if (c.archiviato || c.stato_pacchetto === "gratuito") return;
     if (pagMese(c.id, (p) => p.stato === "da_saldare")) return; // già presente tra i da saldare
     const bs = billingByClient[c.id];
-    if (bs?.frequenza_pagamento === "settimanale" && Number(bs.importo_ricorrente) > 0) {
-      // Paga ogni settimana lo stesso importo: previste tutte le scadenze settimanali dall'ultimo pagamento a fine mese
-      const ultima = pagamenti.filter((p) => p.client_id === c.id && p.stato === "saldato" && p.data_pagamento).map((p) => p.data_pagamento).sort().pop();
-      if (!ultima) return;
-      const fineMese = formatDataLocale(new Date(oggi.getFullYear(), oggi.getMonth() + 1, 0));
-      const scadenze = [];
-      for (let d = addGiorni(ultima, 7); d <= fineMese; d = addGiorni(d, 7)) { if (nelMese(d)) scadenze.push(d); }
-      if (scadenze.length) previsti.push({ chiave: `${c.id}-sett`, cliente: c, titolo: `${scadenze.length} pagament${scadenze.length === 1 ? "o" : "i"} settimanal${scadenze.length === 1 ? "e" : "i"} da ${Number(bs.importo_ricorrente).toFixed(0)}€`, data: scadenze[0], importo: scadenze.length * Number(bs.importo_ricorrente) });
+    if (bs?.frequenza_pagamento === "a_lezione" && Number(bs.importo_ricorrente) > 0) {
+      // Paga a lezione: lezioni a settimana ricavate dalle ultime 4 settimane, per le settimane che restano nel mese
+      const oggiStr = formatDataLocale(oggi);
+      const da = addGiorni(oggiStr, -28);
+      const nUltime = lezioniPacchetti.filter((l) => l.client_id === c.id && l.data > da && l.data <= oggiStr).length;
+      const aSett = Math.round((nUltime / 4) * 2) / 2;
+      const giorniMese = new Date(oggi.getFullYear(), oggi.getMonth() + 1, 0).getDate();
+      const settimaneRim = Math.max(0, Math.round((giorniMese - oggi.getDate() + 1) / 7));
+      const prezzo = Number(bs.importo_ricorrente);
+      if (aSett > 0 && settimaneRim > 0) previsti.push({ chiave: `${c.id}-lez`, cliente: c, titolo: `${String(aSett).replace(".", ",")} lezioni a settimana × ${settimaneRim} settiman${settimaneRim === 1 ? "a" : "e"} × ${prezzo.toFixed(0)}€`, data: null, importo: aSett * settimaneRim * prezzo });
       return;
     }
     if (nelMese(c.data_scadenza) && TIPI_ONLINE.includes(c.piano) && !pagMese(c.id, (p) => TIPI_ONLINE.includes(p.tipo_piano))) {
