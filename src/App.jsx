@@ -445,6 +445,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
     }).select().single();
     // il collegamento al pacchetto avviene solo quando Morgana approva la richiesta
+    if (creato?.id) inviaPush({ evento: "richiesta", event_id: creato.id });
     setInviando(false);
     onFatto();
   };
@@ -659,8 +660,109 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         )}
       </div>
 
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} />
+
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
     </div>
+  );
+}
+
+const VAPID_PUBLIC_KEY = "BEW6pygpfBHvX2s_s7Kn1SeNLEs1Zhn15tW5reQaOcNK3d6yycsmG3jaUWubGTBNgtXv9kFEvYm-Flobv0H98tU";
+
+// Chiede al server di mandare una notifica sul telefono. Non blocca mai l'app se qualcosa va storto.
+function inviaPush(body) {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!session) return;
+    supabase.functions.invoke("invia-push", { body, headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => {});
+  }).catch(() => {});
+}
+let timerPushCarichi = null;
+function inviaPushCarichi() { // aspetta qualche secondo dall'ultimo carico salvato, poi controlla record e costanza
+  clearTimeout(timerPushCarichi);
+  timerPushCarichi = setTimeout(() => inviaPush({ evento: "carico" }), 8000);
+}
+
+function chiaveVapidInBytes(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+function AttivaNotifichePush({ ruolo, clientId = null }) {
+  const supportato = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const ios = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const [attive, setAttive] = useState(false);
+  const [lavoro, setLavoro] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const salva = async (sub) => {
+    const j = sub.toJSON();
+    await supabase.from("push_subscriptions").upsert({ client_id: clientId, ruolo, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+  };
+
+  useEffect(() => {
+    if (!supportato || Notification.permission !== "granted") return;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) { await salva(sub); setAttive(true); }
+      } catch (e) { /* resta il pulsante di attivazione */ }
+    })();
+  }, []);
+
+  const attiva = async () => {
+    setLavoro(true); setErrore("");
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { setErrore("Le notifiche sono bloccate: puoi riattivarle dalle impostazioni del telefono."); setLavoro(false); return; }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chiaveVapidInBytes(VAPID_PUBLIC_KEY) });
+      await salva(sub);
+      setAttive(true);
+      reg.showNotification("Notifiche attivate ✨", { body: "Da ora ti avviso direttamente sul telefono.", icon: "/apple-touch-icon.png" });
+    } catch (e) {
+      setErrore("Non sono riuscita ad attivarle: " + (e.message || "riprova"));
+    }
+    setLavoro(false);
+  };
+
+  const disattiva = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) { await supabase.from("push_subscriptions").delete().eq("endpoint", sub.endpoint); await sub.unsubscribe(); }
+    } catch (e) { /* ignora */ }
+    setAttive(false);
+  };
+
+  if (!supportato) {
+    if (!ios) return null;
+    return (
+      <Card className="p-4 space-y-1">
+        <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
+        <p className="text-xs text-slate-500">Su iPhone: tocca il tasto Condividi di Safari, scegli "Aggiungi alla schermata Home", poi apri l'app dall'icona appena creata e torna qui per attivarle.</p>
+      </Card>
+    );
+  }
+  if (attive) {
+    return (
+      <div className="flex items-center justify-between px-1">
+        <p className="text-xs text-emerald-600">🔔 Notifiche attive su questo telefono</p>
+        <button onClick={disattiva} className="text-[11px] text-slate-400 underline">Disattiva</button>
+      </div>
+    );
+  }
+  return (
+    <Card className="p-4 space-y-2">
+      <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
+      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check e richieste di lezione." : "Ricevi un avviso per i messaggi di Morgana, i promemoria e i tuoi traguardi."}</p>
+      <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+    </Card>
   );
 }
 
@@ -764,6 +866,8 @@ function ClientCheckin({ client, onInviato }) {
         headers: { Authorization: `Bearer ${session.access_token}` },
       }).catch(() => {});
     });
+
+    inviaPush({ evento: "check", checkin_id: inserito.id });
 
     setInviato(true);
     onInviato?.();
@@ -1603,6 +1707,7 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
       if (inserito) setId(inserito.id);
     }
     setSalvando(false);
+    if (kg !== "") inviaPushCarichi();
     onSaved();
   };
 
@@ -3250,6 +3355,7 @@ function LezioniPacchetto({ client, onCompletato }) {
   const cambiaFatta = async (id, fatta) => {
     setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, fatta } : l)));
     await supabase.from("lezioni_svolte").update({ fatta }).eq("id", id);
+    if (fatta) inviaPush({ evento: "lezione", client_id: client.id });
     const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === lezioni.length;
     if (tutteFatte && lezioni.length > 0 && pacchettoAttivo) {
       await supabase.from("pacchetti_lezioni").update({ stato: "completato", completato_il: new Date().toISOString() }).eq("id", pacchettoAttivo.id);
@@ -5468,10 +5574,11 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
 
   const invia = async () => {
     setSalvando(true);
-    await supabase.from("notifiche").insert({
+    const { data: nuovaProposta } = await supabase.from("notifiche").insert({
       client_id: evento.client_id, tipo: "proposta_lezione", calendar_event_id: evento.id,
       proposta_data: data, proposta_ora: ora, proposta_luogo: luogo, messaggio: messaggio || null, stato: "inviata",
-    });
+    }).select("id").single();
+    if (nuovaProposta?.id) inviaPush({ evento: "nota", notifica_id: nuovaProposta.id });
     setSalvando(false);
     onFatto();
   };
@@ -5641,7 +5748,8 @@ function InviaNotaForm({ clients, onFatto }) {
   const invia = async () => {
     if (!clientId || !messaggio.trim()) return;
     setSalvando(true);
-    await supabase.from("notifiche").insert({ client_id: clientId, tipo: "nota", messaggio, stato: "inviata" });
+    const { data: nuovaNota } = await supabase.from("notifiche").insert({ client_id: clientId, tipo: "nota", messaggio, stato: "inviata" }).select("id").single();
+    if (nuovaNota?.id) inviaPush({ evento: "nota", notifica_id: nuovaNota.id });
     setSalvando(false);
     setMessaggio("");
     setFatto(true);
@@ -5835,7 +5943,10 @@ function promemoriaCliente(c, oggi = formatDataLocale(new Date())) {
 async function generaPromemoriCliente(c) {
   for (const v of promemoriaCliente(c)) {
     const { data: esiste } = await supabase.from("notifiche").select("id").eq("client_id", c.id).eq("tipo", "nota").eq("proposta_luogo", v.marker).eq("proposta_data", v.data).limit(1).maybeSingle();
-    if (!esiste) await supabase.from("notifiche").insert({ client_id: c.id, tipo: "nota", messaggio: v.messaggio, proposta_data: v.data, proposta_luogo: v.marker, stato: "inviata" });
+    if (!esiste) {
+      const { data: nuova } = await supabase.from("notifiche").insert({ client_id: c.id, tipo: "nota", messaggio: v.messaggio, proposta_data: v.data, proposta_luogo: v.marker, stato: "inviata" }).select("id").single();
+      if (nuova?.id) inviaPush({ evento: "nota", notifica_id: nuova.id });
+    }
   }
 }
 
@@ -5890,8 +6001,9 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
         const { error: e1 } = await supabase.storage.from("progress-photos").upload(foto_path, foto);
         if (e1) throw e1;
       }
-      const { error } = await supabase.from("messaggi").insert({ client_id: clientId, mittente: ruolo, testo: testo.trim() || null, foto_path });
+      const { data: nuovoMsg, error } = await supabase.from("messaggi").insert({ client_id: clientId, mittente: ruolo, testo: testo.trim() || null, foto_path }).select("id").single();
       if (error) throw error;
+      if (nuovoMsg?.id) inviaPush({ evento: "messaggio", messaggio_id: nuovoMsg.id });
       setTesto("");
       setFoto(null);
       await carica();
@@ -7742,6 +7854,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
 
       <div className="pt-2 border-t border-slate-100 space-y-2">
         <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Il tuo account</p>
+        <AttivaNotifichePush ruolo="coach" />
         <CambiaPasswordPropria />
       </div>
     </div>
