@@ -4769,6 +4769,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
+      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta i dati di questa cliente (Excel)" />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" />}
 
       {tab === "allenamento" && (
@@ -5790,6 +5791,112 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
   );
 }
 
+async function leggiTutto(costruisci) {
+  // Legge tutte le righe a blocchi da 1000 (il database ne restituisce al massimo 1000 per volta)
+  const out = [];
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await costruisci().range(da, da + 999);
+    if (error) throw error;
+    out.push(...(data || []));
+    if ((data || []).length < 1000) break;
+  }
+  return out;
+}
+
+function caricaModuloExcel() {
+  return new Promise((ok, ko) => {
+    if (window.XLSX) return ok(window.XLSX);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    sc.onload = () => (window.XLSX ? ok(window.XLSX) : ko(new Error("modulo Excel non disponibile")));
+    sc.onerror = () => ko(new Error("Impossibile caricare il modulo Excel, controlla la connessione e riprova."));
+    document.head.appendChild(sc);
+  });
+}
+
+async function esportaExcelCompleto(clientId = null) {
+  const XLSX = await caricaModuloExcel();
+  const filtra = (q) => (clientId ? q.eq("client_id", clientId) : q);
+  const clienti = (await leggiTutto(() => (clientId ? supabase.from("clients").select("*").eq("id", clientId) : supabase.from("clients").select("*")).order("id")))
+    .sort((a, b) => `${a.nome} ${a.cognome || ""}`.localeCompare(`${b.nome} ${b.cognome || ""}`));
+  const checks = await leggiTutto(() => filtra(supabase.from("checkins").select("*")).order("data_check").order("id"));
+  const voci = await leggiTutto(() => filtra(supabase.from("training_entries").select("*, training_exercises(nome, training_days(nome))")).order("data").order("id"));
+
+  const mappa = {}; clienti.forEach((c) => { mappa[c.id] = c; });
+  const nome = (id) => (mappa[id] ? `${mappa[id].nome} ${mappa[id].cognome || ""}`.trim() : "—");
+  const dt = (s) => (s ? new Date(`${s}T12:00:00Z`) : "");
+  const num = (v) => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? "" : Number(v));
+  const ordNome = (a, b) => nome(a.client_id).localeCompare(nome(b.client_id));
+
+  const fogli = [];
+  fogli.push(["Clienti", [["Codice", "Nome", "Cognome", "Email", "Tipo servizio", "Piano", "Pacchetto lezioni", "Stato pacchetto", "Data inizio", "Data scadenza", "Altezza (cm)", "Peso iniziale (kg)", "Obiettivo"],
+    ...clienti.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, dt(c.data_inizio), dt(c.data_scadenza), num(c.altezza_cm), num(c.peso_kg), c.obiettivo_attuale || ""])]]);
+
+  const checkOrd = [...checks].sort((a, b) => ordNome(a, b) || String(a.data_check).localeCompare(String(b.data_check)));
+  fogli.push(["Check e misure", [["Cliente", "Data check", "Peso (kg)", "Spalle (cm)", "Petto (cm)", "Sopra ombelico (cm)", "Ombelico (cm)", "Sotto ombelico (cm)", "Glutei (cm)", "Coscia dx (cm)", "Braccio dx (cm)", "Collo (cm)", "Energia (1-5)", "Sonno (1-5)", "Aderenza cibo (1-5)", "Aderenza allenamento (1-5)", "Fase mestruale", "Stato", "Note cliente"],
+    ...checkOrd.map((c) => [nome(c.client_id), dt(c.data_check), num(c.peso_kg), num(c.spalle_cm), num(c.petto_cm), num(c.sopra_ombelico_cm), num(c.ombelico_cm), num(c.sotto_ombelico_cm), num(c.glutei_cm), num(c.coscia_dx_cm), num(c.braccio_dx_cm), num(c.collo_cm), num(c.energia), num(c.sonno), num(c.aderenza_cibo), num(c.aderenza_allenamento), c.fase_mestruale || "", c.stato, c.note_cliente || ""])]]);
+
+  // Progressi misure: primo check contro ultimo check, per cliente
+  const perCliente = {};
+  checkOrd.forEach((c) => { (perCliente[c.client_id] = perCliente[c.client_id] || []).push(c); });
+  const diff = (p, u, k) => (num(p[k]) !== "" && num(u[k]) !== "" ? Math.round((num(u[k]) - num(p[k])) * 10) / 10 : "");
+  const righeProg = Object.keys(perCliente).map((id) => {
+    const l = perCliente[id]; const p = l[0]; const u = l[l.length - 1];
+    return [nome(id), l.length, dt(p.data_check), dt(u.data_check), num(p.peso_kg), num(u.peso_kg), diff(p, u, "peso_kg"), diff(p, u, "petto_cm"), diff(p, u, "ombelico_cm"), diff(p, u, "glutei_cm"), diff(p, u, "coscia_dx_cm"), diff(p, u, "braccio_dx_cm")];
+  }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  fogli.push(["Progressi misure", [["Cliente", "N. check", "Primo check", "Ultimo check", "Peso iniziale (kg)", "Peso attuale (kg)", "Variazione peso (kg)", "Variazione petto (cm)", "Variazione ombelico (cm)", "Variazione glutei (cm)", "Variazione coscia dx (cm)", "Variazione braccio dx (cm)"], ...righeProg]]);
+
+  const vociOrd = [...voci].sort((a, b) => ordNome(a, b) || String(a.data).localeCompare(String(b.data)) || (a.numero_serie || 0) - (b.numero_serie || 0));
+  fogli.push(["Log carichi", [["Cliente", "Giorno scheda", "Esercizio", "Data", "N. serie", "Kg", "Ripetizioni", "Note"],
+    ...vociOrd.map((r) => [nome(r.client_id), r.training_exercises?.training_days?.nome || "", r.training_exercises?.nome || "", dt(r.data), num(r.numero_serie), num(r.kg), r.ripetizioni || "", r.note || ""])]]);
+
+  // Progressi carichi: per cliente ed esercizio, kg massimo della prima sessione contro quello dell'ultima
+  const gruppi = {};
+  vociOrd.forEach((r) => {
+    if (num(r.kg) === "") return;
+    const chiave = `${r.client_id}||${r.training_exercises?.nome || "?"}`;
+    const g = (gruppi[chiave] = gruppi[chiave] || { id: r.client_id, esercizio: r.training_exercises?.nome || "?", date: {} });
+    g.date[r.data] = Math.max(g.date[r.data] ?? 0, num(r.kg));
+  });
+  const righeCar = Object.values(gruppi).map((g) => {
+    const date = Object.keys(g.date).sort(); const p = date[0]; const u = date[date.length - 1];
+    const kp = g.date[p]; const ku = g.date[u]; const kmax = Math.max(...Object.values(g.date));
+    return [nome(g.id), g.esercizio, date.length, dt(p), kp, dt(u), ku, kmax, Math.round((ku - kp) * 10) / 10, kp > 0 ? Math.round(((ku - kp) / kp) * 1000) / 10 : ""];
+  }).sort((a, b) => String(a[0]).localeCompare(String(b[0])) || String(a[1]).localeCompare(String(b[1])));
+  fogli.push(["Progressi carichi", [["Cliente", "Esercizio", "N. sessioni", "Prima sessione", "Kg prima sessione (max serie)", "Ultima sessione", "Kg ultima sessione (max serie)", "Kg massimo", "Variazione (kg)", "Variazione (%)"], ...righeCar]]);
+
+  const wb = XLSX.utils.book_new();
+  fogli.forEach(([titolo, righe]) => {
+    const ws = XLSX.utils.aoa_to_sheet(righe, { cellDates: true });
+    Object.keys(ws).forEach((k) => { if (k[0] !== "!" && ws[k].t === "d") ws[k].z = "dd/mm/yyyy"; });
+    ws["!cols"] = righe[0].map((h, i) => ({ wch: Math.min(40, Math.max(String(h).length + 2, ...righe.slice(1, 60).map((r) => String(r[i] instanceof Date ? "00/00/0000" : (r[i] ?? "")).length + 2))) }));
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, ws, titolo);
+  });
+  const etichetta = clientId ? nome(clientId).replace(/[^a-zA-Z0-9]+/g, "-") : "tutte-le-clienti";
+  XLSX.writeFile(wb, `dati-${etichetta}-${new Date().toISOString().slice(0, 10)}.xlsx`, { cellDates: true });
+  return { check: checks.length, carichi: voci.length };
+}
+
+function BottoneEsportaExcel({ clientId = null, label, className = "" }) {
+  const [inCorso, setInCorso] = useState(false);
+  const [msg, setMsg] = useState("");
+  const vai = async () => {
+    setInCorso(true); setMsg("");
+    try {
+      const r = await esportaExcelCompleto(clientId);
+      setMsg(`Scaricato: ${r.check} check e ${r.carichi} serie di carichi.`);
+    } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
+    setInCorso(false);
+  };
+  return (
+    <div className={className}>
+      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo il file Excel..." : label}</button>
+      {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
+    </div>
+  );
+}
+
 function scaricaCsv(nomeFile, righe) {
   const escapeCsv = (v) => {
     const s = v == null ? "" : String(v);
@@ -5812,7 +5919,7 @@ async function esportaClientiCsv(clients) {
 }
 
 async function esportaCheckCsv() {
-  const { data } = await supabase.from("checkins").select("*, clients(nome, cognome, codice)").order("data_check");
+  const data = await leggiTutto(() => supabase.from("checkins").select("*, clients(nome, cognome, codice)").order("data_check").order("id"));
   const intestazione = ["Cliente", "Codice", "Data check", "Peso", "Petto", "Spalle", "Sopra ombelico", "Ombelico", "Sotto ombelico", "Coscia dx", "Braccio dx", "Collo", "Glutei", "Stato", "Note cliente"];
   const righe = (data || []).map((c) => [
     c.clients ? `${c.clients.nome} ${c.clients.cognome}` : "", c.clients?.codice, c.data_check, c.peso_kg, c.petto_cm, c.spalle_cm,
@@ -5822,9 +5929,9 @@ async function esportaCheckCsv() {
 }
 
 async function esportaCarichiCsv() {
-  const { data } = await supabase.from("training_entries")
+  const data = await leggiTutto(() => supabase.from("training_entries")
     .select("*, training_exercises(nome, training_days(nome)), clients(nome, cognome, codice)")
-    .order("data");
+    .order("data").order("id"));
   const intestazione = ["Cliente", "Codice", "Giorno", "Esercizio", "Data", "N. serie", "Kg", "Ripetizioni", "Note"];
   const righe = (data || []).map((r) => [
     r.clients ? `${r.clients.nome} ${r.clients.cognome}` : "", r.clients?.codice,
@@ -6989,6 +7096,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       <div className="pt-2 border-t border-slate-100 space-y-2">
         <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Esportazioni e backup</p>
         <div className="grid grid-cols-2 gap-2">
+          <BottoneEsportaExcel label="⬇ Esporta tutto in Excel (carichi, progressi, check)" className="col-span-2" />
           <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
           <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
           <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
