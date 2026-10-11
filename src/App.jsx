@@ -2016,7 +2016,7 @@ function NotificheCliente({ client }) {
     <div className="px-5 pt-6 pb-24 space-y-3">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Notifiche</h1>
-        <p className="text-slate-500 text-sm mt-1">Proposte di orario e note da Morgana.</p>
+        <p className="text-slate-500 text-sm mt-1">Proposte di orario, note e promemoria di Morgana. Restano sempre qui, anche dopo averle lette.</p>
       </div>
       {notifiche.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Nessuna notifica.</Card>}
       {notifiche.map((n) => (
@@ -2041,7 +2041,7 @@ function NotificheCliente({ client }) {
               <p className="text-slate-600 text-sm">{n.messaggio}</p>
             </>
           )}
-          <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}</p>
+          <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}{n.tipo === "nota" ? (n.stato === "inviata" ? " · Nuova" : " · ✓ Letta") : ""}</p>
         </Card>
       ))}
     </div>
@@ -2229,7 +2229,7 @@ function ClientApp({ session }) {
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
-    { key: "chat", label: "Chat", icon: MessageCircle, badge: chatNonLetti },
+    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ];
 
   return (
