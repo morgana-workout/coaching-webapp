@@ -6836,7 +6836,7 @@ async function esportaRiepilogoCommercialista(meseChiave) {
   const XLSX = await caricaModuloExcel();
   const pagamenti = await leggiTutto(() => supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento").order("id"));
   const righe = righeContabili(pagamenti).filter((r) => (r.d || "").slice(0, 7) === meseChiave);
-  const incassi = righe.filter((r) => r.tipo === "incasso");
+  const incassi = righe.filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti"); // i contanti non vanno al commercialista
   const spese = righe.filter((r) => r.tipo === "spesa");
   const tot = (l) => Math.round(l.reduce((s, r) => s + r.imp, 0) * 100) / 100;
   const dt = (s) => (s ? new Date(`${s}T12:00:00`) : "");
@@ -6849,7 +6849,6 @@ async function esportaRiepilogoCommercialista(meseChiave) {
   const perCategoria = {};
   incassi.forEach((r) => { const k = categoriaPagamento(r.p); perCategoria[k] = (perCategoria[k] || 0) + r.imp; });
   const elettronici = tot(incassi.filter((r) => METODI_ELETTRONICI_STAT.includes(r.p.metodo_pagamento)));
-  const contanti = tot(incassi.filter((r) => r.p.metodo_pagamento === "contanti"));
 
   const fogli = [
     ["Riepilogo", [
@@ -6859,7 +6858,7 @@ async function esportaRiepilogoCommercialista(meseChiave) {
       ["Utile netto (€)", Math.round((tot(incassi) - tot(spese)) * 100) / 100],
       ["", ""],
       ["Pagamenti elettronici (€)", elettronici],
-      ["Contanti (€)", contanti],
+      ["Nota", "Esclusi i pagamenti in contanti"],
       ["", ""],
       ["Incassi per metodo", ""],
       ...Object.entries(perMetodo).map(([k, v]) => [k, Math.round(v * 100) / 100]),
@@ -6979,7 +6978,7 @@ function StatisticheCoach({ clients }) {
 
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
-        <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto.</p>
+        <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, senza i pagamenti in contanti.</p>
         <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : `⬇ Scarica riepilogo ${labelMese(mese)}`}</button>
         {msg && <p className="text-xs text-slate-500">{msg}</p>}
       </Card>
