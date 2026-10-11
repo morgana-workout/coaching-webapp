@@ -1440,6 +1440,56 @@ function ProgressiCarichi({ clientId }) {
   );
 }
 
+// Foto con zoom a due dita (pizzico) e spostamento col dito; un tocco semplice la apre a schermo intero.
+function FotoZoom({ src, alt, v, onChange, onTap }) {
+  const ref = React.useRef(null);
+  const punti = React.useRef(new Map());
+  const st = React.useRef({ dist: 0, mosso: 0 });
+  const limita = (n, a, b) => Math.max(a, Math.min(b, n));
+  const giu = (e) => {
+    ref.current?.setPointerCapture?.(e.pointerId);
+    punti.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punti.current.size === 1) st.current.mosso = 0;
+    st.current.dist = 0;
+  };
+  const muovi = (e) => {
+    const m = punti.current;
+    const prec = m.get(e.pointerId);
+    if (!prec) return;
+    const cur = { x: e.clientX, y: e.clientY };
+    m.set(e.pointerId, cur);
+    const box = ref.current.getBoundingClientRect();
+    if (m.size >= 2) {
+      const [p1, p2] = [...m.values()];
+      const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      if (st.current.dist > 0) onChange({ z: Math.round(limita(v.z * (dist / st.current.dist), 1, 4) * 100) / 100 });
+      st.current.dist = dist;
+      st.current.mosso += 10;
+    } else if (v.z > 1) {
+      const dx = cur.x - prec.x, dy = cur.y - prec.y;
+      st.current.mosso += Math.abs(dx) + Math.abs(dy);
+      onChange({ x: limita(v.x - (dx / (v.z - 1) / box.width) * 100, 0, 100), y: limita(v.y - (dy / (v.z - 1) / box.height) * 100, 0, 100) });
+    } else {
+      st.current.mosso += Math.abs(cur.x - prec.x) + Math.abs(cur.y - prec.y);
+    }
+  };
+  const su = (e) => {
+    const m = punti.current;
+    m.delete(e.pointerId);
+    st.current.dist = 0;
+    if (m.size === 0 && st.current.mosso < 8 && e.type === "pointerup") onTap?.();
+  };
+  return (
+    <div ref={ref} onPointerDown={giu} onPointerMove={muovi} onPointerUp={su} onPointerCancel={su}
+      style={{ touchAction: "none" }} className="relative w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer select-none">
+      {src
+        ? <img src={src} alt={alt} draggable={false} className="absolute inset-0 w-full h-full object-cover pointer-events-none" style={{ transform: `scale(${v.z})`, transformOrigin: `${v.x}% ${v.y}%` }} />
+        : <span className="text-slate-300 text-xs">Caricamento...</span>}
+      {v.z > 1 && <span className="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] rounded px-1.5 py-0.5">{String(Math.round(v.z * 10) / 10).replace(".", ",")}×</span>}
+    </div>
+  );
+}
+
 function ConfrontoFoto({ checkins, isAdmin = false }) {
   const ANGOLI = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale dx"], ["foto_extra_path", "Laterale sx"], ["foto_posteriore_path", "Posteriore"]];
   const [angolo, setAngolo] = useState("foto_frontale_path");
@@ -1511,16 +1561,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                   <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
                     {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
                   </select>
-                  <div onClick={() => urls[c?.id] && setGrande(urls[c.id])} className="relative w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer">
-                    {urls[c?.id]
-                      ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="absolute inset-0 w-full h-full object-cover" style={{ transform: `scale(${vista[titolo].z})`, transformOrigin: `${vista[titolo].x}% ${vista[titolo].y}%` }} />
-                      : <span className="text-slate-300 text-xs">Caricamento...</span>}
-                  </div>
-                  <div className="space-y-1 bg-slate-50 rounded-lg p-2">
-                    <Cursore label={`${String(vista[titolo].z).replace(".", ",")}×`} valore={vista[titolo].z} set={(n) => cambia(titolo, { z: n })} min={1} max={3} step={0.1} />
-                    {vista[titolo].z > 1 && <Cursore label="↔" valore={vista[titolo].x} set={(n) => cambia(titolo, { x: n })} min={0} max={100} step={1} />}
-                    {vista[titolo].z > 1 && <Cursore label="↕" valore={vista[titolo].y} set={(n) => cambia(titolo, { y: n })} min={0} max={100} step={1} />}
-                  </div>
+                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => cambia(titolo, patch)} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
                   {isAdmin ? (
                     <div>
@@ -1540,7 +1581,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
             <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
               <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
               <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
-              <p className="text-[11px] text-slate-400">Regola zoom (×) e posizione (↔ ↕) di ogni foto per renderle simili. Tocca una foto per aprirla a schermo intero.</p>
+              <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla: puoi adattare ogni foto all’altra. Tocca una foto per aprirla a schermo intero.</p>
             </div>
             {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
           </>
