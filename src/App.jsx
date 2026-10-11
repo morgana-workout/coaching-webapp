@@ -1916,7 +1916,7 @@ function NotificheCliente({ client }) {
     const { data } = await supabase.from("notifiche").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
     setNotifiche(data || []);
     setCaricando(false);
-    const daLeggere = (data || []).filter((n) => n.tipo === "nota" && n.stato === "inviata" && (n.proposta_luogo || "").startsWith("promemoria"));
+    const daLeggere = (data || []).filter((n) => n.tipo === "nota" && n.stato === "inviata");
     if (daLeggere.length) await supabase.from("notifiche").update({ stato: "letta" }).in("id", daLeggere.map((n) => n.id));
   };
   useEffect(() => { carica(); }, [client.id]);
@@ -5620,6 +5620,63 @@ function ChatMessaggi({ clientId, ruolo, onLetti }) {
   );
 }
 
+function StoricoNotifiche({ clients }) {
+  const [righe, setRighe] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+  const [quante, setQuante] = useState(20);
+  const [filtro, setFiltro] = useState("tutte");
+
+  const carica = async () => {
+    // Assicura che i promemoria del giorno prima risultino nello storico anche se la cliente non ha ancora aperto l'app
+    try { for (const c of clients) await generaPromemoriCliente(c); } catch (e) { /* non blocca */ }
+    const { data } = await supabase.from("notifiche").select("*").order("created_at", { ascending: false }).limit(500);
+    setRighe(data || []);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const nomeCliente = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
+  const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota";
+  const badge = (n) => {
+    if (n.stato === "inviata") return { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" };
+    if (n.stato === "accettata") return { t: "Accettata", c: "bg-emerald-100 text-emerald-700" };
+    if (n.stato === "rifiutata") return { t: "Rifiutata", c: "bg-rose-100 text-rose-700" };
+    return { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+  };
+  const filtrate = righe.filter((n) => filtro === "tutte" || (filtro === "non_viste" ? n.stato === "inviata" : n.stato !== "inviata"));
+
+  if (caricando) return <Spinner />;
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico notifiche inviate alle clienti ({righe.length})</p>
+      <div className="flex gap-1.5 mb-2">
+        {[["tutte", "Tutte"], ["non_viste", "Non viste"], ["viste", "Viste"]].map(([k, l]) => (
+          <button key={k} onClick={() => { setFiltro(k); setQuante(20); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>{l}</button>
+        ))}
+      </div>
+      <div className="space-y-2">
+        {filtrate.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna notifica in questo elenco.</Card>}
+        {filtrate.slice(0, quante).map((n) => {
+          const b = badge(n);
+          return (
+            <Card key={n.id} className="p-3 space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-medium text-slate-700 text-sm">{nomeCliente(n.client_id)}</p>
+                <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 flex-shrink-0 ${b.c}`}>{b.t}</span>
+              </div>
+              <p className="text-slate-500 text-xs font-medium">{titolo(n)}</p>
+              {n.tipo === "proposta_lezione" && <p className="text-slate-600 text-xs">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>}
+              {n.messaggio && <p className="text-slate-600 text-xs">{n.messaggio}</p>}
+              <p className="text-slate-400 text-[11px]">Inviata il {new Date(n.created_at).toLocaleDateString("it-IT")} alle {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+            </Card>
+          );
+        })}
+        {filtrate.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
+      </div>
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged }) {
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
@@ -5725,6 +5782,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
         <InviaNotaForm clients={clients} onFatto={() => {}} />
       </div>
+
+      <StoricoNotifiche clients={clients} />
 
       <PromemoriaMessaggi clients={clients} />
     </div>
