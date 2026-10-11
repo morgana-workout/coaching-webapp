@@ -493,6 +493,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
   }, [prenotaAperto, inviata]);
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
   const [prossimaLezione, setProssimaLezione] = useState(undefined);
+  const [infoPacchetto, setInfoPacchetto] = useState(null);
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const isSoloOnline = client.tipo_servizio === "online";
@@ -507,8 +508,16 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         .neq("stato", "annullata").neq("stato", "persa").gte("data", oggi).order("data").limit(1).maybeSingle()
         .then(({ data }) => setProssimaLezione(data || null));
     } else {
-      supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
-        .then(({ count }) => setLezioniSvolte(count ?? 0));
+      (async () => {
+        const { data: pk } = await supabase.from("pacchetti_lezioni").select("id, numero_lezioni").eq("client_id", client.id).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+        let q = supabase.from("lezioni_svolte").select("data, ora, fatta").eq("client_id", client.id).order("data");
+        if (pk?.id) q = q.eq("pacchetto_id", pk.id);
+        const { data: ls } = await q;
+        const righe = ls || [];
+        const oggiS = formatDataLocale(new Date());
+        setLezioniSvolte(righe.filter((r) => r.fatta).length);
+        setInfoPacchetto({ totale: pk?.numero_lezioni ?? null, prossima: righe.find((r) => !r.fatta && r.data >= oggiS) || null });
+      })();
     }
   }, [client.id, isBulb, pacchettoSingolo]);
 
@@ -573,9 +582,31 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
       {isBulb && !pacchettoSingolo && (
         <Card className="p-5">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
-          <p className="text-3xl font-semibold text-slate-800 mt-2">
-            {lezioniSvolte ?? 0}{lezioniIncluse ? ` / ${lezioniIncluse}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
-          </p>
+          {(() => {
+            const totale = infoPacchetto?.totale ?? lezioniIncluse;
+            const fatte = lezioniSvolte ?? 0;
+            const rimaste = totale ? Math.max(0, totale - fatte) : null;
+            const prossima = infoPacchetto?.prossima;
+            return (
+              <>
+                <p className="text-3xl font-semibold text-slate-800 mt-2">
+                  {fatte}{totale ? ` / ${totale}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
+                </p>
+                {totale > 0 && (
+                  <>
+                    <div className="h-2 bg-slate-100 rounded-full mt-3 overflow-hidden">
+                      <div className="h-full bg-sky-500 rounded-full" style={{ width: `${Math.min(100, Math.round((fatte / totale) * 100))}%` }} />
+                    </div>
+                    <p className="text-slate-500 text-sm mt-2">
+                      {rimaste > 0 ? `${rimaste} ${rimaste === 1 ? "lezione rimasta" : "lezioni rimaste"}` : "Pacchetto completato"}
+                      {prossima ? ` · prossima il ${prossima.data.split("-").reverse().slice(0, 2).join("/")}${prossima.ora ? ` alle ${prossima.ora.slice(0, 5)}` : ""}` : ""}
+                    </p>
+                    {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto: scrivimi in chat quando vuoi rinnovarlo." : "Il pacchetto sta per finire: scrivimi in chat per rinnovarlo e non interrompere le lezioni."}</p>}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </Card>
       )}
 
@@ -1218,6 +1249,7 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
 function ProgressiCarichi({ clientId }) {
   const [esercizi, setEsercizi] = useState(null);
   const [aperto, setAperto] = useState(null);
+  const [traguardi, setTraguardi] = useState({ streak: 0 });
 
   useEffect(() => {
     let vivo = true;
@@ -1236,8 +1268,19 @@ function ProgressiCarichi({ clientId }) {
           const date = Object.keys(g.date).sort();
           const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
           const primo = g.date[date[0]]; const ultimo = g.date[date[date.length - 1]];
-          return { nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1] };
+          const precedenti = date.slice(0, -1).map((d) => g.date[d]);
+          const maxPrec = precedenti.length ? Math.max(...precedenti) : 0;
+          const record = date.length >= 2 && ultimo > maxPrec;
+          return { nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
         }).sort((a, b) => a.nome.localeCompare(b.nome));
+        // Costanza: settimane consecutive (lunedì-domenica) con almeno un allenamento registrato
+        const lunedi = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
+        const settimane = new Set(righe.filter((r) => r.data).map((r) => lunedi(r.data)));
+        let cur = lunedi(formatDataLocale(new Date()));
+        if (!settimane.has(cur)) cur = addGiorni(cur, -7);
+        let streak = 0;
+        while (settimane.has(cur)) { streak += 1; cur = addGiorni(cur, -7); }
+        if (vivo) setTraguardi({ streak });
         if (vivo) setEsercizi(lista);
       } catch (e) { if (vivo) setEsercizi([]); }
     })();
@@ -1250,6 +1293,15 @@ function ProgressiCarichi({ clientId }) {
 
   return (
     <div className="space-y-2">
+      {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
+        <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">I tuoi traguardi</p>
+          {traguardi.streak >= 2 && <p className="text-sm text-slate-700">🔥 <span className="font-semibold">{traguardi.streak} settimane di fila</span> con almeno un allenamento registrato. Continua così!</p>}
+          {esercizi.filter((e) => e.recordRecente).map((e) => (
+            <p key={e.nome} className="text-sm text-slate-700">🏆 Nuovo record: <span className="font-semibold">{e.nome}</span> {fmt(e.maxPrec)} → {fmt(e.ultimo)} kg</p>
+          ))}
+        </Card>
+      )}
       <div className="px-1">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Progressi carichi</p>
         <p className="text-slate-400 text-xs mt-0.5">{inAumento} esercizi su {esercizi.length} con carico in aumento. Il valore è il kg più alto usato in ogni allenamento.</p>
@@ -1258,7 +1310,7 @@ function ProgressiCarichi({ clientId }) {
         <Card key={e.nome} className="p-3">
           <button onClick={() => setAperto(aperto === e.nome ? null : e.nome)} className="w-full text-left">
             <div className="flex items-start justify-between gap-2">
-              <p className="font-medium text-slate-700 text-sm">{e.nome}</p>
+              <p className="font-medium text-slate-700 text-sm">{e.nome}{e.recordRecente ? " 🏆" : ""}</p>
               <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}>
                 {e.sessioni < 2 ? "1ª sessione" : `${e.diff > 0 ? "+" : ""}${fmt(e.diff)} kg`}
               </span>
@@ -1280,6 +1332,68 @@ function ProgressiCarichi({ clientId }) {
           )}
         </Card>
       ))}
+    </div>
+  );
+}
+
+function ConfrontoFoto({ checkins }) {
+  const ANGOLI = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale"], ["foto_posteriore_path", "Posteriore"]];
+  const [angolo, setAngolo] = useState("foto_frontale_path");
+  const [idA, setIdA] = useState("");
+  const [idB, setIdB] = useState("");
+  const [urls, setUrls] = useState({});
+  const conFoto = [...checkins].filter((c) => c[angolo]).sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const a = conFoto.find((c) => c.id === idA) || conFoto[0];
+  const b = conFoto.find((c) => c.id === idB) || conFoto[conFoto.length - 1];
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const out = {};
+      for (const c of [a, b]) {
+        if (c && c[angolo] && !out[c.id]) {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(c[angolo], 3600);
+          out[c.id] = data?.signedUrl;
+        }
+      }
+      if (vivo) setUrls(out);
+    })();
+    return () => { vivo = false; };
+  }, [a?.id, b?.id, angolo]);
+
+  if (checkins.filter((c) => ANGOLI.some(([k]) => c[k])).length < 2) return null;
+  const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const diffPeso = a && b && a.peso_kg != null && b.peso_kg != null ? Math.round((Number(b.peso_kg) - Number(a.peso_kg)) * 10) / 10 : null;
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Confronto foto</p>
+      <Card className="p-4 space-y-3">
+        <div className="flex gap-1.5">
+          {ANGOLI.map(([k, l]) => (
+            <button key={k} onClick={() => { setAngolo(k); setIdA(""); setIdB(""); }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${angolo === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
+          ))}
+        </div>
+        {conFoto.length < 2 ? (
+          <p className="text-slate-400 text-sm text-center py-4">Servono almeno due check con questa foto per fare il confronto.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              {[["Prima", a, idA, setIdA], ["Dopo", b, idB, setIdB]].map(([titolo, c, id, setId]) => (
+                <div key={titolo} className="space-y-1.5">
+                  <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
+                    {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
+                  </select>
+                  <div className="aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
+                    {urls[c?.id] ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">Caricamento...</span>}
+                  </div>
+                  {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
+                </div>
+              ))}
+            </div>
+            {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
+          </>
+        )}
+      </Card>
     </div>
   );
 }
@@ -1323,6 +1437,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
           </LineChart>
         </ResponsiveContainer>
       </Card>
+
+      <ConfrontoFoto checkins={checkins} />
 
       <HistoryTable checkins={checkins} sesso={sesso} />
 
