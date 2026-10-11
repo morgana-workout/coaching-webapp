@@ -6524,6 +6524,28 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const totalePrevisti = previsti.reduce((s, v) => s + (v.importo || 0), 0);
   const totaleDaSaldareConPrevisti = totaleDaSaldare + totalePrevisti;
 
+  // Previsione entrate del mese: già incassato + da saldare registrato + rinnovi previsti (al netto delle spese del mese)
+  const incassatoMese = nettoRows.filter((p) => nelMese(p.data_pagamento) && Number(p.importo) > 0).reduce((s, p) => s + Number(p.importo), 0);
+  const speseMese = spese.filter((p) => nelMese(p.data_pagamento)).reduce((s, p) => s + Number(p.importo), 0); // valore negativo
+  const previsioneEntrate = incassatoMese + totaleDaSaldare + totalePrevisti;
+
+  // Elettronici (tutti i metodi insieme) contro contanti, sugli incassi reali (saldati + acconti)
+  const METODI_ELETTRONICI = ["satispay", "hype", "sella", "bonifico"];
+  const righeMetodo = [
+    ...incassi.map((p) => ({ m: p.metodo_pagamento, imp: Number(p.importo), d: p.data_pagamento })),
+    ...daSaldare.filter((p) => Number(p.importo_saldato) > 0).map((p) => ({ m: p.metodo_pagamento, imp: Number(p.importo_saldato), d: p.data_pagamento })),
+  ].filter((r) => r.imp > 0);
+  const raggruppaMetodi = (righe) => {
+    const out = { elettronici: { tot: 0, n: 0 }, contanti: { tot: 0, n: 0 }, altro: { tot: 0, n: 0 } };
+    righe.forEach((r) => {
+      const k = r.m === "contanti" ? "contanti" : METODI_ELETTRONICI.includes(r.m) ? "elettronici" : "altro";
+      out[k].tot += r.imp; out[k].n += 1;
+    });
+    return out;
+  };
+  const metodiMese = raggruppaMetodi(righeMetodo.filter((r) => nelMese(r.d)));
+  const metodiTotali = raggruppaMetodi(righeMetodo);
+
   const pagamentiVisibili = filtro === "tutti" ? pagamenti : pagamenti.filter((p) => p.stato === filtro);
 
   const cambiaStato = async (p) => {
@@ -6590,6 +6612,36 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           <p className="text-[11px] text-slate-400 mt-2">Calcolati in automatico da scadenze e pacchetti. Spariscono appena registri il pagamento.</p>
         </Card>
       )}
+      <Card className="p-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Previsione entrate di {oggi.toLocaleDateString("it-IT", { month: "long" })}</p>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-slate-500">Già incassato nel mese</span><span className="font-medium text-slate-700">{incassatoMese.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Da saldare (già registrati)</span><span className="font-medium text-slate-700">{totaleDaSaldare.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Rinnovi previsti</span><span className="font-medium text-slate-700">{totalePrevisti.toFixed(2)}€</span></div>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Entrate previste</span><span className="font-semibold text-emerald-600">{previsioneEntrate.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Spese del mese</span><span className="font-medium text-rose-600">{speseMese.toFixed(2)}€</span></div>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Previsione netta</span><span className="font-semibold text-slate-800">{(previsioneEntrate + speseMese).toFixed(2)}€</span></div>
+        </div>
+        {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-amber-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
+      </Card>
+
+      <Card className="p-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Elettronici e contanti (incassi)</p>
+        <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1.5 text-sm items-baseline">
+          <span></span><span className="text-[11px] text-slate-400 text-right">Questo mese</span><span className="text-[11px] text-slate-400 text-right">Totale</span>
+          {[["elettronici", "Elettronici"], ["contanti", "Contanti"], ["altro", "Altro / non indicato"]].map(([k, l]) => (
+            (metodiTotali[k].n > 0) && (
+              <React.Fragment key={k}>
+                <span className="text-slate-600">{l}</span>
+                <span className="text-right text-slate-700 font-medium">{metodiMese[k].tot.toFixed(2)}€ <span className="text-slate-400 font-normal text-[11px]">({metodiMese[k].n})</span></span>
+                <span className="text-right text-slate-700 font-medium">{metodiTotali[k].tot.toFixed(2)}€ <span className="text-slate-400 font-normal text-[11px]">({metodiTotali[k].n})</span></span>
+              </React.Fragment>
+            )
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-400 mt-2">Elettronici = Satispay, Hype, Sella e bonifico insieme. Tra parentesi il numero di pagamenti.</p>
+      </Card>
+
       <button
         onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare: totaleDaSaldareConPrevisti, mesi, metodiOrdinati })}
         className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
