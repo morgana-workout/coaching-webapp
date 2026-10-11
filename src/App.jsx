@@ -6397,12 +6397,18 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const [caricando, setCaricando] = useState(true);
   const [filtro, setFiltro] = useState("tutti");
   const [pagamentoAperto, setPagamentoAperto] = useState(null);
+  const [pacchettiAttivi, setPacchettiAttivi] = useState([]);
+  const [lezioniPacchetti, setLezioniPacchetti] = useState([]);
 
   const carica = async () => {
     const { data: pg } = await supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento", { ascending: false });
     setPagamenti(pg || []);
     const { data: bl } = await supabase.from("client_billing").select("*");
     setBilling(bl || []);
+    try {
+      setPacchettiAttivi(await leggiTutto(() => supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, stato").eq("stato", "attivo").order("id")));
+      setLezioniPacchetti(await leggiTutto(() => supabase.from("lezioni_svolte").select("pacchetto_id, numero, data").not("pacchetto_id", "is", null).order("id")));
+    } catch (e) { /* senza questi dati restano solo i rinnovi online */ }
     setCaricando(false);
   };
   useEffect(() => { carica(); }, []);
@@ -6473,6 +6479,39 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
     .sort((a, b) => (a.data_scadenza || "").localeCompare(b.data_scadenza || ""))
     .slice(0, 8);
 
+  // Rinnovi previsti nel mese corrente (entrano in automatico nel "Da saldare"):
+  // - online (mensile/trimestrale/semestrale) con scadenza in questo mese e nessun pagamento già registrato nel mese;
+  // - pacchetti lezioni attivi che si completano in questo mese (o già completati e proseguiti con lezioni extra).
+  const TIPI_ONLINE = ["Mensile", "Trimestrale", "Semestrale"];
+  const nelMese = (d) => (d || "").slice(0, 7) === meseCorrente;
+  const pagMese = (id, pred) => pagamenti.some((p) => p.client_id === id && nelMese(p.data_pagamento) && pred(p));
+  const ultimoImporto = (id, pred) => { // pagamenti è già ordinato dal più recente
+    const l = pagamenti.filter((p) => p.client_id === id && p.stato !== "spesa" && Number(p.importo) > 0 && pred(p));
+    return l.length ? Number(l[0].importo) : null;
+  };
+  const previsti = [];
+  clients.forEach((c) => {
+    if (c.archiviato || c.stato_pacchetto === "gratuito") return;
+    if (pagMese(c.id, (p) => p.stato === "da_saldare")) return; // già presente tra i da saldare
+    if (nelMese(c.data_scadenza) && c.stato_pacchetto !== "scaduto" && TIPI_ONLINE.includes(c.piano) && !pagMese(c.id, (p) => TIPI_ONLINE.includes(p.tipo_piano))) {
+      const b = billingByClient[c.id];
+      const imp = b?.importo_ricorrente != null && Number(b.importo_ricorrente) > 0 ? Number(b.importo_ricorrente) : ultimoImporto(c.id, (p) => p.tipo_piano === c.piano);
+      previsti.push({ chiave: `${c.id}-online`, cliente: c, titolo: `Rinnovo ${c.piano.toLowerCase()}`, data: c.data_scadenza, importo: imp });
+    }
+    pacchettiAttivi.filter((pk) => pk.client_id === c.id).forEach((pk) => {
+      const N = Number(pk.numero_lezioni);
+      if (!N) return;
+      const righe = lezioniPacchetti.filter((l) => l.pacchetto_id === pk.id);
+      const dataN = righe.find((l) => Number(l.numero) === N)?.data;
+      const extraNelMese = righe.some((l) => Number(l.numero) > N && nelMese(l.data));
+      if (!(nelMese(dataN) || extraNelMese)) return;
+      const re = new RegExp(`(^|\\D)${N}\\s*lezion`, "i");
+      previsti.push({ chiave: `${pk.id}-pk`, cliente: c, titolo: `Nuovo pacchetto ${N} lezioni`, data: dataN, importo: ultimoImporto(c.id, (p) => re.test(p.note || "")) });
+    });
+  });
+  const totalePrevisti = previsti.reduce((s, v) => s + (v.importo || 0), 0);
+  const totaleDaSaldareConPrevisti = totaleDaSaldare + totalePrevisti;
+
   const pagamentiVisibili = filtro === "tutti" ? pagamenti : pagamenti.filter((p) => p.stato === filtro);
 
   const cambiaStato = async (p) => {
@@ -6515,11 +6554,32 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Da saldare</p>
-          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldare.toFixed(2)}€</p>
+          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldareConPrevisti.toFixed(2)}€</p>
+          {totalePrevisti > 0 && <p className="text-[10px] text-slate-400 leading-tight">di cui {totalePrevisti.toFixed(2)}€ rinnovi previsti</p>}
         </Card>
       </div>
+      {previsti.length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi previsti questo mese</p>
+            <span className="text-xs font-semibold text-amber-600">{totalePrevisti.toFixed(2)}€</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {previsti.map((v) => (
+              <button key={v.chiave} onClick={() => onSelect(v.cliente.id)} className="w-full flex items-center justify-between py-2 text-left gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700 font-medium truncate">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="text-xs text-slate-400">{v.titolo}{v.data ? ` · ${v.data.split("-").reverse().join("/")}` : ""}</p>
+                </div>
+                {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-amber-600 flex-shrink-0">importo da definire</span>}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">Calcolati in automatico da scadenze e pacchetti. Spariscono appena registri il pagamento.</p>
+        </Card>
+      )}
       <button
-        onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare, mesi, metodiOrdinati })}
+        onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare: totaleDaSaldareConPrevisti, mesi, metodiOrdinati })}
         className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
         ⬇ Scarica prospetto guadagni (CSV)
       </button>
