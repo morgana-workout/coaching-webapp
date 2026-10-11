@@ -5497,6 +5497,141 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
   );
 }
 
+const MESSAGGI_PRONTI = [
+  { titolo: "Check ricevuto", testo: "Check ricevuto! Esamino i dati e ti rispondo ✨" },
+  { titolo: "Come è andata la settimana?", testo: "Ciao {nome}! Com'è andata questa settimana? Allenamenti, alimentazione, energia, sonno: raccontami tutto, così aggiustiamo il tiro dove serve. ✨" },
+  { titolo: "Promemoria check", testo: "Ciao {nome}, ti ricordo di inviarmi il check (misure e foto): mi serve per aggiornare al meglio il tuo percorso. Grazie! ✨" },
+  { titolo: "Promemoria pagamento", testo: "Ciao {nome}! Il tuo pacchetto sta per scadere: quando riesci procedi con il saldo così proseguiamo senza interruzioni. Grazie mille! ✨" },
+  { titolo: "Non vedo carichi da un po'", testo: "Ciao {nome}, non vedo carichi registrati da qualche giorno. Tutto ok? Se ti serve una mano a ripartire scrivimi pure. ✨" },
+  { titolo: "Complimenti", testo: "Brava {nome}! Sto vedendo i tuoi progressi e sono davvero belli. Continua così! ✨" },
+  { titolo: "Rinnovo pacchetto lezioni", testo: "Ciao {nome}, il tuo pacchetto lezioni sta per finire. Vuoi rinnovarlo? Dimmi pure e ti blocco le prossime date. ✨" },
+];
+
+function SelettoreMessaggiPronti({ nome, onScegli }) {
+  const primoNome = (nome || "").trim().split(" ")[0];
+  return (
+    <select value="" onChange={(e) => { const m = MESSAGGI_PRONTI[Number(e.target.value)]; if (m) onScegli(m.testo.replace(/\{nome\}/g, primoNome)); }}
+      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 bg-white">
+      <option value="">✨ Messaggi pronti...</option>
+      {MESSAGGI_PRONTI.map((m, i) => <option key={m.titolo} value={i}>{m.titolo}</option>)}
+    </select>
+  );
+}
+
+function OggiCoach({ clients, onSelect, vai }) {
+  const [dati, setDati] = useState(null);
+  const oggi = formatDataLocale(new Date());
+  const domani = addGiorni(oggi, 1);
+  const giorniDa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
+  const fmt = (d) => d.split("-").reverse().slice(0, 2).join("/");
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data: ev } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").gte("data", oggi).lte("data", domani).order("data").order("ora");
+        const { count: richieste } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
+        const { count: checkDaEsaminare } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
+        const { data: msg } = await supabase.from("messaggi").select("client_id, mittente, created_at").order("created_at", { ascending: false }).limit(1000);
+        const ultimoMsg = {};
+        (msg || []).forEach((m) => { if (!ultimoMsg[m.client_id]) ultimoMsg[m.client_id] = m; });
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("client_id, data").gte("data", addGiorni(oggi, -60)).order("id"));
+        const ultimoCarico = {};
+        righe.forEach((r) => { if (r.data && (!ultimoCarico[r.client_id] || r.data > ultimoCarico[r.client_id])) ultimoCarico[r.client_id] = r.data; });
+        if (vivo) setDati({ ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico });
+      } catch (e) { if (vivo) setDati({ ev: [], richieste: 0, checkDaEsaminare: 0, ultimoMsg: {}, ultimoCarico: {} }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  if (!dati) return <Spinner />;
+
+  const attivi = dati.ev.filter((e) => e.stato !== "annullata" && e.stato !== "persa");
+  const nomeEv = (e) => (e.tipo === "personale" ? (e.titolo || "Attività personale") : e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente");
+  const Giorno = ({ titolo, data }) => {
+    const lista = attivi.filter((e) => e.data === data);
+    return (
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{titolo} · {fmt(data)}</p>
+        {lista.length === 0 && <p className="text-slate-400 text-sm">Nessun impegno in agenda.</p>}
+        {lista.map((e) => (
+          <button key={e.id} onClick={() => e.client_id && onSelect(e.client_id)} className="w-full flex items-center gap-3 text-left">
+            <span className="text-sm font-semibold text-slate-700 w-12 flex-shrink-0">{e.ora ? e.ora.slice(0, 5) : "—"}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm text-slate-700 font-medium truncate">{nomeEv(e)}</span>
+              <span className="block text-xs text-slate-500 truncate">{e.tipo === "lezione" ? "Lezione 1:1" : e.tipo === "personale" ? "Personale" : "Call"}{e.luogo ? ` · ${e.luogo}` : ""}{e.stato === "richiesta" ? " · da confermare" : ""}</span>
+            </span>
+          </button>
+        ))}
+      </Card>
+    );
+  };
+
+  const msgSenzaRisposta = clients.filter((c) => dati.ultimoMsg[c.id]?.mittente === "cliente");
+  const scadenze = [];
+  clients.forEach((c) => {
+    if (c.tipo_servizio !== "presenza" && c.prossimo_check && c.prossimo_check <= addGiorni(oggi, 3) && c.prossimo_check >= oggi) scadenze.push({ c, testo: `Check ${c.prossimo_check === oggi ? "oggi" : "il " + fmt(c.prossimo_check)}`, ord: c.prossimo_check });
+    if (c.data_scadenza && c.stato_pacchetto !== "gratuito" && c.data_scadenza >= oggi && c.data_scadenza <= addGiorni(oggi, 7)) scadenze.push({ c, testo: `Pacchetto in scadenza ${c.data_scadenza === oggi ? "oggi" : "il " + fmt(c.data_scadenza)}`, ord: c.data_scadenza });
+    if (c.stato_pacchetto === "scaduto") scadenze.push({ c, testo: "Pacchetto scaduto", ord: "0000" });
+  });
+  scadenze.sort((a, b) => a.ord.localeCompare(b.ord));
+
+  const daSeguire = [];
+  clients.forEach((c) => {
+    const motivi = [];
+    const uc = dati.ultimoCarico[c.id];
+    if (uc && giorniDa(uc) >= 10) motivi.push(`nessun carico da ${giorniDa(uc)} giorni`);
+    if (c.tipo_servizio !== "presenza" && c.prossimo_check && c.prossimo_check < oggi && c.stato_check === "da_compilare") motivi.push(`check in ritardo di ${giorniDa(c.prossimo_check)} giorni`);
+    const um = dati.ultimoMsg[c.id];
+    if (um?.mittente === "cliente" && (Date.now() - new Date(um.created_at).getTime()) > 86400000) motivi.push("chat senza risposta da oltre un giorno");
+    if (motivi.length) daSeguire.push({ c, motivi });
+  });
+
+  const Voce = ({ n, label, onClick }) => (
+    <button onClick={onClick} className="w-full flex items-center justify-between py-2 text-left">
+      <span className="text-sm text-slate-700">{label}</span>
+      <span className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${n > 0 ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-400"}`}>{n}</span>
+    </button>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Giorno titolo="Oggi" data={oggi} />
+      <Giorno titolo="Domani" data={domani} />
+
+      <Card className="p-4 divide-y divide-slate-100">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-2">Da fare</p>
+        <Voce n={dati.richieste} label="Richieste di lezione da confermare" onClick={() => vai("notifiche")} />
+        <Voce n={dati.checkDaEsaminare} label="Check ricevuti da esaminare" onClick={() => vai("notifiche")} />
+        <Voce n={msgSenzaRisposta.length} label="Chat in attesa di risposta" onClick={() => vai("chat")} />
+      </Card>
+
+      {scadenze.length > 0 && (
+        <Card className="p-4 space-y-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Scadenze in arrivo</p>
+          {scadenze.map((s, i) => (
+            <button key={i} onClick={() => onSelect(s.c.id)} className="w-full flex items-center justify-between py-1.5 text-left">
+              <span className="text-sm text-slate-700 font-medium">{s.c.nome} {s.c.cognome}</span>
+              <span className="text-xs text-amber-600">{s.testo}</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <Card className="p-4 space-y-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Clienti da seguire</p>
+        {daSeguire.length === 0 && <p className="text-emerald-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
+        {daSeguire.map(({ c, motivi }) => (
+          <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+            <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+            <span className="block text-xs text-rose-500">{motivi.join(" · ")}</span>
+          </button>
+        ))}
+      </Card>
+    </div>
+  );
+}
+
 function InviaNotaForm({ clients, onFatto }) {
   const [clientId, setClientId] = useState(clients[0]?.id || "");
   const [messaggio, setMessaggio] = useState("");
@@ -5519,6 +5654,7 @@ function InviaNotaForm({ clients, onFatto }) {
       <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
       </select>
+      <SelettoreMessaggiPronti nome={(() => { const c = clients.find((x) => x.id === clientId); return c ? c.nome : ""; })()} onScegli={(t) => { setMessaggio(t); setFatto(false); }} />
       <textarea placeholder="Scrivi la nota..." value={messaggio} onChange={(e) => { setMessaggio(e.target.value); setFatto(false); }} rows={3} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia nota"}</button>
       {fatto && <p className="text-emerald-600 text-xs">Nota inviata!</p>}
@@ -5636,7 +5772,7 @@ function ChatCoach({ clients, onChanged }) {
       <div className="space-y-3">
         <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutte le chat</button>
         <p className="text-lg font-semibold text-slate-800">{c?.nome} {c?.cognome}</p>
-        <ChatMessaggi clientId={aperta} ruolo="coach" onLetti={() => onChanged?.()} />
+        <ChatMessaggi clientId={aperta} ruolo="coach" nomeCliente={c?.nome || ""} onLetti={() => onChanged?.()} />
       </div>
     );
   }
@@ -5703,7 +5839,7 @@ async function generaPromemoriCliente(c) {
   }
 }
 
-function ChatMessaggi({ clientId, ruolo, onLetti }) {
+function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   const [msgs, setMsgs] = useState([]);
   const [testo, setTesto] = useState("");
   const [foto, setFoto] = useState(null);
@@ -5797,6 +5933,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti }) {
           <button onClick={() => setFoto(null)} className="text-slate-400 ml-2"><X size={14} /></button>
         </div>
       )}
+      {ruolo === "coach" && <SelettoreMessaggiPronti nome={nomeCliente} onScegli={setTesto} />}
       <div className="flex items-end gap-2">
         <label className="flex-shrink-0 w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
           <Camera size={18} />
@@ -6503,6 +6640,182 @@ function ImportoMancante({ p, onSalvato }) {
       <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="€"
         className="w-16 border border-amber-300 rounded-lg px-1.5 py-1 text-xs" />
       <button onClick={salva} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={16} /></button>
+    </div>
+  );
+}
+
+const categoriaPagamento = (p) => {
+  if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) return "Coaching online";
+  const t = `${p.tipo_piano || ""} ${p.note || ""}`.toLowerCase();
+  if (/lezion|pacchetto|prova|presenza|bulb/.test(t)) return "Lezioni in presenza";
+  if (/mensile|trimestrale|semestrale|online|coaching/.test(t)) return "Coaching online";
+  return "Altro";
+};
+const METODI_ELETTRONICI_STAT = ["satispay", "hype", "sella", "bonifico"];
+
+// Righe di incasso reali (saldati + acconti) e spese, con importo sempre positivo
+function righeContabili(pagamenti) {
+  const out = [];
+  pagamenti.forEach((p) => {
+    if (p.importo == null) return;
+    if (p.stato === "spesa") out.push({ tipo: "spesa", d: p.data_pagamento, imp: Math.abs(Number(p.importo)), p });
+    else if (p.stato === "saldato" && Number(p.importo) > 0) out.push({ tipo: "incasso", d: p.data_pagamento, imp: Number(p.importo), p });
+    else if (p.stato === "da_saldare" && Number(p.importo_saldato) > 0) out.push({ tipo: "incasso", d: p.data_pagamento, imp: Number(p.importo_saldato), p });
+  });
+  return out;
+}
+
+async function esportaRiepilogoCommercialista(meseChiave) {
+  const XLSX = await caricaModuloExcel();
+  const pagamenti = await leggiTutto(() => supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento").order("id"));
+  const righe = righeContabili(pagamenti).filter((r) => (r.d || "").slice(0, 7) === meseChiave);
+  const incassi = righe.filter((r) => r.tipo === "incasso");
+  const spese = righe.filter((r) => r.tipo === "spesa");
+  const tot = (l) => Math.round(l.reduce((s, r) => s + r.imp, 0) * 100) / 100;
+  const dt = (s) => (s ? new Date(`${s}T12:00:00`) : "");
+  const nomeC = (p) => (p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "");
+  const [anno, mese] = meseChiave.split("-").map(Number);
+  const titoloMese = new Date(anno, mese - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" });
+
+  const perMetodo = {};
+  incassi.forEach((r) => { const k = labelMetodo(r.p.metodo_pagamento) || "non specificato"; perMetodo[k] = (perMetodo[k] || 0) + r.imp; });
+  const perCategoria = {};
+  incassi.forEach((r) => { const k = categoriaPagamento(r.p); perCategoria[k] = (perCategoria[k] || 0) + r.imp; });
+  const elettronici = tot(incassi.filter((r) => METODI_ELETTRONICI_STAT.includes(r.p.metodo_pagamento)));
+  const contanti = tot(incassi.filter((r) => r.p.metodo_pagamento === "contanti"));
+
+  const fogli = [
+    ["Riepilogo", [
+      [`Riepilogo ${titoloMese}`, ""],
+      ["Totale incassi (€)", tot(incassi)],
+      ["Totale spese (€)", tot(spese)],
+      ["Utile netto (€)", Math.round((tot(incassi) - tot(spese)) * 100) / 100],
+      ["", ""],
+      ["Pagamenti elettronici (€)", elettronici],
+      ["Contanti (€)", contanti],
+      ["", ""],
+      ["Incassi per metodo", ""],
+      ...Object.entries(perMetodo).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+      ["", ""],
+      ["Incassi per tipo di servizio", ""],
+      ...Object.entries(perCategoria).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+    ]],
+    ["Incassi", [["Data", "Cliente", "Descrizione", "Metodo", "Importo (€)", "Note"], ...incassi.map((r) => [dt(r.d), nomeC(r.p), r.p.tipo_piano || "", labelMetodo(r.p.metodo_pagamento), r.imp, r.p.note || ""]), ["", "", "", "Totale", tot(incassi), ""]]],
+    ["Spese", [["Data", "Descrizione", "Importo (€)", "Note"], ...spese.map((r) => [dt(r.d), r.p.tipo_piano || "Spesa", r.imp, r.p.note || ""]), ["", "Totale", tot(spese), ""]]],
+  ];
+  const wb = XLSX.utils.book_new();
+  fogli.forEach(([titolo, rows]) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
+    Object.keys(ws).forEach((k) => { if (k[0] !== "!" && ws[k].t === "d") ws[k].z = "dd/mm/yyyy"; });
+    ws["!cols"] = rows[0].map((h, i) => ({ wch: Math.min(40, Math.max(String(h).length + 2, ...rows.slice(1, 80).map((r) => String(r[i] instanceof Date ? "00/00/0000" : (r[i] ?? "")).length + 2), 14)) }));
+    XLSX.utils.book_append_sheet(wb, ws, titolo);
+  });
+  XLSX.writeFile(wb, `riepilogo-commercialista-${meseChiave}.xlsx`, { cellDates: true });
+  return { incassi: incassi.length, spese: spese.length };
+}
+
+function StatisticheCoach({ clients }) {
+  const oggi = new Date();
+  const chiaveDi = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const mesiLista = Array.from({ length: 12 }, (_, i) => chiaveDi(new Date(oggi.getFullYear(), oggi.getMonth() - i, 1)));
+  const [mese, setMese] = useState(mesiLista[0]);
+  const [dati, setDati] = useState(null);
+  const [esportando, setEsportando] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const pagamenti = await leggiTutto(() => supabase.from("payments").select("*").order("id"));
+        const pacchetti = await leggiTutto(() => supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, stato, creato_il, completato_il").order("id"));
+        setDati({ pagamenti, pacchetti });
+      } catch (e) { setDati({ pagamenti: [], pacchetti: [] }); }
+    })();
+  }, []);
+
+  if (!dati) return <Spinner />;
+  const eur = (n) => `${(Math.round(n * 100) / 100).toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} €`;
+  const nelMese = (d) => (d || "").slice(0, 7) === mese;
+  const righe = righeContabili(dati.pagamenti);
+  const incassiMese = righe.filter((r) => r.tipo === "incasso" && nelMese(r.d));
+  const speseMese = righe.filter((r) => r.tipo === "spesa" && nelMese(r.d));
+  const somma = (l) => l.reduce((s, r) => s + r.imp, 0);
+  const totInc = somma(incassiMese), totSpese = somma(speseMese);
+
+  const perCat = {};
+  incassiMese.forEach((r) => { const k = categoriaPagamento(r.p); perCat[k] = (perCat[k] || 0) + r.imp; });
+  const catOrd = Object.entries(perCat).sort((a, b) => b[1] - a[1]);
+  const elettronici = somma(incassiMese.filter((r) => METODI_ELETTRONICI_STAT.includes(r.p.metodo_pagamento)));
+  const contanti = somma(incassiMese.filter((r) => r.p.metodo_pagamento === "contanti"));
+
+  // Rinnovi coaching online: pagamenti a cadenza fissa la cui copertura finisce nel mese scelto
+  const fissi = dati.pagamenti.filter((p) => MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.stato === "saldato" && p.data_pagamento);
+  let attesiOnline = 0, rinnovatiOnline = 0;
+  fissi.forEach((p) => {
+    const fine = addMesi(p.data_pagamento, MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]);
+    if (!nelMese(fine)) return;
+    attesiOnline += 1;
+    if (dati.pagamenti.some((q) => q.client_id === p.client_id && q.id !== p.id && MESI_PER_TIPO_PAGAMENTO[q.tipo_piano] && q.data_pagamento > p.data_pagamento && q.data_pagamento <= addGiorni(fine, 20))) rinnovatiOnline += 1;
+  });
+  // Rinnovi pacchetti lezioni: pacchetti completati nel mese, seguiti da un nuovo pacchetto
+  const completati = dati.pacchetti.filter((pk) => nelMese(pk.completato_il));
+  const rinnovatiLez = completati.filter((pk) => dati.pacchetti.some((q) => q.client_id === pk.client_id && q.id !== pk.id && (q.creato_il || "") >= (pk.creato_il || "") && q.id > pk.id)).length;
+  const attesiTot = attesiOnline + completati.length;
+  const rinnovatiTot = rinnovatiOnline + rinnovatiLez;
+  const retention = attesiTot > 0 ? Math.round((rinnovatiTot / attesiTot) * 100) : null;
+
+  const attive = clients.filter((c) => !c.archiviato);
+  const nOnline = attive.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length;
+  const nBulb = attive.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length;
+  const labelMese = (k) => { const [a, m] = k.split("-").map(Number); return new Date(a, m - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" }); };
+
+  const esporta = async () => {
+    setEsportando(true); setMsg("");
+    try { const r = await esportaRiepilogoCommercialista(mese); setMsg(`Scaricato: ${r.incassi} incassi e ${r.spese} spese.`); }
+    catch (e) { setMsg("Esportazione non riuscita: " + (e.message || "riprova")); }
+    setEsportando(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <select value={mese} onChange={(e) => { setMese(e.target.value); setMsg(""); }} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white capitalize">
+        {mesiLista.map((k) => <option key={k} value={k}>{labelMese(k)}</option>)}
+      </select>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Card className="p-4"><p className="text-xs text-slate-500">Incassato</p><p className="text-xl font-semibold text-slate-800 mt-1">{eur(totInc)}</p></Card>
+        <Card className="p-4"><p className="text-xs text-slate-500">Utile netto</p><p className="text-xl font-semibold text-slate-800 mt-1">{eur(totInc - totSpese)}</p><p className="text-[11px] text-slate-400 mt-0.5">spese {eur(totSpese)}</p></Card>
+      </div>
+
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Incassi per tipo di servizio</p>
+        {catOrd.length === 0 && <p className="text-slate-400 text-sm">Nessun incasso in questo mese.</p>}
+        {catOrd.map(([k, v]) => (
+          <div key={k}>
+            <div className="flex justify-between text-sm"><span className="text-slate-700">{k}</span><span className="font-medium text-slate-800">{eur(v)}</span></div>
+            <div className="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden"><div className="h-full bg-sky-500 rounded-full" style={{ width: `${totInc ? Math.round((v / totInc) * 100) : 0}%` }} /></div>
+          </div>
+        ))}
+        {totInc > 0 && <p className="text-[11px] text-slate-400 pt-1">Elettronici {eur(elettronici)} · Contanti {eur(contanti)}</p>}
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi e fidelizzazione</p>
+        {attesiTot === 0 ? <p className="text-slate-400 text-sm">Nessun rinnovo previsto in questo mese.</p> : (
+          <>
+            <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-emerald-600 ml-2">{retention}%</span>}</p>
+            <p className="text-xs text-slate-500">Coaching online: {rinnovatiOnline} su {attesiOnline} · Pacchetti lezioni: {rinnovatiLez} su {completati.length}</p>
+          </>
+        )}
+        <p className="text-xs text-slate-500 pt-1">Clienti attive: {attive.length} (online {nOnline} · Bulb {nBulb})</p>
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
+        <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto.</p>
+        <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : `⬇ Scarica riepilogo ${labelMese(mese)}`}</button>
+        {msg && <p className="text-xs text-slate-500">{msg}</p>}
+      </Card>
     </div>
   );
 }
@@ -7295,7 +7608,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-4 gap-1.5">
+        <button onClick={() => setVista("oggi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "oggi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Oggi</button>
         <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
         <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
         <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
@@ -7317,10 +7631,13 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
             <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{chatNonLette}</span>
           )}
         </button>
+        <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
       </div>
 
+      {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
+      {vista === "statistiche" && <StatisticheCoach clients={clientiAttivi} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
       {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
@@ -7468,7 +7785,7 @@ function AdminApp() {
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [backupInCorso, setBackupInCorso] = useState(false);
-  const [vista, setVista] = useState("calendario"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
+  const [vista, setVista] = useState("oggi"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
 
   const carica = async () => {
     try {
