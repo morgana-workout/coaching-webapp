@@ -1510,11 +1510,11 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                   <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
                     {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
                   </select>
-                  <button onClick={() => urls[c?.id] && setGrande(urls[c.id])} className="block w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
+                  <div onClick={() => urls[c?.id] && setGrande(urls[c.id])} className="relative w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer">
                     {urls[c?.id]
-                      ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="w-full h-full object-cover" style={{ transform: `scale(${zoom})`, transformOrigin: `${px}% ${py}%` }} />
+                      ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="absolute inset-0 w-full h-full object-cover" style={{ transform: `scale(${zoom})`, transformOrigin: `${px}% ${py}%` }} />
                       : <span className="text-slate-300 text-xs">Caricamento...</span>}
-                  </button>
+                  </div>
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
                   {isAdmin ? (
                     <div>
