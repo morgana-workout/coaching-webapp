@@ -6505,10 +6505,10 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
       if (scadenze.length) previsti.push({ chiave: `${c.id}-sett`, cliente: c, titolo: `${scadenze.length} pagament${scadenze.length === 1 ? "o" : "i"} settimanal${scadenze.length === 1 ? "e" : "i"} da ${Number(bs.importo_ricorrente).toFixed(0)}€`, data: scadenze[0], importo: scadenze.length * Number(bs.importo_ricorrente) });
       return;
     }
-    if (nelMese(c.data_scadenza) && c.stato_pacchetto !== "scaduto" && TIPI_ONLINE.includes(c.piano) && !pagMese(c.id, (p) => TIPI_ONLINE.includes(p.tipo_piano))) {
+    if (nelMese(c.data_scadenza) && TIPI_ONLINE.includes(c.piano) && !pagMese(c.id, (p) => TIPI_ONLINE.includes(p.tipo_piano))) {
       const b = billingByClient[c.id];
       const imp = b?.importo_ricorrente != null && Number(b.importo_ricorrente) > 0 ? Number(b.importo_ricorrente) : ultimoImporto(c.id, (p) => p.tipo_piano === c.piano);
-      previsti.push({ chiave: `${c.id}-online`, cliente: c, titolo: `Rinnovo ${c.piano.toLowerCase()}`, data: c.data_scadenza, importo: imp });
+      previsti.push({ chiave: `${c.id}-online`, cliente: c, titolo: `Rinnovo ${c.piano.toLowerCase()}${c.stato_pacchetto === "scaduto" ? " (pacchetto scaduto)" : ""}`, data: c.data_scadenza, importo: imp });
     }
     pacchettiAttivi.filter((pk) => pk.client_id === c.id).forEach((pk) => {
       const N = Number(pk.numero_lezioni);
