@@ -1,0 +1,12 @@
+{
+  "name": "Coaching by Morgana",
+  "short_name": "MorGainz",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FFFCF2",
+  "theme_color": "#8EBDED",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
