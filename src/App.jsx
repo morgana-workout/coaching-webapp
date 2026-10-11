@@ -1215,7 +1215,76 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
   );
 }
 
-function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi" }) {
+function ProgressiCarichi({ clientId }) {
+  const [esercizi, setEsercizi] = useState(null);
+  const [aperto, setAperto] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        const mappa = {};
+        righe.forEach((r) => {
+          const kg = Number(r.kg);
+          const nome = r.training_exercises?.nome;
+          if (!nome || !r.data || !(kg > 0)) return;
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {} });
+          g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
+        });
+        const lista = Object.values(mappa).map((g) => {
+          const date = Object.keys(g.date).sort();
+          const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
+          const primo = g.date[date[0]]; const ultimo = g.date[date[date.length - 1]];
+          return { nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1] };
+        }).sort((a, b) => a.nome.localeCompare(b.nome));
+        if (vivo) setEsercizi(lista);
+      } catch (e) { if (vivo) setEsercizi([]); }
+    })();
+    return () => { vivo = false; };
+  }, [clientId]);
+
+  if (!esercizi || esercizi.length === 0) return null;
+  const inAumento = esercizi.filter((e) => e.diff > 0).length;
+  const fmt = (n) => String(n).replace(".", ",");
+
+  return (
+    <div className="space-y-2">
+      <div className="px-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Progressi carichi</p>
+        <p className="text-slate-400 text-xs mt-0.5">{inAumento} esercizi su {esercizi.length} con carico in aumento. Il valore è il kg più alto usato in ogni allenamento.</p>
+      </div>
+      {esercizi.map((e) => (
+        <Card key={e.nome} className="p-3">
+          <button onClick={() => setAperto(aperto === e.nome ? null : e.nome)} className="w-full text-left">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium text-slate-700 text-sm">{e.nome}</p>
+              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}>
+                {e.sessioni < 2 ? "1ª sessione" : `${e.diff > 0 ? "+" : ""}${fmt(e.diff)} kg`}
+              </span>
+            </div>
+            <p className="text-slate-500 text-xs mt-1">{fmt(e.primo)} kg → {fmt(e.ultimo)} kg · massimo {fmt(e.max)} kg · {e.sessioni} {e.sessioni === 1 ? "sessione" : "sessioni"}</p>
+          </button>
+          {aperto === e.nome && e.serie.length > 1 && (
+            <div style={{ width: "100%", height: 150 }} className="mt-2">
+              <ResponsiveContainer>
+                <LineChart data={e.serie}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="dataLabel" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} domain={["auto", "auto"]} width={32} />
+                  <Tooltip formatter={(v) => [`${v} kg`, "Carico"]} />
+                  <Line type="monotone" dataKey="kg" stroke="#4F8FD0" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi", clientId }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
   const dati = [...checkins]
@@ -1223,7 +1292,12 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
     .map((c) => ({ ...c, dataLabel: c.data_check?.slice(5).split("-").reverse().join("/") }));
 
   if (checkins.length === 0) {
-    return <div className="px-5 pt-16 text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</div>;
+    return (
+      <div className="px-5 pt-16 pb-24 space-y-6">
+        <p className="text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</p>
+        {clientId && <ProgressiCarichi clientId={clientId} />}
+      </div>
+    );
   }
 
   return (
@@ -1256,6 +1330,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Valori estrapolati</p>
         <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
       </div>
+
+      {clientId && <ProgressiCarichi clientId={clientId} />}
     </div>
   );
 }
@@ -2175,7 +2251,7 @@ function ClientApp({ session }) {
         {tab === "notifiche" && <NotificheCliente client={client} />}
         {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} /></div>}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
-        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} />}
+        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
         {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
         {tab === "extra" && <ClientApprofondimenti />}
@@ -4770,7 +4846,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta i dati di questa cliente (Excel)" />}
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} />}
 
       {tab === "allenamento" && (
         <div className="space-y-5">
