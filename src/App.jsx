@@ -1440,12 +1440,23 @@ function ProgressiCarichi({ clientId }) {
   );
 }
 
-function ConfrontoFoto({ checkins }) {
-  const ANGOLI = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale"], ["foto_posteriore_path", "Posteriore"]];
+function ConfrontoFoto({ checkins, isAdmin = false }) {
+  const ANGOLI = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale dx"], ["foto_extra_path", "Laterale sx"], ["foto_posteriore_path", "Posteriore"]];
   const [angolo, setAngolo] = useState("foto_frontale_path");
   const [idA, setIdA] = useState("");
   const [idB, setIdB] = useState("");
   const [urls, setUrls] = useState({});
+  const [zoom, setZoom] = useState(1);
+  const [px, setPx] = useState(50);
+  const [py, setPy] = useState(40);
+  const [grande, setGrande] = useState(null);
+  const [note, setNote] = useState({});
+  const [salvata, setSalvata] = useState("");
+  useEffect(() => {
+    const m = {};
+    checkins.forEach((c) => { m[c.id] = c.nota_foto_coach || ""; });
+    setNote(m);
+  }, [checkins.length]);
   const conFoto = [...checkins].filter((c) => c[angolo]).sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
   const a = conFoto.find((c) => c.id === idA) || conFoto[0];
   const b = conFoto.find((c) => c.id === idB) || conFoto[conFoto.length - 1];
@@ -1467,6 +1478,18 @@ function ConfrontoFoto({ checkins }) {
   if (checkins.filter((c) => ANGOLI.some(([k]) => c[k])).length < 2) return null;
   const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "");
   const diffPeso = a && b && a.peso_kg != null && b.peso_kg != null ? Math.round((Number(b.peso_kg) - Number(a.peso_kg)) * 10) / 10 : null;
+  const salvaNota = async (c) => {
+    const testo = (note[c.id] || "").trim();
+    if (testo === (c.nota_foto_coach || "")) return;
+    const { error } = await supabase.from("checkins").update({ nota_foto_coach: testo || null }).eq("id", c.id);
+    if (!error) { c.nota_foto_coach = testo || null; setSalvata(c.id); setTimeout(() => setSalvata(""), 2000); }
+  };
+  const Cursore = ({ label, valore, set, min, max, step }) => (
+    <label className="flex items-center gap-2 text-xs text-slate-500">
+      <span className="w-20 flex-shrink-0">{label}</span>
+      <input type="range" min={min} max={max} step={step} value={valore} onChange={(e) => set(Number(e.target.value))} className="flex-1 accent-sky-500" />
+    </label>
+  );
 
   return (
     <div className="space-y-2">
@@ -1474,7 +1497,7 @@ function ConfrontoFoto({ checkins }) {
       <Card className="p-4 space-y-3">
         <div className="flex gap-1.5">
           {ANGOLI.map(([k, l]) => (
-            <button key={k} onClick={() => { setAngolo(k); setIdA(""); setIdB(""); }} className={`flex-1 py-1.5 rounded-lg text-xs font-medium ${angolo === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
+            <button key={k} onClick={() => { setAngolo(k); setIdA(""); setIdB(""); }} className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium ${angolo === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
           ))}
         </div>
         {conFoto.length < 2 ? (
@@ -1482,27 +1505,55 @@ function ConfrontoFoto({ checkins }) {
         ) : (
           <>
             <div className="grid grid-cols-2 gap-3">
-              {[["Prima", a, idA, setIdA], ["Dopo", b, idB, setIdB]].map(([titolo, c, id, setId]) => (
+              {[["Prima", a, setIdA], ["Dopo", b, setIdB]].map(([titolo, c, setId]) => (
                 <div key={titolo} className="space-y-1.5">
                   <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
                     {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
                   </select>
-                  <div className="aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
-                    {urls[c?.id] ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">Caricamento...</span>}
-                  </div>
+                  <button onClick={() => urls[c?.id] && setGrande(urls[c.id])} className="block w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
+                    {urls[c?.id]
+                      ? <img src={urls[c.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} className="w-full h-full object-cover" style={{ transform: `scale(${zoom})`, transformOrigin: `${px}% ${py}%` }} />
+                      : <span className="text-slate-300 text-xs">Caricamento...</span>}
+                  </button>
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
+                  {isAdmin ? (
+                    <div>
+                      <textarea value={note[c?.id] || ""} onChange={(e) => setNote((n) => ({ ...n, [c.id]: e.target.value }))} onBlur={() => c && salvaNota(c)} rows={3}
+                        placeholder="Nota per la cliente su questo check..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                      {salvata === c?.id && <p className="text-emerald-600 text-[11px]">Nota salvata ✓</p>}
+                    </div>
+                  ) : (c?.nota_foto_coach && (
+                    <div className="bg-sky-50 border border-sky-100 rounded-lg px-2 py-1.5">
+                      <p className="text-[10px] uppercase tracking-wide text-sky-700 font-medium">Nota di Morgana</p>
+                      <p className="text-xs text-slate-700 whitespace-pre-wrap">{c.nota_foto_coach}</p>
+                    </div>
+                  ))}
                 </div>
               ))}
+            </div>
+            <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
+              <Cursore label={`Zoom ${String(zoom).replace(".", ",")}×`} valore={zoom} set={setZoom} min={1} max={3} step={0.1} />
+              {zoom > 1 && <Cursore label="Sposta ↔" valore={px} set={setPx} min={0} max={100} step={1} />}
+              {zoom > 1 && <Cursore label="Sposta ↕" valore={py} set={setPy} min={0} max={100} step={1} />}
+              {zoom > 1 && <button onClick={() => { setZoom(1); setPx(50); setPy(40); }} className="text-[11px] text-slate-400 underline">Torna alla vista intera</button>}
+              <p className="text-[11px] text-slate-400">Lo zoom vale per entrambe le foto, così il confronto resta allineato. Tocca una foto per aprirla a schermo intero.</p>
             </div>
             {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
           </>
         )}
       </Card>
+      {grande && createPortal(
+        <div onClick={() => setGrande(null)} className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-3">
+          <img src={grande} alt="" className="max-w-full max-h-full object-contain" />
+          <button className="absolute top-4 right-4 text-white text-2xl leading-none">×</button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
 
-function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi", clientId }) {
+function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi", clientId, isAdmin = false }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
   const dati = [...checkins]
@@ -1542,7 +1593,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         </ResponsiveContainer>
       </Card>
 
-      <ConfrontoFoto checkins={checkins} />
+      <ConfrontoFoto checkins={checkins} isAdmin={isAdmin} />
 
       <HistoryTable checkins={checkins} sesso={sesso} />
 
@@ -5068,7 +5119,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta i dati di questa cliente (Excel)" />}
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
 
       {tab === "allenamento" && (
         <div className="space-y-5">
