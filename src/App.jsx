@@ -5530,15 +5530,6 @@ function CalendarioAgenda({ clients, onSelect }) {
     if (e.nota) pezzi.push(e.nota);
     eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
 
-    // Promemoria automatico 48h prima di una lezione in presenza: ricordati di scrivere alla cliente
-    if (e.tipo === "lezione" && e.stato !== "annullata" && e.stato !== "persa") {
-      const dataPromemoria = addGiorni(e.data, -2);
-      eventi.push({
-        data: dataPromemoria, ora: null, tipo: "promemoria", nome: `Scrivi a ${nomeCliente}`,
-        label: `Ricorda la lezione del ${e.data.split("-").reverse().join("/")}${e.ora ? " alle " + e.ora.slice(0, 5) : ""}`,
-        clientId: e.client_id,
-      });
-    }
   });
 
   // Promemoria di fine settimana (venerdì): chi manca ancora da contattare
@@ -5732,7 +5723,7 @@ function OggiCoach({ clients, onSelect, vai }) {
     let vivo = true;
     (async () => {
       try {
-        const { data: ev } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").gte("data", oggi).lte("data", domani).order("data").order("ora");
+        const { data: ev } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").gte("data", oggi).lte("data", addGiorni(oggi, 7)).order("data").order("ora");
         const { count: richieste } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
         const { count: checkDaEsaminare } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
         const { data: msg } = await supabase.from("messaggi").select("client_id, mittente, created_at").order("created_at", { ascending: false }).limit(1000);
@@ -5741,8 +5732,19 @@ function OggiCoach({ clients, onSelect, vai }) {
         const righe = await leggiTutto(() => supabase.from("training_entries").select("client_id, data").gte("data", addGiorni(oggi, -60)).order("id"));
         const ultimoCarico = {};
         righe.forEach((r) => { if (r.data && (!ultimoCarico[r.client_id] || r.data > ultimoCarico[r.client_id])) ultimoCarico[r.client_id] = r.data; });
-        if (vivo) setDati({ ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico });
-      } catch (e) { if (vivo) setDati({ ev: [], richieste: 0, checkDaEsaminare: 0, ultimoMsg: {}, ultimoCarico: {} }); }
+        const chk = await leggiTutto(() => supabase.from("checkins").select("client_id, data_check").order("id"));
+        const primoCheck = {};
+        chk.forEach((r) => { if (r.data_check && (!primoCheck[r.client_id] || r.data_check < primoCheck[r.client_id])) primoCheck[r.client_id] = r.data_check; });
+        const gg = await leggiTutto(() => supabase.from("training_days").select("client_id").order("id"));
+        const conGiorni = {};
+        gg.forEach((r) => { conGiorni[r.client_id] = true; });
+        const { data: sch } = await supabase.from("schede").select("client_id, stato");
+        (sch || []).forEach((r) => { if (r.stato === "finale") conGiorni[r.client_id] = true; });
+        const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").order("id"));
+        const pagato = {};
+        pag.forEach((r) => { if (r.stato === "saldato") pagato[r.client_id] = true; });
+        if (vivo) setDati({ ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico, primoCheck, conGiorni, pagato });
+      } catch (e) { if (vivo) setDati({ ev: [], richieste: 0, checkDaEsaminare: 0, ultimoMsg: {}, ultimoCarico: {}, primoCheck: {}, conGiorni: {}, pagato: {} }); }
     })();
     return () => { vivo = false; };
   }, []);
@@ -5751,30 +5753,48 @@ function OggiCoach({ clients, onSelect, vai }) {
 
   const attivi = dati.ev.filter((e) => e.stato !== "annullata" && e.stato !== "persa");
   const nomeEv = (e) => (e.tipo === "personale" ? (e.titolo || "Attività personale") : e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente");
+  const nuoveClienti = clients
+    .filter((c) => c.tipo_servizio !== "presenza" && dati.primoCheck[c.id] && !c.scheda_pdf_path && !(c.link_scheda || "").trim() && !dati.conGiorni[c.id])
+    .map((c) => ({ c, check: dati.primoCheck[c.id], scad: addGiorni(dati.primoCheck[c.id], 7), pagato: !!dati.pagato[c.id] }))
+    .sort((a, b) => a.scad.localeCompare(b.scad));
+  const vociDelGiorno = (data) => {
+    const v = [];
+    nuoveClienti.filter((n) => n.scad === data).forEach((n) => v.push({ key: `sk-${n.c.id}`, ora: null, titolo: `${n.c.nome} ${n.c.cognome}`, sub: "Ultimo giorno per consegnare la scheda", clientId: n.c.id }));
+    attivi.filter((e) => e.data === data).forEach((e) => v.push({
+      key: e.id, ora: e.ora ? e.ora.slice(0, 5) : null, titolo: nomeEv(e), clientId: e.client_id,
+      sub: `${e.tipo === "lezione" ? "Lezione 1:1" : e.tipo === "personale" ? "Personale" : "Call"}${e.luogo ? ` · ${e.luogo}` : ""}${e.stato === "richiesta" ? " · da confermare" : ""}`,
+    }));
+    clients.forEach((c) => {
+      if (c.tipo_servizio !== "presenza" && c.prossimo_check === data) v.push({ key: `ck-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Check da fare", clientId: c.id });
+      if (c.data_scadenza === data && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto") v.push({ key: `sc-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Pacchetto in scadenza", clientId: c.id });
+    });
+    return v.sort((x, y) => (x.ora || "").localeCompare(y.ora || ""));
+  };
+  const RigaVoce = ({ e }) => (
+    <button onClick={() => e.clientId && onSelect(e.clientId)} className="w-full flex items-center gap-3 text-left">
+      <span className="text-sm font-semibold text-slate-700 w-12 flex-shrink-0">{e.ora || "•"}</span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm text-slate-700 font-medium truncate">{e.titolo}</span>
+        <span className="block text-xs text-slate-500 truncate">{e.sub}</span>
+      </span>
+    </button>
+  );
   const Giorno = ({ titolo, data }) => {
-    const lista = attivi.filter((e) => e.data === data);
+    const lista = vociDelGiorno(data);
     return (
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{titolo} · {fmt(data)}</p>
         {lista.length === 0 && <p className="text-slate-400 text-sm">Nessun impegno in agenda.</p>}
-        {lista.map((e) => (
-          <button key={e.id} onClick={() => e.client_id && onSelect(e.client_id)} className="w-full flex items-center gap-3 text-left">
-            <span className="text-sm font-semibold text-slate-700 w-12 flex-shrink-0">{e.ora ? e.ora.slice(0, 5) : "—"}</span>
-            <span className="flex-1 min-w-0">
-              <span className="block text-sm text-slate-700 font-medium truncate">{nomeEv(e)}</span>
-              <span className="block text-xs text-slate-500 truncate">{e.tipo === "lezione" ? "Lezione 1:1" : e.tipo === "personale" ? "Personale" : "Call"}{e.luogo ? ` · ${e.luogo}` : ""}{e.stato === "richiesta" ? " · da confermare" : ""}</span>
-            </span>
-          </button>
-        ))}
+        {lista.map((e) => <RigaVoce key={e.key} e={e} />)}
       </Card>
     );
   };
+  const giorniSettimana = [2, 3, 4, 5, 6, 7].map((n) => addGiorni(oggi, n)).map((d) => ({ d, voci: vociDelGiorno(d) })).filter((g) => g.voci.length > 0);
+  const nomeGiorno = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "2-digit", month: "2-digit" });
 
   const msgSenzaRisposta = clients.filter((c) => dati.ultimoMsg[c.id]?.mittente === "cliente");
   const scadenze = [];
   clients.forEach((c) => {
-    if (c.tipo_servizio !== "presenza" && c.prossimo_check && c.prossimo_check <= addGiorni(oggi, 3) && c.prossimo_check >= oggi) scadenze.push({ c, testo: `Check ${c.prossimo_check === oggi ? "oggi" : "il " + fmt(c.prossimo_check)}`, ord: c.prossimo_check });
-    if (c.data_scadenza && c.stato_pacchetto !== "gratuito" && c.data_scadenza >= oggi && c.data_scadenza <= addGiorni(oggi, 7)) scadenze.push({ c, testo: `Pacchetto in scadenza ${c.data_scadenza === oggi ? "oggi" : "il " + fmt(c.data_scadenza)}`, ord: c.data_scadenza });
     if (c.stato_pacchetto === "scaduto") scadenze.push({ c, testo: "Pacchetto scaduto", ord: "0000" });
   });
   scadenze.sort((a, b) => a.ord.localeCompare(b.ord));
@@ -5800,7 +5820,38 @@ function OggiCoach({ clients, onSelect, vai }) {
   return (
     <div className="space-y-4">
       <Giorno titolo="Oggi" data={oggi} />
-      <Giorno titolo="Domani" data={domani} />
+      <Giorno titolo="In programma domani" data={domani} />
+
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">In programma questa settimana</p>
+        {giorniSettimana.length === 0 && <p className="text-slate-400 text-sm">Niente in programma nei prossimi giorni.</p>}
+        {giorniSettimana.map((g) => (
+          <div key={g.d} className="space-y-2">
+            <p className="text-xs font-semibold text-sky-700 capitalize">{nomeGiorno(g.d)}</p>
+            {g.voci.map((e) => <RigaVoce key={e.key} e={e} />)}
+          </div>
+        ))}
+      </Card>
+
+      {nuoveClienti.length > 0 && (
+        <Card className="p-4 space-y-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Nuove clienti: scheda da creare</p>
+          <p className="text-[11px] text-slate-400 pb-1">Entro 7 giorni dall'invio dei dati</p>
+          {nuoveClienti.map((n) => {
+            const g = -giorniDa(n.scad);
+            const testo = g > 0 ? `tra ${g} ${g === 1 ? "giorno" : "giorni"}` : g === 0 ? "scade oggi" : `scaduta da ${-g} ${g === -1 ? "giorno" : "giorni"}`;
+            return (
+              <button key={n.c.id} onClick={() => onSelect(n.c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-slate-700 font-medium truncate">{n.c.nome} {n.c.cognome}</span>
+                  <span className={`text-xs font-semibold flex-shrink-0 ${g < 0 ? "text-rose-600" : g <= 2 ? "text-amber-600" : "text-slate-500"}`}>{testo}</span>
+                </span>
+                <span className="block text-xs text-slate-500">Check inviato il {fmt(n.check)} · scheda entro il {fmt(n.scad)} · {n.pagato ? "pagamento ricevuto ✓" : "pagamento da verificare"}</span>
+              </button>
+            );
+          })}
+        </Card>
+      )}
 
       <Card className="p-4 divide-y divide-slate-100">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-2">Da fare</p>
@@ -5811,7 +5862,7 @@ function OggiCoach({ clients, onSelect, vai }) {
 
       {scadenze.length > 0 && (
         <Card className="p-4 space-y-1">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Scadenze in arrivo</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Pacchetti scaduti</p>
           {scadenze.map((s, i) => (
             <button key={i} onClick={() => onSelect(s.c.id)} className="w-full flex items-center justify-between py-1.5 text-left">
               <span className="text-sm text-slate-700 font-medium">{s.c.nome} {s.c.cognome}</span>
