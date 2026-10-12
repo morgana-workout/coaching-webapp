@@ -151,7 +151,7 @@ function Login({ erroreLink }) {
     setErrore("");
     setCaricando(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setErrore("Email o password non corrette.");
+    if (error) setErrore("Ops, email o password non corrette 🫶🏻 Riprova pure!");
     setCaricando(false);
   };
 
@@ -218,14 +218,14 @@ function Registrazione({ onTornaAlLogin }) {
   const registrati = async (e) => {
     e.preventDefault();
     setErrore("");
-    if (!nome.trim()) { setErrore("Inserisci il tuo nome."); return; }
-    if (!dataNascita) { setErrore("Inserisci la tua data di nascita."); return; }
-    if (!citta.trim()) { setErrore("Inserisci la tua città di domicilio."); return; }
-    if (!altezza || !peso) { setErrore("Inserisci altezza e peso."); return; }
-    if (!livelloAttivita) { setErrore("Seleziona quanti passi fai in media al giorno."); return; }
-    if (!tipoLavoro.trim()) { setErrore("Inserisci il tuo tipo di lavoro."); return; }
-    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
-    if (password !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla."); return; }
+    if (!nome.trim()) { setErrore("Come ti chiami? Scrivimi il tuo nome ✨"); return; }
+    if (!dataNascita) { setErrore("Mi serve la tua data di nascita 🫶🏻"); return; }
+    if (!citta.trim()) { setErrore("Dove vivi? Scrivimi la tua città ✨"); return; }
+    if (!altezza || !peso) { setErrore("Mi servono altezza e peso per partire 💪🏻"); return; }
+    if (!livelloAttivita) { setErrore("Dimmi quanti passi fai più o meno al giorno 🚶🏻‍♀️"); return; }
+    if (!tipoLavoro.trim()) { setErrore("Che lavoro fai? Scrivimelo qui ✨"); return; }
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (password !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
     setCaricando(true);
     // Creazione account + scheda cliente in un solo passaggio lato server (edge function con
     // permessi da admin): niente email di conferma da aspettare, l'account è subito utilizzabile
@@ -602,7 +602,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
                       {rimaste > 0 ? `${rimaste} ${rimaste === 1 ? "lezione rimasta" : "lezioni rimaste"}` : "Pacchetto completato"}
                       {prossima ? ` · prossima il ${prossima.data.split("-").reverse().slice(0, 2).join("/")}${prossima.ora ? ` alle ${prossima.ora.slice(0, 5)}` : ""}` : ""}
                     </p>
-                    {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto: scrivimi in chat quando vuoi rinnovarlo." : "Il pacchetto sta per finire: scrivimi in chat per rinnovarlo e non interrompere le lezioni."}</p>}
+                    {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
                   </>
                 )}
               </>
@@ -656,7 +656,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
           <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
         )}
         {inviata && (
-          <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
+          <p className="text-emerald-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
         )}
       </div>
 
@@ -716,16 +716,16 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
     setLavoro(true); setErrore("");
     try {
       const perm = await Notification.requestPermission();
-      if (perm !== "granted") { setErrore("Le notifiche sono bloccate: puoi riattivarle dalle impostazioni del telefono."); setLavoro(false); return; }
+      if (perm !== "granted") { setErrore("Le notifiche sono bloccate 🫶🏻 Puoi riattivarle dalle impostazioni del telefono, così non ti perdi nulla!"); setLavoro(false); return; }
       const reg = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
       let sub = await reg.pushManager.getSubscription();
       if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chiaveVapidInBytes(VAPID_PUBLIC_KEY) });
       await salva(sub);
       setAttive(true);
-      reg.showNotification("Notifiche attivate ✨", { body: "Da ora ti avviso direttamente sul telefono.", icon: "/apple-touch-icon.png" });
+      reg.showNotification("Notifiche attivate ✨", { body: "Da ora ti avviso direttamente sul telefono 🫶🏻", icon: "/apple-touch-icon.png" });
     } catch (e) {
-      setErrore("Non sono riuscita ad attivarle: " + (e.message || "riprova"));
+      setErrore("Ops, non sono riuscita ad attivarle 🫶🏻 " + (e.message || "riprova"));
     }
     setLavoro(false);
   };
@@ -824,7 +824,7 @@ function ClientCheckin({ client, onInviato }) {
 
   const invia = async () => {
     if (!files.frontale || !files.laterale || !files.posteriore || !files.extra) {
-      setErrore("Le 4 foto (frontale, laterale destra, laterale sinistra, posteriore) sono obbligatorie.");
+      setErrore("Mi servono tutte e 4 le foto (frontale, laterale destra, laterale sinistra, posteriore) 📸 Poi ci siamo!");
       return;
     }
     setInviando(true);
@@ -848,13 +848,13 @@ function ClientCheckin({ client, onInviato }) {
       payload.foto_extra_path = await caricaFotoStorage(files.extra, client.id, dataCheck, "extra");
     } catch (e) {
       setInviando(false);
-      setErrore("Errore nel caricamento delle foto: " + e.message);
+      setErrore("Ops, le foto non si sono caricate 🫶🏻 Riprova. " + e.message);
       return;
     }
 
     const { data: inserito, error } = await supabase.from("checkins").insert(payload).select().single();
     setInviando(false);
-    if (error) { setErrore("Non sono riuscita a inviare il check: " + error.message); return; }
+    if (error) { setErrore("Ops, il check non è partito 🫶🏻 Riprova tra poco. " + error.message); return; }
 
     // Aggiorna in automatico il prossimo check a +4 settimane (tramite funzione sicura)
     supabase.rpc("aggiorna_prossimo_check", { check_date: dataCheck }).then(() => {});
@@ -877,8 +877,8 @@ function ClientCheckin({ client, onInviato }) {
     return (
       <div className="px-5 pt-16 flex flex-col items-center text-center">
         <CheckCircle2 className="text-emerald-500 mb-4" size={48} />
-        <h2 className="text-lg font-semibold text-slate-800">Check inviato</h2>
-        <p className="text-slate-500 text-sm mt-2">Morgana riceverà i tuoi dati e li revisionerà a breve.</p>
+        <h2 className="text-lg font-semibold text-slate-800">Check inviato, grazie! 🫶🏻</h2>
+        <p className="text-slate-500 text-sm mt-2">Guardo i tuoi dati con calma e ti scrivo presto ✨💪🏻</p>
       </div>
     );
   }
@@ -1400,7 +1400,7 @@ function ProgressiCarichi({ clientId }) {
       {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
         <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
           <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">I tuoi traguardi</p>
-          {traguardi.streak >= 2 && <p className="text-sm text-slate-700">🔥 <span className="font-semibold">{traguardi.streak} settimane di fila</span> con almeno un allenamento registrato. Continua così!</p>}
+          {traguardi.streak >= 2 && <p className="text-sm text-slate-700">🔥 <span className="font-semibold">{traguardi.streak} settimane di fila</span> con almeno un allenamento registrato. Che costanza, sono fiera di te! 💪🏻✨</p>}
           {esercizi.filter((e) => e.recordRecente).map((e) => (
             <p key={e.nome} className="text-sm text-slate-700">🏆 Nuovo record: <span className="font-semibold">{e.nome}</span> {fmt(e.maxPrec)} → {fmt(e.ultimo)} kg</p>
           ))}
@@ -3371,8 +3371,8 @@ function InvitaClienteForm({ client, onInvitato }) {
   const impostaPassword = async (e) => {
     e.preventDefault();
     if (!email) { setErrore("Inserisci un'email."); return; }
-    if (nuovaPassword.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
-    if (nuovaPassword !== confermaPassword) { setErrore("Le due password non coincidono."); return; }
+    if (nuovaPassword.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (nuovaPassword !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
     setGenerando("imposta");
     setErrore("");
     setLink("");
@@ -3451,8 +3451,8 @@ function CambiaPasswordPropria() {
     e.preventDefault();
     setErrore("");
     setFatto(false);
-    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
-    if (password !== conferma) { setErrore("Le due password non coincidono."); return; }
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (password !== conferma) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
     setSalvando(true);
     const { error } = await supabase.auth.updateUser({ password });
     setSalvando(false);
@@ -5924,13 +5924,13 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
 }
 
 const MESSAGGI_PRONTI = [
-  { titolo: "Check ricevuto", testo: "Check ricevuto! Esamino i dati e ti rispondo ✨" },
-  { titolo: "Come è andata la settimana?", testo: "Ciao {nome}! Com'è andata questa settimana? Allenamenti, alimentazione, energia, sonno: raccontami tutto, così aggiustiamo il tiro dove serve. ✨" },
-  { titolo: "Promemoria check", testo: "Ciao {nome}, ti ricordo di inviarmi il check (misure e foto): mi serve per aggiornare al meglio il tuo percorso. Grazie! ✨" },
-  { titolo: "Promemoria pagamento", testo: "Ciao {nome}! Il tuo pacchetto sta per scadere: quando riesci procedi con il saldo così proseguiamo senza interruzioni. Grazie mille! ✨" },
-  { titolo: "Non vedo carichi da un po'", testo: "Ciao {nome}, non vedo carichi registrati da qualche giorno. Tutto ok? Se ti serve una mano a ripartire scrivimi pure. ✨" },
-  { titolo: "Complimenti", testo: "Brava {nome}! Sto vedendo i tuoi progressi e sono davvero belli. Continua così! ✨" },
-  { titolo: "Rinnovo pacchetto lezioni", testo: "Ciao {nome}, il tuo pacchetto lezioni sta per finire. Vuoi rinnovarlo? Dimmi pure e ti blocco le prossime date. ✨" },
+  { titolo: "Check ricevuto", testo: "Check ricevuto, grazie {nome}! 🫶🏻 Lo guardo con calma e ti scrivo presto ✨" },
+  { titolo: "Come è andata la settimana?", testo: "Ciao {nome}! 🫶🏻 Com'è andata questa settimana? Allenamenti, alimentazione, energia, sonno: raccontami tutto, così aggiustiamo il tiro dove serve ✨💪🏻" },
+  { titolo: "Promemoria check", testo: "Ciao {nome}! 🫶🏻 Ti ricordo il check (misure e foto): mi serve per aggiornare al meglio il tuo percorso. Grazie mille! ✨" },
+  { titolo: "Promemoria pagamento", testo: "Ciao {nome}! 🫶🏻 Il tuo pacchetto sta per scadere: quando riesci procedi con il saldo così proseguiamo senza interruzioni. Grazie mille, sei super! ✨" },
+  { titolo: "Non vedo carichi da un po'", testo: "Ciao {nome}! 🫶🏻 Non vedo carichi registrati da qualche giorno: va tutto bene? Se ti serve una mano a ripartire scrivimi pure, ci sono io 💪🏻✨" },
+  { titolo: "Complimenti", testo: "Brava {nome}! 🔥 Sto vedendo i tuoi progressi e sono davvero belli, sono fiera di te! Continua così 💪🏻✨" },
+  { titolo: "Rinnovo pacchetto lezioni", testo: "Ciao {nome}! 🫶🏻 Il tuo pacchetto lezioni sta per finire: ti va di rinnovarlo? Dimmi pure e ti blocco le prossime date 🧘🏻‍♀️✨" },
 ];
 
 function SelettoreMessaggiPronti({ nome, onScegli }) {
@@ -6308,13 +6308,13 @@ function promemoriaCliente(c, oggi = formatDataLocale(new Date())) {
   if (c.data_scadenza && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto" && (c.data_scadenza === domani || c.data_scadenza === oggi)) {
     voci.push({
       marker: "promemoria_pacchetto", data: c.data_scadenza,
-      messaggio: `Il tuo pacchetto è in scadenza il ${fmt(c.data_scadenza)}. Per proseguire serenamente il tuo percorso senza interruzioni, ti chiedo gentilmente di procedere al saldo. Grazie per la collaborazione!`,
+      messaggio: `Ciao! 🫶🏻 Il tuo pacchetto scade il ${fmt(c.data_scadenza)}. Quando riesci, procedi pure con il saldo così proseguiamo il percorso senza interruzioni. Grazie mille, sei super! ✨`,
     });
   }
   if (c.tipo_servizio !== "presenza" && c.prossimo_check && (c.prossimo_check === domani || c.prossimo_check === oggi)) {
     voci.push({
       marker: "promemoria_check", data: c.prossimo_check,
-      messaggio: `Il tuo prossimo check è previsto il ${fmt(c.prossimo_check)}. Ti ricordo di inviarmi misure e foto: mi servono per aggiornare al meglio il tuo percorso. Grazie!`,
+      messaggio: `Ciao! 🫶🏻 Il tuo prossimo check è il ${fmt(c.prossimo_check)}. Ricordati di mandarmi misure e foto: mi servono per aggiornare al meglio il tuo percorso 💪🏻 Grazie! ✨`,
     });
   }
   return voci;
@@ -8325,8 +8325,8 @@ function ImpostaPassword({ onFatto }) {
   const salva = async (e) => {
     e.preventDefault();
     setErrore("");
-    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
-    if (password !== conferma) { setErrore("Le due password non coincidono."); return; }
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (password !== conferma) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
     setSalvando(true);
     const { error } = await supabase.auth.updateUser({ password });
     setSalvando(false);
