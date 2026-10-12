@@ -6565,13 +6565,16 @@ function StoricoNotifiche({ clients }) {
   );
 }
 
-function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged }) {
+function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
+  const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
+    const { data: au } = await supabase.from("notifiche").select("*, clients(nome, cognome)").eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%").order("created_at", { ascending: false });
+    setAutoNuove(au || []);
     const { data: r } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("data");
     setRichieste(r || []);
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
@@ -6590,10 +6593,38 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
     carica();
   };
 
+  const segnaAutoViste = async (ids) => {
+    await supabase.from("notifiche").update({ coach_vista: true }).in("id", ids);
+    await carica();
+    onAggiorna?.();
+  };
+  const titoloAuto = (m) => (m || "").startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : (m || "").startsWith("promemoria_check") ? "Promemoria: check in arrivo" : (m || "").startsWith("auto_check") ? "Check ricevuto ✨" : (m || "").startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : (m || "").startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : (m || "").startsWith("auto_traguardo_streak") ? "Costanza 🔥" : "Messaggio automatico";
+
   if (caricando) return <Spinner />;
 
   return (
     <div className="space-y-5">
+      {autoNuove.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2 px-1">
+            <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">Messaggi automatici inviati ({autoNuove.length})</p>
+            <button onClick={() => segnaAutoViste(autoNuove.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button>
+          </div>
+          <div className="space-y-2">
+            {autoNuove.map((n) => (
+              <Card key={n.id} className="p-3 space-y-1 bg-sky-50/60 border-sky-100">
+                <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
+                <p className="text-slate-500 text-xs font-medium">{titoloAuto(n.proposta_luogo)}</p>
+                <p className="text-slate-600 text-xs">{n.messaggio}</p>
+                <div className="flex items-center justify-between pt-1">
+                  <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+                  <button onClick={() => segnaAutoViste([n.id])} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
       {promemoriaDomani.length > 0 && (
         <div>
           <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Promemoria di domani ({promemoriaDomani.length})</p>
@@ -8083,8 +8114,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
     const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+    const { count: a } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%");
     setChatNonLette(m || 0);
-    setNonLetteCoach((r || 0) + (c || 0));
+    setNonLetteCoach((r || 0) + (c || 0) + (a || 0));
   };
   const caricaCandidatureNuove = async () => {
     const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
@@ -8195,7 +8227,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       {vista === "esercizi" && <LibreriaEserciziCoach />}
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
-      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} onAggiorna={caricaNonLetteCoach} />}
       {vista === "statistiche" && <StatisticheCoach clients={clientiAttivi} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
