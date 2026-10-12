@@ -8098,7 +8098,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-4 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
         <button onClick={() => setVista("oggi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "oggi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Oggi</button>
         <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
         <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
@@ -8122,8 +8122,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
           )}
         </button>
         <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
+        <button onClick={() => setVista("esercizi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Esercizi</button>
       </div>
-      <button onClick={() => setVista("esercizi")} className={`w-full py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Libreria esercizi e video</button>
 
       {vista === "esercizi" && <LibreriaEserciziCoach />}
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
