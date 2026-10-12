@@ -8127,6 +8127,14 @@ export default function App() {
   const [devImpostarePassword, setDevImpostarePassword] = useState(false);
   const [erroreLink, setErroreLink] = useState("");
 
+  // Toglie il pallino rosso dall'icona quando apri l'app
+  useEffect(() => {
+    const pulisci = () => { try { if (document.visibilityState === "visible" && navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) { /* ignora */ } };
+    pulisci();
+    document.addEventListener("visibilitychange", pulisci);
+    return () => document.removeEventListener("visibilitychange", pulisci);
+  }, []);
+
   // Gestiamo noi stessi il link ricevuto via email (invito o reset password),
   // senza affidarci al rilevamento automatico della libreria (che può perdere il segnale).
   useEffect(() => {
