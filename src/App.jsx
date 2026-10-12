@@ -1881,7 +1881,73 @@ function EsercizioNome({ id, nome, onSaved }) {
   );
 }
 
-function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
+// Libreria esercizi con video (tabella esercizi_video): trova l'esercizio che corrisponde al nome scritto in scheda
+function trovaEsercizioVideo(nome, libreria) {
+  const n = (nome || "").toLowerCase();
+  let best = null, bestLen = 0;
+  (libreria || []).forEach((e) => {
+    (e.parole_chiave || "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean).forEach((k) => {
+      if (n.includes(k) && k.length > bestLen) { best = e; bestLen = k.length; }
+    });
+  });
+  return best;
+}
+
+function videoIdYoutube(url) {
+  const m = (url || "").match(/(?:shorts\/|youtu\.be\/|[?&]v=|embed\/)([A-Za-z0-9_-]{6,})/);
+  return m ? m[1] : null;
+}
+
+function EsercizioInfoModal({ es, onClose }) {
+  const video = (es.video_url || "").split("\n").map((r) => r.trim()).filter(Boolean).map((r, i, arr) => {
+    const k = r.indexOf("|");
+    return k > -1 ? { label: r.slice(0, k), url: r.slice(k + 1) } : { label: arr.length > 1 ? `Video ${i + 1}` : "Video", url: r };
+  });
+  const [attivo, setAttivo] = useState(0);
+  const corrente = video[attivo];
+  const id = corrente ? videoIdYoutube(corrente.url) : null;
+  const Blocco = ({ titolo, testo }) => testo ? (
+    <div className="bg-slate-50 rounded-xl px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">{titolo}</p>
+      <p className="text-sm text-slate-700 leading-relaxed">{testo}</p>
+    </div>
+  ) : null;
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold text-slate-800 leading-snug">{es.nome}</p>
+            <p className="text-xs text-slate-400">{es.gruppo}{es.attrezzo ? ` · ${es.attrezzo}` : ""}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 p-1 flex-shrink-0"><X size={20} /></button>
+        </div>
+        {video.length > 1 && (
+          <div className="flex gap-2">
+            {video.map((v, i) => (
+              <button key={i} onClick={() => setAttivo(i)} className={`px-3 py-1 rounded-full text-xs font-medium ${i === attivo ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{v.label}</button>
+            ))}
+          </div>
+        )}
+        {id ? (
+          <div className="mx-auto bg-black rounded-2xl overflow-hidden" style={{ aspectRatio: "9 / 16", maxHeight: "55vh" }}>
+            <iframe key={id} title={es.nome} src={`https://www.youtube-nocookie.com/embed/${id}?playsinline=1&rel=0`} className="w-full h-full" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowFullScreen />
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 text-center py-2">Il video di questo esercizio arriva presto ✨</p>
+        )}
+        {corrente && <a href={corrente.url} target="_blank" rel="noreferrer" className="block text-center text-sky-600 text-xs font-medium">Apri su YouTube</a>}
+        <Blocco titolo="Posizionamento" testo={es.posizionamento} />
+        <Blocco titolo="Movimento e ROM" testo={es.movimento} />
+        <Blocco titolo="Errori comuni" testo={es.errori} />
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo = [] }) {
+  const [infoEs, setInfoEs] = useState(null);
   const [esercizi, setEsercizi] = useState([]);
   const [entries, setEntries] = useState([]);
   const [nuovoEsercizio, setNuovoEsercizio] = useState("");
@@ -2009,6 +2075,9 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
                       </p>
                     )}
                     {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
+                    {(() => { const info = trovaEsercizioVideo(es.nome, libreriaVideo); return info ? (
+                      <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>
+                    ) : null; })()}
                   </td>
                   {date.map((d) => {
                     const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
@@ -2031,6 +2100,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
         <button onClick={aggiungiEsercizio} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
       </div>
       <button onClick={aggiungiData} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">+ Nuova data di allenamento</button>
+      {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
     </div>
   );
 }
@@ -2077,6 +2147,21 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     setCaricando(false);
   };
   useEffect(() => { carica(); }, [clientId]);
+
+  // Libreria video: la vedono il coach e le clienti online o ibride
+  const [libreriaVideo, setLibreriaVideo] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!isAdmin) {
+          const { data: c } = await supabase.from("clients").select("tipo_servizio").eq("id", clientId).maybeSingle();
+          if (!c || (c.tipo_servizio !== "online" && c.tipo_servizio !== "ibrido")) return;
+        }
+        const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
+        setLibreriaVideo(data || []);
+      } catch (e) { /* senza libreria l'app funziona come prima */ }
+    })();
+  }, [clientId, isAdmin]);
 
   const eliminaGiorno = async (giornoId) => {
     if (!confirm("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
@@ -2260,7 +2345,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       )}
 
       {giornoAttivo && (
-        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} />
+        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} />
       )}
 
       {archiviati.length > 0 && (() => {
@@ -2288,7 +2373,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                       ))}
                     </div>
                     {giornoArchAttivo && gruppi[et].find((g) => g.id === giornoArchAttivo) && (
-                      <GiornoAllenamento key={giornoArchAttivo} clientId={clientId} giorno={gruppi[et].find((g) => g.id === giornoArchAttivo)} onGiornoRinominato={carica} />
+                      <GiornoAllenamento key={giornoArchAttivo} clientId={clientId} giorno={gruppi[et].find((g) => g.id === giornoArchAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} />
                     )}
                   </div>
                 )}
