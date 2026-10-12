@@ -8039,7 +8039,7 @@ async function esportaBackupCompleto(setInCorso) {
   setInCorso(false);
 }
 
-function AdminApp() {
+function AdminApp({ onVistaCliente }) {
   const [clients, setClients] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
@@ -8063,7 +8063,10 @@ function AdminApp() {
     <div className="min-h-screen bg-slate-50">
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
-        <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
+        <div className="flex items-center gap-4">
+          {onVistaCliente && <button onClick={onVistaCliente} className="text-sky-600 text-xs font-medium">Vista cliente</button>}
+          <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
+        </div>
       </div>
       {selectedId ? (
         <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
@@ -8126,6 +8129,9 @@ export default function App() {
   const [ruolo, setRuolo] = useState(null); // "admin" | "client" | null
   const [devImpostarePassword, setDevImpostarePassword] = useState(false);
   const [erroreLink, setErroreLink] = useState("");
+  // Il coach può guardare l'app come cliente (profilo Morgana) senza uscire; ricordo la scelta finché la scheda resta aperta
+  const [vistaCliente, setVistaCliente] = useState(() => { try { return sessionStorage.getItem("vistaCliente") === "1"; } catch (e) { return false; } });
+  const impostaVistaCliente = (v) => { setVistaCliente(v); try { sessionStorage.setItem("vistaCliente", v ? "1" : "0"); } catch (e) { /* ignora */ } };
 
   // Toglie il pallino rosso dall'icona quando apri l'app
   useEffect(() => {
@@ -8184,5 +8190,16 @@ export default function App() {
   if (devImpostarePassword) return <ImpostaPassword onFatto={() => setDevImpostarePassword(false)} />;
   if (ruolo === null) return <Spinner />;
 
-  return ruolo === "admin" ? <AdminApp /> : <ClientApp session={session} />;
+  if (ruolo === "admin") {
+    if (vistaCliente) {
+      return (
+        <>
+          <ClientApp session={session} />
+          <button onClick={() => impostaVistaCliente(false)} className="fixed bottom-24 right-3 z-50 bg-slate-800 text-white text-xs font-medium rounded-full px-4 py-2 shadow-lg">← Torna a Coach</button>
+        </>
+      );
+    }
+    return <AdminApp onVistaCliente={() => impostaVistaCliente(true)} />;
+  }
+  return <ClientApp session={session} />;
 }
