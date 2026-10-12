@@ -51,10 +51,12 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
   const [date, setDate] = useState(todayStr());
 
   const carica = async () => {
-    const [{ data: fd }, { data: vc }, { data: cl }] = await Promise.all([
-      supabase.from("kcal_foods").select("*").eq("client_id", clientId).order("nome"),
+    // libreria_con: eventuale persona con cui condivido gli alimenti (es. Morgana e Giacomo)
+    const { data: cl } = await supabase.from("clients").select("obiettivo_kcal, libreria_con").eq("id", clientId).single();
+    const idLibrerie = cl?.libreria_con ? [clientId, cl.libreria_con] : [clientId];
+    const [{ data: fd }, { data: vc }] = await Promise.all([
+      supabase.from("kcal_foods").select("*").in("client_id", idLibrerie).order("nome"),
       supabase.from("kcal_voci").select("*").eq("client_id", clientId).order("data"),
-      supabase.from("clients").select("obiettivo_kcal").eq("id", clientId).single(),
     ]);
     setFoods(fd || []);
     setVoci(vc || []);
@@ -104,8 +106,57 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
 /* ------------------------------------------------------------------ */
 /* Diario del giorno                                                   */
 /* ------------------------------------------------------------------ */
+function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto }) {
+  const val = (x) => (x == null ? "" : String(x));
+  const [kcal, setKcal] = useState(val(esistente?.kcal));
+  const [p, setP] = useState(val(esistente?.proteine));
+  const [c, setC] = useState(val(esistente?.carboidrati));
+  const [g, setG] = useState(val(esistente?.grassi));
+  const [salvando, setSalvando] = useState(false);
+  const n = (x) => (x === "" || isNaN(Number(x)) ? null : Number(x));
+  const salva = async () => {
+    if (n(kcal) == null) return;
+    setSalvando(true);
+    const riga = { client_id: clientId, data: date, pasto: "totale", food_id: null, nome: "Totali del giorno", marca: null, unit: "pz", uname: "giorno", quantita: 1, kcal: n(kcal), proteine: n(p), carboidrati: n(c), grassi: n(g) };
+    if (esistente?.id) await supabase.from("kcal_voci").update(riga).eq("id", esistente.id);
+    else await supabase.from("kcal_voci").insert({ ...riga, creato_da: isAdmin ? "coach" : "cliente" });
+    setSalvando(false);
+    onFatto();
+  };
+  const elimina = async () => {
+    if (!esistente?.id) return;
+    await supabase.from("kcal_voci").delete().eq("id", esistente.id);
+    onFatto();
+  };
+  const campo = (label, v, set) => (
+    <div>
+      <label className="text-xs text-slate-500 block mb-1">{label}</label>
+      <input type="number" inputMode="decimal" min="0" value={v} onChange={(e) => set(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+    </div>
+  );
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Totali del giorno</p>
+      <p className="text-xs text-slate-500">Se hai calcolato tutto con un'altra app, scrivi qui i totali di oggi.</p>
+      <div className="grid grid-cols-2 gap-3">
+        {campo("Calorie (kcal)", kcal, setKcal)}
+        {campo("Proteine (g)", p, setP)}
+        {campo("Carboidrati (g)", c, setC)}
+        {campo("Grassi (g)", g, setG)}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando || n(kcal) == null} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-40">{salvando ? "Salvo..." : "Salva totali"}</button>
+        <button onClick={onChiudi} className="px-4 text-sm text-slate-500 border border-slate-200 rounded-xl">Annulla</button>
+      </div>
+      {esistente?.id && <button onClick={elimina} className="text-xs text-rose-500 underline">Elimina i totali di questo giorno</button>}
+    </Card>
+  );
+}
+
 function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onObiettivoCambiato, onCambiato }) {
   const [sheet, setSheet] = useState(null); // { meal } | { meal, food, amt, entryId }
+  const [mostraTotali, setMostraTotali] = useState(false);
+  const totaleManuale = vociGiorno.find((v) => v.pasto === "totale");
   const [editObiettivo, setEditObiettivo] = useState(false);
 
   const totaleKcal = vociGiorno.reduce((a, v) => a + Number(v.kcal), 0);
@@ -168,6 +219,17 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
           </form>
         )}
       </Card>
+
+      {mostraTotali ? (
+        <TotaliGiorno clientId={clientId} isAdmin={isAdmin} date={date} esistente={totaleManuale} onChiudi={() => setMostraTotali(false)} onFatto={() => { setMostraTotali(false); onCambiato(); }} />
+      ) : totaleManuale ? (
+        <button onClick={() => setMostraTotali(true)} className="w-full flex items-center justify-between text-left bg-sky-50 border border-sky-100 rounded-xl px-4 py-3">
+          <span className="text-sm text-slate-700 font-medium">Totali inseriti a mano</span>
+          <span className="text-xs text-slate-500">{Math.round(totaleManuale.kcal)} kcal · P {num(totaleManuale.proteine ?? 0)} · C {num(totaleManuale.carboidrati ?? 0)} · G {num(totaleManuale.grassi ?? 0)} · Modifica</span>
+        </button>
+      ) : (
+        <button onClick={() => setMostraTotali(true)} className="w-full text-sky-600 text-sm font-medium border border-dashed border-sky-200 rounded-xl py-2.5">Inserisci solo i totali del giorno</button>
+      )}
 
       <div className="space-y-4">
         {MEALS.map(([key, nome]) => {
