@@ -1946,6 +1946,151 @@ function EsercizioInfoModal({ es, onClose }) {
   );
 }
 
+function CampoEs({ edit, setEdit, label, k, righe = 1, hint }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">{label}</p>
+      {righe > 1
+        ? <textarea rows={righe} value={edit[k] || ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+        : <input value={edit[k] || ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />}
+      {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+// Coach: modifica la libreria esercizi con video + richieste delle clienti
+function LibreriaEserciziCoach() {
+  const [lista, setLista] = useState([]);
+  const [richieste, setRichieste] = useState([]);
+  const [cerca, setCerca] = useState("");
+  const [edit, setEdit] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const carica = async () => {
+    const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
+    setLista(data || []);
+    const { data: r } = await supabase.from("esercizi_richieste").select("*, clients(nome,cognome)").order("created_at", { ascending: false });
+    setRichieste(r || []);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const nuovo = (nome = "") => setEdit({ nome, gruppo: "", attrezzo: "", posizionamento: "", movimento: "", errori: "", video_url: "", parole_chiave: nome.toLowerCase() });
+
+  const salva = async () => {
+    if (!edit.nome.trim()) { setErrore("Scrivi il nome dell'esercizio."); return; }
+    setSalvando(true); setErrore("");
+    const campi = {
+      nome: edit.nome.trim(), gruppo: edit.gruppo || null, attrezzo: edit.attrezzo || null,
+      posizionamento: edit.posizionamento || null, movimento: edit.movimento || null, errori: edit.errori || null,
+      video_url: edit.video_url || null, parole_chiave: edit.parole_chiave || edit.nome.toLowerCase(),
+    };
+    const { error } = edit.id
+      ? await supabase.from("esercizi_video").update(campi).eq("id", edit.id)
+      : await supabase.from("esercizi_video").insert({ ...campi, ordine: (lista.reduce((m, e) => Math.max(m, e.ordine || 0), 0)) + 1 });
+    setSalvando(false);
+    if (error) { setErrore("Non sono riuscita a salvare: " + error.message); return; }
+    setEdit(null); carica();
+  };
+
+  const elimina = async () => {
+    if (!confirm(`Eliminare "${edit.nome}" dalla libreria? Non si può annullare.`)) return;
+    await supabase.from("esercizi_video").delete().eq("id", edit.id);
+    setEdit(null); carica();
+  };
+
+  const segnaFatta = async (id) => { await supabase.from("esercizi_richieste").update({ stato: "fatta" }).eq("id", id); carica(); };
+  const eliminaRichiesta = async (id) => { await supabase.from("esercizi_richieste").delete().eq("id", id); carica(); };
+
+  const q = cerca.trim().toLowerCase();
+  const filtrati = lista.filter((e) => !q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""}`.toLowerCase().includes(q));
+  const nuove = richieste.filter((r) => r.stato === "nuova");
+
+  if (edit) {
+    return (
+      <div className="space-y-3">
+        <button onClick={() => { setEdit(null); setErrore(""); }} className="text-sm text-slate-500 flex items-center gap-1"><ArrowLeft size={16} /> Torna alla libreria</button>
+        <Card className="p-4 space-y-3">
+          <p className="font-semibold text-slate-800">{edit.id ? "Modifica esercizio" : "Nuovo esercizio"}</p>
+          <CampoEs edit={edit} setEdit={setEdit} label="Nome" k="nome" />
+          <div className="grid grid-cols-2 gap-2">
+            <CampoEs edit={edit} setEdit={setEdit} label="Gruppo muscolare" k="gruppo" />
+            <CampoEs edit={edit} setEdit={setEdit} label="Attrezzo" k="attrezzo" />
+          </div>
+          <CampoEs edit={edit} setEdit={setEdit} label="Link video YouTube" k="video_url" righe={3} hint="Un link per riga. Se ne metti più di uno puoi dare un nome: Frontale|https://youtube.com/shorts/..." />
+          <CampoEs edit={edit} setEdit={setEdit} label="Posizionamento" k="posizionamento" righe={4} />
+          <CampoEs edit={edit} setEdit={setEdit} label="Movimento e ROM" k="movimento" righe={4} />
+          <CampoEs edit={edit} setEdit={setEdit} label="Errori comuni" k="errori" righe={4} />
+          <CampoEs edit={edit} setEdit={setEdit} label="Parole chiave" k="parole_chiave" righe={2} hint="Separate da virgola. Servono a collegare l'esercizio al nome scritto nella scheda della cliente." />
+          {errore && <p className="text-rose-600 text-sm">{errore}</p>}
+          <div className="flex gap-2">
+            <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-3 text-sm font-medium disabled:opacity-50">{salvando ? "Salvo..." : "Salva"}</button>
+            {edit.id && <button onClick={elimina} className="px-4 rounded-xl border border-rose-200 text-rose-600 text-sm">Elimina</button>}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {nuove.length > 0 && (
+        <Card className="p-4 space-y-2 border-amber-200 bg-amber-50">
+          <p className="text-sm font-semibold text-amber-800">Video richiesti dalle clienti ({nuove.length})</p>
+          {nuove.map((r) => (
+            <div key={r.id} className="bg-white rounded-xl px-3 py-2 text-sm">
+              <p className="text-slate-800">{r.testo}</p>
+              <p className="text-[11px] text-slate-400">{r.clients ? `${r.clients.nome} ${r.clients.cognome || ""}` : ""} · {new Date(r.created_at).toLocaleDateString("it-IT")}</p>
+              <div className="flex gap-3 mt-1">
+                <button onClick={() => nuovo(r.testo)} className="text-xs text-sky-600 font-medium">Aggiungi alla libreria</button>
+                <button onClick={() => segnaFatta(r.id)} className="text-xs text-emerald-600 font-medium">Fatto</button>
+                <button onClick={() => eliminaRichiesta(r.id)} className="text-xs text-slate-400">Elimina</button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+      <div className="flex gap-2">
+        <input value={cerca} onChange={(e) => setCerca(e.target.value)} placeholder="Cerca esercizio..." className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
+        <button onClick={() => nuovo()} className="bg-slate-800 text-white rounded-xl px-4 text-sm font-medium flex items-center gap-1"><Plus size={16} /> Nuovo</button>
+      </div>
+      <p className="text-xs text-slate-400">{lista.length} esercizi · {lista.filter((e) => e.video_url).length} con video</p>
+      {filtrati.map((e) => (
+        <button key={e.id} onClick={() => setEdit({ ...e })} className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium text-slate-800">{e.nome}</p>
+            <p className="text-xs text-slate-400">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
+          </div>
+          <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : "senza video"}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Cliente (solo test): richiede il video di un esercizio nuovo
+const CLIENT_TEST_RICHIESTE = "85c9c307-b49f-4bc6-b50e-a89fb8e539a6";
+function RichiediVideoEsercizio({ clientId }) {
+  const [testo, setTesto] = useState("");
+  const [msg, setMsg] = useState("");
+  if (clientId !== CLIENT_TEST_RICHIESTE) return null;
+  const invia = async () => {
+    if (!testo.trim()) return;
+    const { error } = await supabase.from("esercizi_richieste").insert({ client_id: clientId, testo: testo.trim() });
+    if (error) { setMsg("Non sono riuscita a inviare, riprova."); return; }
+    setTesto(""); setMsg("Richiesta inviata ✨ Morgana ti preparerà il video!");
+  };
+  return (
+    <Card className="p-4 space-y-2">
+      <p className="text-sm font-semibold text-slate-800">Non trovi il video di un esercizio?</p>
+      <p className="text-xs text-slate-500">Scrivi il nome dell'esercizio e Morgana lo aggiungerà.</p>
+      <input value={testo} onChange={(e) => { setTesto(e.target.value); setMsg(""); }} placeholder="Es. Hip thrust al multipower" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+      <button onClick={invia} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Richiedi video</button>
+      {msg && <p className="text-xs text-emerald-600">{msg}</p>}
+    </Card>
+  );
+}
+
 function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo = [] }) {
   const [infoEs, setInfoEs] = useState(null);
   const [esercizi, setEsercizi] = useState([]);
@@ -2347,6 +2492,8 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       {giornoAttivo && (
         <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} />
       )}
+
+      <RichiediVideoEsercizio clientId={clientId} />
 
       {archiviati.length > 0 && (() => {
         const gruppi = {};
@@ -7976,7 +8123,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         </button>
         <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
       </div>
+      <button onClick={() => setVista("esercizi")} className={`w-full py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Libreria esercizi e video</button>
 
+      {vista === "esercizi" && <LibreriaEserciziCoach />}
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} />}
