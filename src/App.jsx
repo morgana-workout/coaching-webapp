@@ -5955,8 +5955,9 @@ function DaCompletareClienti({ clients, onSelect }) {
         const es = await leggiTutto(() => supabase.from("training_exercises").select("client_id, training_day_id, nome").order("id"));
         const piani = await leggiTutto(() => supabase.from("nutrition_plans").select("client_id").order("id"));
         const { data: lib } = await supabase.from("esercizi_video").select("parole_chiave, video_url");
-        if (vivo) setD({ giorni, es, piani, lib: lib || [] });
-      } catch (e) { if (vivo) setD({ giorni: [], es: [], piani: [], lib: [] }); }
+        const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").eq("stato", "da_saldare").order("id"));
+        if (vivo) setD({ giorni, es, piani, lib: lib || [], pag });
+      } catch (e) { if (vivo) setD({ giorni: [], es: [], piani: [], lib: [], pag: [] }); }
     })();
     return () => { vivo = false; };
   }, []);
@@ -5965,10 +5966,18 @@ function DaCompletareClienti({ clients, onSelect }) {
   const attivi = new Set(d.giorni.filter((g) => !g.scheda_archiviata).map((g) => g.id));
   const conGiorni = new Set(d.giorni.filter((g) => !g.scheda_archiviata).map((g) => g.client_id));
   const conPiano = new Set(d.piani.map((p) => p.client_id));
+  const oggi = formatDataLocale(new Date());
+  const giorniFa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
+  const daSaldare = new Set(d.pag.map((p) => p.client_id));
   const righe = clients
-    .filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")
     .map((c) => {
       const manca = [];
+      const online = c.tipo_servizio === "online" || c.tipo_servizio === "ibrido";
+      if (daSaldare.has(c.id)) manca.push({ k: "pag", t: "Pagamento da saldare 💳" });
+      if (c.stato_pacchetto === "scaduto") manca.push({ k: "scad", t: "Pacchetto scaduto: rinnovo da proporre" });
+      if (online && c.prossimo_check && c.prossimo_check < oggi && c.stato_check === "da_compilare") manca.push({ k: "check", t: `Check in ritardo di ${giorniFa(c.prossimo_check)} giorni` });
+      if (online && !c.prossimo_check) manca.push({ k: "nocheck", t: "Data del prossimo check non impostata" });
+      if (!online) return { c, manca };
       if (!conGiorni.has(c.id)) manca.push({ k: "csv", t: "Scheda CSV (allenamento) da caricare" });
       if (!c.scheda_pdf_path && !(c.link_scheda || "").trim()) manca.push({ k: "pdf", t: "Scheda PDF da caricare" });
       if (c.nutrizione_attiva !== false && !conPiano.has(c.id)) manca.push({ k: "nutri", t: "Piano nutrizionale da inserire" });
