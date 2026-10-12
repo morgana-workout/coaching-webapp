@@ -5944,6 +5944,62 @@ function SelettoreMessaggiPronti({ nome, onScegli }) {
   );
 }
 
+// Coach: per ogni cliente online/ibrida, cosa manca ancora (scheda CSV, PDF, video, nutrizione)
+function DaCompletareClienti({ clients, onSelect }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const giorni = await leggiTutto(() => supabase.from("training_days").select("id, client_id, scheda_archiviata").order("id"));
+        const es = await leggiTutto(() => supabase.from("training_exercises").select("client_id, training_day_id, nome").order("id"));
+        const piani = await leggiTutto(() => supabase.from("nutrition_plans").select("client_id").order("id"));
+        const { data: lib } = await supabase.from("esercizi_video").select("parole_chiave, video_url");
+        if (vivo) setD({ giorni, es, piani, lib: lib || [] });
+      } catch (e) { if (vivo) setD({ giorni: [], es: [], piani: [], lib: [] }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  const [aperta, setAperta] = useState(true);
+  if (!d) return null;
+  const attivi = new Set(d.giorni.filter((g) => !g.scheda_archiviata).map((g) => g.id));
+  const conGiorni = new Set(d.giorni.filter((g) => !g.scheda_archiviata).map((g) => g.client_id));
+  const conPiano = new Set(d.piani.map((p) => p.client_id));
+  const righe = clients
+    .filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")
+    .map((c) => {
+      const manca = [];
+      if (!conGiorni.has(c.id)) manca.push({ k: "csv", t: "Scheda CSV (allenamento) da caricare" });
+      if (!c.scheda_pdf_path && !(c.link_scheda || "").trim()) manca.push({ k: "pdf", t: "Scheda PDF da caricare" });
+      if (c.nutrizione_attiva !== false && !conPiano.has(c.id)) manca.push({ k: "nutri", t: "Piano nutrizionale da inserire" });
+      const nomi = {};
+      d.es.filter((e) => e.client_id === c.id && attivi.has(e.training_day_id)).forEach((e) => {
+        const trovato = trovaEsercizioVideo(e.nome, d.lib);
+        if (!trovato || !(trovato.video_url || "").trim()) nomi[(e.nome || "").trim().toLowerCase()] = (e.nome || "").trim();
+      });
+      const lista = Object.values(nomi);
+      if (lista.length > 0) manca.push({ k: "video", t: `Video mancanti (${lista.length}): ${lista.slice(0, 4).join(", ")}${lista.length > 4 ? ` +${lista.length - 4}` : ""}` });
+      return { c, manca };
+    })
+    .filter((r) => r.manca.length > 0);
+  return (
+    <Card className="p-4 space-y-1">
+      <button onClick={() => setAperta((v) => !v)} className="w-full flex items-center justify-between pb-1">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Da completare per cliente ({righe.length})</span>
+        <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
+      </button>
+      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
+      {aperta && righe.map(({ c, manca }) => (
+        <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+          {manca.map((m) => <span key={m.k} className="block text-xs text-rose-600">• {m.t}</span>)}
+        </button>
+      ))}
+      {aperta && <p className="text-[11px] text-slate-400 pt-1">Se una cliente segue la nutrizione con un altro professionista, disattiva "nutrizione" nella sua scheda e non comparirà più qui.</p>}
+    </Card>
+  );
+}
+
 function OggiCoach({ clients, onSelect, vai }) {
   const [dati, setDati] = useState(null);
   const oggi = formatDataLocale(new Date());
@@ -6064,6 +6120,8 @@ function OggiCoach({ clients, onSelect, vai }) {
           </div>
         ))}
       </Card>
+
+      <DaCompletareClienti clients={clients} onSelect={onSelect} />
 
       {nuoveClienti.length > 0 && (
         <Card className="p-4 space-y-1">
