@@ -100,14 +100,15 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
   const [errore, setErrore] = useState("");
   const [mostraRegs, setMostraRegs] = useState(false);
   const [valoriVoci, setValoriVoci] = useState({});
+  const [videoVoci, setVideoVoci] = useState({});
 
   const salvaVoce = async (voce) => {
     const n = Number(String(valoriVoci[voce.nome] || "").replace(",", "."));
     if (!(n > 0)) { setErrore("Inserisci il carico in kg 🙂"); return; }
-    if (!video.trim()) { setErrore("Aggiungi il link al video della prova: è obbligatorio 🎥"); return; }
+    if (!String(videoVoci[voce.nome] || "").trim()) { setErrore("Per ogni esercizio serve il link al video: aggiungilo sotto «" + voce.nome + "» 🎥"); return; }
     setErrore("");
     setLavoro(true);
-    await supabase.from("sfide_registrazioni").insert({ adesione_id: adesione.id, client_id: client.id, giorno: oggiS, voce: voce.nome, valore: n, nota: nota.trim() || null, video_url: video.trim() || null });
+    await supabase.from("sfide_registrazioni").insert({ adesione_id: adesione.id, client_id: client.id, giorno: oggiS, voce: voce.nome, valore: n, nota: nota.trim() || null, video_url: String(videoVoci[voce.nome]).trim() });
     const { data: tutte } = await supabase.from("sfide_registrazioni").select("*").eq("adesione_id", adesione.id);
     const nuovo = avanzamento(sfida, tutte || []);
     if (nuovo.completa && adesione.stato === "in_corso") {
@@ -116,8 +117,8 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
     }
     setLavoro(false);
     setNota("");
-    setVideo("");
     setValoriVoci((x) => ({ ...x, [voce.nome]: "" }));
+    setVideoVoci((x) => ({ ...x, [voce.nome]: "" }));
     onCambiato();
   };
 
@@ -207,18 +208,20 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">Il tuo migliore: {v.migliore ? `${fmtNum(v.migliore)} kg` : "—"}</p>
                 {!v.ok && (
-                  <div className="flex gap-2 mt-2">
-                    <input type="text" inputMode="decimal" value={valoriVoci[v.nome] || ""} onChange={(e) => setValoriVoci((x) => ({ ...x, [v.nome]: e.target.value }))}
-                      placeholder="kg" className="w-24 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-                    <button onClick={() => salvaVoce(v)} disabled={lavoro} className="flex-1 bg-slate-800 text-white rounded-lg py-1.5 text-xs font-medium">{lavoro ? "Salvo..." : "Salva"}</button>
+                  <div className="space-y-2 mt-2">
+                    <div className="flex gap-2">
+                      <input type="text" inputMode="decimal" value={valoriVoci[v.nome] || ""} onChange={(e) => setValoriVoci((x) => ({ ...x, [v.nome]: e.target.value }))}
+                        placeholder="kg" className="w-24 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+                      <button onClick={() => salvaVoce(v)} disabled={lavoro} className="flex-1 bg-slate-800 text-white rounded-lg py-1.5 text-xs font-medium">{lavoro ? "Salvo..." : "Salva"}</button>
+                    </div>
+                    <input type="text" value={videoVoci[v.nome] || ""} onChange={(e) => setVideoVoci((x) => ({ ...x, [v.nome]: e.target.value }))}
+                      placeholder="Link al video di questo esercizio (obbligatorio) 🎥" className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
                   </div>
                 )}
               </div>
             ))}
           </div>
           <input type="text" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)"
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link al video della prova (obbligatorio) 🎥"
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           {errore && <p className="text-rose-500 text-sm">{errore}</p>}
         </div>
