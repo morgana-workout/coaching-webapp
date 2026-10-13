@@ -281,6 +281,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
 }
 
 export function SfideCliente({ client }) {
+  const [aperta, setAperta] = useState(null);
   const [sfide, setSfide] = useState(null);
   const [adesioni, setAdesioni] = useState([]);
   const [regs, setRegs] = useState([]);
@@ -304,9 +305,20 @@ export function SfideCliente({ client }) {
   const ordinate = [...sfide].sort((a, b) => {
     const pa = adesioni.find((x) => x.sfida_id === a.id);
     const pb = adesioni.find((x) => x.sfida_id === b.id);
-    const rango = (p) => (!p ? 1 : p.stato === "completata" ? 3 : 0);
+    const rango = (p) => (!p ? 0 : p.stato === "in_corso" ? 1 : p.stato === "da_approvare" ? 2 : 3);
     return rango(pa) - rango(pb);
   });
+
+  const sAperta = aperta ? sfide.find((x) => x.id === aperta) : null;
+  if (sAperta) {
+    const adA = adesioni.find((x) => x.sfida_id === sAperta.id) || null;
+    return (
+      <div className="px-5 pt-6 pb-24 space-y-4">
+        <button onClick={() => { setAperta(null); window.scrollTo(0, 0); }} className="text-sky-600 text-sm font-medium">← Tutte le sfide</button>
+        <SchedaSfidaCliente key={sAperta.id} sfida={sAperta} adesione={adA} regs={adA ? regs.filter((r) => r.adesione_id === adA.id) : []} client={client} onCambiato={carica} />
+      </div>
+    );
+  }
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-4">
@@ -319,7 +331,28 @@ export function SfideCliente({ client }) {
       )}
       {ordinate.map((s) => {
         const ad = adesioni.find((x) => x.sfida_id === s.id) || null;
-        return <SchedaSfidaCliente key={s.id} sfida={s} adesione={ad} regs={ad ? regs.filter((r) => r.adesione_id === ad.id) : []} client={client} onCambiato={carica} />;
+        const av = ad ? avanzamento(s, regs.filter((r) => r.adesione_id === ad.id)) : null;
+        let etichetta = "Nuova ✨";
+        let colore = "bg-sky-100 text-sky-700";
+        if (ad && ad.stato === "completata") { etichetta = "Completata 🏆"; colore = "bg-emerald-100 text-emerald-700"; }
+        else if (ad && ad.stato === "da_approvare") { etichetta = "In verifica"; colore = "bg-amber-100 text-amber-700"; }
+        else if (ad) { etichetta = av && av.tipo !== "obiettivo" ? `In corso · ${av.fatti}/${av.totale}` : "In corso"; colore = "bg-slate-100 text-slate-600"; }
+        return (
+          <Card key={s.id} className="p-4 space-y-2">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0"><Trophy size={20} /></div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-slate-800 text-sm">{s.titolo}</p>
+                <p className="text-xs text-slate-500 mt-0.5">{descriviSfida(s)}</p>
+              </div>
+              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${colore}`}>{etichetta}</span>
+            </div>
+            {s.premio && <p className="text-xs text-amber-700">🎁 Premio: {s.premio}</p>}
+            <button onClick={() => { setAperta(s.id); window.scrollTo(0, 0); }} className={`w-full rounded-xl py-2 text-sm font-medium ${!ad ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-700"}`}>
+              {!ad ? "Scopri la sfida" : ad.stato === "in_corso" ? "Apri la sfida" : "Apri"}
+            </button>
+          </Card>
+        );
       })}
     </div>
   );
