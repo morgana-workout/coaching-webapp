@@ -2838,7 +2838,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
     setSalvando(true);
     setErrore("");
     const payload = { data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
-    if (!checkin) { payload.client_id = clientId; payload.stato = "ricevuto"; }
+    if (!checkin) { payload.client_id = clientId; payload.stato = "revisionato"; }
     for (const k of ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
     }
@@ -2856,6 +2856,11 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
       await supabase.from("checkins").update(payload).eq("id", checkin.id);
     } else {
       await supabase.from("checkins").insert(payload);
+      // Il check lo inserisce la coach stessa: niente da rivedere e il promemoria non serve più.
+      try {
+        await supabase.from("notifiche").update({ coach_vista: true }).eq("client_id", clientId).like("proposta_luogo", "promemoria_check%");
+        await conTimeout(supabase.rpc("sincronizza_stati_check"));
+      } catch (e) { /* non blocca mai il salvataggio */ }
       // Anche se il check lo inserisce la coach, lo stato/il prossimo check si aggiornano
       // esattamente come se lo avesse inviato la cliente stessa.
       try {
