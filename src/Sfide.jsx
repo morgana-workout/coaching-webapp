@@ -104,6 +104,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
   const salvaVoce = async (voce) => {
     const n = Number(String(valoriVoci[voce.nome] || "").replace(",", "."));
     if (!(n > 0)) { setErrore("Inserisci il carico in kg 🙂"); return; }
+    if (!video.trim()) { setErrore("Aggiungi il link al video della prova: è obbligatorio 🎥"); return; }
     setErrore("");
     setLavoro(true);
     await supabase.from("sfide_registrazioni").insert({ adesione_id: adesione.id, client_id: client.id, giorno: oggiS, voce: voce.nome, valore: n, nota: nota.trim() || null, video_url: video.trim() || null });
@@ -130,6 +131,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
   const salva = async () => {
     const v = Number(String(valore).replace(",", "."));
     if (!(v > 0)) { setErrore("Inserisci un numero maggiore di zero 🙂"); return; }
+    if (!video.trim()) { setErrore("Aggiungi il link al video della prova: è obbligatorio 🎥"); return; }
     setErrore("");
     setLavoro(true);
     const payload = { valore: v, nota: nota.trim() || null, video_url: video.trim() || null };
@@ -216,7 +218,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
           </div>
           <input type="text" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)"
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link a un video della prova (facoltativo)"
+          <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link al video della prova (obbligatorio) 🎥"
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           {errore && <p className="text-rose-500 text-sm">{errore}</p>}
         </div>
@@ -249,7 +251,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
             <input type="text" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-            <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link a un video della prova (facoltativo)"
+            <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link al video della prova (obbligatorio) 🎥"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
             {errore && <p className="text-rose-500 text-sm">{errore}</p>}
             <button onClick={salva} disabled={lavoro} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
