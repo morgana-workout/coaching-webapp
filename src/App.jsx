@@ -1503,6 +1503,12 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   const [grande, setGrande] = useState(null);
   const [note, setNote] = useState({});
   const [salvata, setSalvata] = useState("");
+  const [, forzaAggiorna] = useState(0);
+  const invertiLaterali = async (c) => {
+    const nuovo = { foto_laterale_path: c.foto_extra_path || null, foto_extra_path: c.foto_laterale_path || null };
+    const { error } = await supabase.from("checkins").update(nuovo).eq("id", c.id);
+    if (!error) { c.foto_laterale_path = nuovo.foto_laterale_path; c.foto_extra_path = nuovo.foto_extra_path; forzaAggiorna((n) => n + 1); }
+  };
   useEffect(() => {
     const m = {};
     checkins.forEach((c) => { m[c.id] = c.nota_foto_coach || ""; });
@@ -1524,7 +1530,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
       if (vivo) setUrls(out);
     })();
     return () => { vivo = false; };
-  }, [a?.id, b?.id, angolo]);
+  }, [a?.id, b?.id, angolo, a?.[angolo], b?.[angolo]]);
 
   if (checkins.filter((c) => ANGOLI.some(([k]) => c[k])).length < 2) return null;
   const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "");
@@ -1563,6 +1569,9 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                   </select>
                   <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => cambia(titolo, patch)} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
+                  {isAdmin && c && (angolo === "foto_laterale_path" || angolo === "foto_extra_path") && (
+                    <button onClick={() => invertiLaterali(c)} className="w-full text-[11px] text-sky-600 border border-sky-100 bg-sky-50 rounded-lg py-1.5 font-medium">↔ Inverti laterale dx e sx di questo check</button>
+                  )}
                   {isAdmin ? (
                     <div>
                       <textarea value={note[c?.id] || ""} onChange={(e) => setNote((n) => ({ ...n, [c.id]: e.target.value }))} onBlur={() => c && salvaNota(c)} rows={3}
