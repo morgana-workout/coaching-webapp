@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
+import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -661,6 +662,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
       </div>
 
       <AttivaNotifichePush ruolo="cliente" clientId={client.id} />
+
+      <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
 
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
     </div>
@@ -2789,6 +2792,7 @@ function ClientApp({ session }) {
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
+    { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
     { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ];
@@ -2815,6 +2819,7 @@ function ClientApp({ session }) {
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
         {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
+        {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
     </div>
@@ -8126,6 +8131,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
   const [chatNonLette, setChatNonLette] = useState(0);
   const [candidatureNuove, setCandidatureNuove] = useState(0);
+  const [sfideDaFare, setSfideDaFare] = useState(0);
 
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
@@ -8134,6 +8140,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     const { count: a } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%");
     setChatNonLette(m || 0);
     setNonLetteCoach((r || 0) + (c || 0) + (a || 0));
+    try { setSfideDaFare(await contaSfideCoach()); } catch (e) { /* non blocca mai il caricamento */ }
   };
   const caricaCandidatureNuove = async () => {
     const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
@@ -8239,9 +8246,16 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         </button>
         <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
         <button onClick={() => setVista("esercizi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Esercizi</button>
+        <button onClick={() => setVista("sfide")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "sfide" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Sfide
+          {sfideDaFare > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{sfideDaFare}</span>
+          )}
+        </button>
       </div>
 
       {vista === "esercizi" && <LibreriaEserciziCoach />}
+      {vista === "sfide" && <SfideCoach clients={clientiAttivi} onCambiato={caricaNonLetteCoach} />}
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} onAggiorna={caricaNonLetteCoach} />}
