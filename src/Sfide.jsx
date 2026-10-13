@@ -303,23 +303,23 @@ export function CodiceAmicaCliente({ client, onAggiornato }) {
   const usati = sconti.filter((s) => s.usato);
 
   return (
-    <Card className="p-4 space-y-3">
+    <Card className="p-3 space-y-2">
       <div className="flex items-center gap-2">
-        <Gift size={18} className="text-sky-500" />
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Il tuo codice amica</p>
+        <Gift size={15} className="text-sky-500" />
+        <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">Il tuo codice amica</p>
       </div>
       {client.codice_amica && (
         <>
           <div className="flex items-center gap-2">
-            <div className="flex-1 bg-slate-50 border border-dashed border-slate-300 rounded-xl px-4 py-3 text-center">
-              <span className="text-xl font-bold tracking-widest text-slate-800">{client.codice_amica}</span>
+            <div className="flex-1 bg-slate-50 border border-dashed border-slate-300 rounded-lg px-3 py-1.5 text-center">
+              <span className="text-base font-bold tracking-widest text-slate-800">{client.codice_amica}</span>
             </div>
-            <button onClick={copia} className="p-3 rounded-xl border border-slate-200 text-slate-600" aria-label="Copia il codice">
-              {copiato ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
+            <button onClick={copia} className="p-2 rounded-lg border border-slate-200 text-slate-600" aria-label="Copia il codice">
+              {copiato ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} />}
             </button>
           </div>
-          <p className="text-sm text-slate-600">Regalalo a una tua amica: quando si iscrive con il tuo codice, <span className="font-semibold">10 € di sconto per lei e 10 € di sconto per te</span> 🫶🏻</p>
-          <button onClick={condividi} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium">Condividi il codice ✨</button>
+          <p className="text-xs text-slate-600">Regalalo a una tua amica: quando si iscrive con il tuo codice, <span className="font-semibold">10 € di sconto per lei e 10 € di sconto per te</span> 🫶🏻</p>
+          <button onClick={condividi} className="w-full bg-sky-500 text-white rounded-lg py-1.5 text-xs font-medium">Condividi il codice ✨</button>
         </>
       )}
 
