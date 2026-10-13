@@ -48,7 +48,21 @@ function targetGiorno(s, k) {
 function totaleGiorni(s) {
   return Number(s?.giorni) || tappeDi(s).length || 7;
 }
+function vociDi(s) {
+  return String(s?.voci || "").split(/\n/).map((r) => r.trim()).filter(Boolean).map((r) => {
+    const p = r.split("|").map((x) => x.trim());
+    return { nome: p[0], kg: Number(String(p[1] || "").replace(",", ".")) || 0, rip: p[2] || "" };
+  }).filter((v) => v.nome);
+}
 function avanzamento(s, regs) {
+  if (s.tipo === "scheda") {
+    const voci = vociDi(s).map((v) => {
+      const migliore = regs.filter((r) => r.voce === v.nome).reduce((m, r) => Math.max(m, Number(r.valore)), 0);
+      return { ...v, migliore, ok: v.kg > 0 && migliore >= v.kg };
+    });
+    const fatti = voci.filter((v) => v.ok).length;
+    return { tipo: "scheda", voci, fatti, totale: voci.length, completa: voci.length > 0 && fatti === voci.length };
+  }
   if (s.tipo === "obiettivo") {
     const migliore = regs.reduce((m, r) => Math.max(m, Number(r.valore)), 0);
     const trg = Number(s.traguardo) || 0;
@@ -64,6 +78,7 @@ function avanzamento(s, regs) {
   return { tipo: "giorni", fatti: Math.min(k, totale), totale, prossimo: targetGiorno(s, Math.min(k, totale - 1)), completa: k >= totale };
 }
 function descriviSfida(s) {
+  if (s.tipo === "scheda") return `${vociDi(s).length} esercizi · raggiungi tutti i carichi`;
   if (s.tipo === "obiettivo") return `Raggiungi ${fmtNum(s.traguardo)} ${s.unita || ""}`.trim();
   const t = tappeDi(s);
   const n = totaleGiorni(s);
@@ -84,6 +99,26 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
   const [lavoro, setLavoro] = useState(false);
   const [errore, setErrore] = useState("");
   const [mostraRegs, setMostraRegs] = useState(false);
+  const [valoriVoci, setValoriVoci] = useState({});
+
+  const salvaVoce = async (voce) => {
+    const n = Number(String(valoriVoci[voce.nome] || "").replace(",", "."));
+    if (!(n > 0)) { setErrore("Inserisci il carico in kg 🙂"); return; }
+    setErrore("");
+    setLavoro(true);
+    await supabase.from("sfide_registrazioni").insert({ adesione_id: adesione.id, client_id: client.id, giorno: oggiS, voce: voce.nome, valore: n, nota: nota.trim() || null, video_url: video.trim() || null });
+    const { data: tutte } = await supabase.from("sfide_registrazioni").select("*").eq("adesione_id", adesione.id);
+    const nuovo = avanzamento(sfida, tutte || []);
+    if (nuovo.completa && adesione.stato === "in_corso") {
+      await supabase.from("sfide_adesioni").update({ stato: "da_approvare", completata_il: new Date().toISOString() }).eq("id", adesione.id);
+      inviaPushLocale({ evento: "sfida", adesione_id: adesione.id });
+    }
+    setLavoro(false);
+    setNota("");
+    setVideo("");
+    setValoriVoci((x) => ({ ...x, [voce.nome]: "" }));
+    onCambiato();
+  };
 
   const inizia = async () => {
     setLavoro(true);
@@ -131,6 +166,14 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
         </div>
       )}
 
+      {sfida.tipo === "scheda" && !(adesione && adesione.stato === "in_corso") && (
+        <div className="space-y-1">
+          {vociDi(sfida).map((v) => (
+            <p key={v.nome} className="text-sm text-slate-700 flex justify-between gap-2"><span>{v.nome}</span><span className="font-semibold">{fmtNum(v.kg)} kg{v.rip ? ` × ${v.rip}` : ""}</span></p>
+          ))}
+        </div>
+      )}
+
       {!adesione && (
         <button onClick={inizia} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium">
           {lavoro ? "Un attimo..." : "Accetto la sfida 💪🏻"}
@@ -150,7 +193,36 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
         </div>
       )}
 
-      {adesione && adesione.stato === "in_corso" && av && (
+      {adesione && adesione.stato === "in_corso" && av && av.tipo === "scheda" && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">Carichi raggiunti: <span className="font-semibold">{av.fatti}</span> su {av.totale}. Quando li hai tutti, vinci! 🏆</p>
+          <div className="space-y-2">
+            {av.voci.map((v) => (
+              <div key={v.nome} className={`rounded-xl border px-3 py-2 ${v.ok ? "bg-emerald-50 border-emerald-100" : "bg-white border-slate-200"}`}>
+                <div className="flex justify-between gap-2 text-sm">
+                  <span className="font-medium text-slate-800">{v.ok ? "✅ " : ""}{v.nome}</span>
+                  <span className="text-slate-600">{fmtNum(v.kg)} kg{v.rip ? ` × ${v.rip}` : ""}</span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">Il tuo migliore: {v.migliore ? `${fmtNum(v.migliore)} kg` : "—"}</p>
+                {!v.ok && (
+                  <div className="flex gap-2 mt-2">
+                    <input type="text" inputMode="decimal" value={valoriVoci[v.nome] || ""} onChange={(e) => setValoriVoci((x) => ({ ...x, [v.nome]: e.target.value }))}
+                      placeholder="kg" className="w-24 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+                    <button onClick={() => salvaVoce(v)} disabled={lavoro} className="flex-1 bg-slate-800 text-white rounded-lg py-1.5 text-xs font-medium">{lavoro ? "Salvo..." : "Salva"}</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <input type="text" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link a un video della prova (facoltativo)"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+        </div>
+      )}
+
+      {adesione && adesione.stato === "in_corso" && av && av.tipo !== "scheda" && (
         <div className="space-y-3">
           {av.tipo === "giorni" ? (
             <>
@@ -193,7 +265,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
           {mostraRegs && (
             <div className="mt-2 space-y-1">
               {[...regs].sort((a, b) => b.giorno.localeCompare(a.giorno)).map((r) => (
-                <p key={r.id} className="text-xs text-slate-600">{fmtData(r.giorno)} · <span className="font-semibold">{fmtNum(r.valore)} {sfida.unita || ""}</span>{r.nota ? ` · ${r.nota}` : ""}</p>
+                <p key={r.id} className="text-xs text-slate-600">{fmtData(r.giorno)} · {r.voce ? r.voce + " · " : ""}<span className="font-semibold">{fmtNum(r.valore)} {sfida.unita || ""}</span>{r.nota ? ` · ${r.nota}` : ""}</p>
               ))}
             </div>
           )}
@@ -366,12 +438,19 @@ export async function contaSfideCoach() {
   return (a || 0) + (s || 0);
 }
 
+const SCHEDA_BASE = "Squat con bilanciere|60|5\nStacco da terra|70|5\nHip thrust|80|8\nPanca piana|40|5\nMilitary press|30|5\nRematore con bilanciere|45|8\nLat machine|50|8\nLeg press|150|10";
 const PRESET = [
-  { etichetta: "Plank 7 giorni", titolo: "Plank 7 giorni", descrizione: "Ogni giorno tieni il plank un po' più a lungo. Registra il tuo tempo e arriva fino in fondo!", tipo: "giorni", unita: "secondi", giorni: "7", tappe: "30,35,40,45,50,55,60", traguardo: "" },
-  { etichetta: "Flessioni", titolo: "Sfida flessioni", descrizione: "Arriva a completare le flessioni di fila, con una buona tecnica.", tipo: "obiettivo", unita: "ripetizioni", giorni: "", tappe: "", traguardo: "15" },
-  { etichetta: "Supera un carico", titolo: "Supera il tuo carico", descrizione: "Raggiungi il carico indicato sull'esercizio, con tecnica pulita.", tipo: "obiettivo", unita: "kg", giorni: "", tappe: "", traguardo: "60" },
+  { etichetta: "Scheda dei carichi", titolo: "La scheda dei carichi 🏋🏻‍♀️", descrizione: "Raggiungi o supera il carico indicato su tutti gli esercizi base, con le ripetizioni richieste e tecnica pulita. Quando li hai tutti, vinci!", tipo: "scheda", unita: "kg", giorni: "", tappe: "", traguardo: "", voci: SCHEDA_BASE },
+  { etichetta: "Prima trazione", titolo: "La tua prima trazione", descrizione: "Una trazione completa alla sbarra, senza aiuti: mento sopra la sbarra e discesa controllata.", tipo: "obiettivo", unita: "trazioni", giorni: "", tappe: "", traguardo: "1", voci: "" },
+  { etichetta: "Dead hang", titolo: "Appesa alla sbarra", descrizione: "Resta appesa alla sbarra con le spalle attive, senza toccare terra. Segna il tuo tempo migliore.", tipo: "obiettivo", unita: "secondi", giorni: "", tappe: "", traguardo: "40", voci: "" },
+  { etichetta: "Squat 10 giorni", titolo: "Squat 10 giorni", descrizione: "Ogni giorno più squat a corpo libero, in una sola serie e con buona tecnica (anca sotto il ginocchio).", tipo: "giorni", unita: "ripetizioni", giorni: "10", tappe: "20,25,30,35,40,45,50,55,60,65", traguardo: "", voci: "" },
+  { etichetta: "Sedia al muro", titolo: "Sedia al muro 7 giorni", descrizione: "Ogni giorno resta in posizione di sedia al muro (cosce parallele al pavimento) un po' più a lungo.", tipo: "giorni", unita: "secondi", giorni: "7", tappe: "30,45,60,75,90,105,120", traguardo: "", voci: "" },
+  { etichetta: "10.000 passi", titolo: "10.000 passi per 7 giorni", descrizione: "Sette giorni di fila con almeno 10.000 passi. Segna ogni sera il numero che vedi sul telefono.", tipo: "giorni", unita: "passi", giorni: "7", tappe: "", traguardo: "10000", voci: "" },
+  { etichetta: "Acqua 14 giorni", titolo: "Acqua: 2 litri per 14 giorni", descrizione: "Per 14 giorni bevi almeno 2 litri d'acqua al giorno. Segna ogni sera quanti litri hai bevuto.", tipo: "giorni", unita: "litri", giorni: "14", tappe: "", traguardo: "2", voci: "" },
+  { etichetta: "Plank 7 giorni", titolo: "Plank 7 giorni", descrizione: "Ogni giorno tieni il plank un po' più a lungo. Registra il tuo tempo e arriva fino in fondo!", tipo: "giorni", unita: "secondi", giorni: "7", tappe: "40,50,60,70,80,90,100", traguardo: "", voci: "" },
+  { etichetta: "Flessioni", titolo: "Sfida flessioni", descrizione: "Arriva a completare le flessioni di fila, a petto basso e con buona tecnica.", tipo: "obiettivo", unita: "ripetizioni", giorni: "", tappe: "", traguardo: "10", voci: "" },
 ];
-const FORM_VUOTO = { titolo: "", descrizione: "", tipo: "giorni", unita: "", giorni: "7", tappe: "", traguardo: "", premio: "", tutte: true, client_ids: [] };
+const FORM_VUOTO = { voci: "", titolo: "", descrizione: "", tipo: "giorni", unita: "", giorni: "7", tappe: "", traguardo: "", premio: "", tutte: true, client_ids: [] };
 
 function FormSfida({ iniziale, clienti, onSalvato, onAnnulla }) {
   const [f, setF] = useState(iniziale);
@@ -381,6 +460,7 @@ function FormSfida({ iniziale, clienti, onSalvato, onAnnulla }) {
 
   const salva = async () => {
     if (!f.titolo.trim()) { setErrore("Dai un titolo alla sfida."); return; }
+    if (f.tipo === "scheda" && vociDi({ voci: f.voci }).length === 0) { setErrore("Scrivi almeno un esercizio, uno per riga: Nome|kg|ripetizioni"); return; }
     if (f.tipo === "obiettivo" && !(Number(String(f.traguardo).replace(",", ".")) > 0)) { setErrore("Indica l'obiettivo da raggiungere (un numero)."); return; }
     if (f.tipo === "giorni" && !(Number(f.giorni) > 0) && !f.tappe.trim()) { setErrore("Indica per quanti giorni dura la sfida."); return; }
     if (f.tipo === "giorni" && !f.tappe.trim() && !(Number(String(f.traguardo).replace(",", ".")) > 0)) { setErrore("Indica il traguardo giornaliero oppure le tappe, giorno per giorno."); return; }
@@ -391,7 +471,8 @@ function FormSfida({ iniziale, clienti, onSalvato, onAnnulla }) {
       titolo: f.titolo.trim(),
       descrizione: f.descrizione.trim() || null,
       tipo: f.tipo,
-      unita: f.unita.trim() || null,
+      unita: f.tipo === "scheda" ? "kg" : (f.unita.trim() || null),
+      voci: f.tipo === "scheda" ? (f.voci || "").trim() || null : null,
       giorni: f.tipo === "giorni" && f.giorni ? Number(f.giorni) : null,
       tappe: f.tipo === "giorni" && f.tappe.trim() ? f.tappe.trim() : null,
       traguardo: f.traguardo !== "" && f.traguardo != null ? Number(String(f.traguardo).replace(",", ".")) : null,
@@ -427,7 +508,8 @@ function FormSfida({ iniziale, clienti, onSalvato, onAnnulla }) {
         <label className="text-xs text-slate-500">Tipo di sfida</label>
         <select value={f.tipo} onChange={(e) => imposta({ tipo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 bg-white">
           <option value="giorni">Ogni giorno per più giorni (es. plank per 7 giorni)</option>
-          <option value="obiettivo">Raggiungi un obiettivo (es. flessioni, carico)</option>
+          <option value="obiettivo">Raggiungi un obiettivo (es. flessioni, trazione)</option>
+          <option value="scheda">Scheda di esercizi con i carichi da raggiungere</option>
         </select>
       </div>
       <div>
@@ -451,6 +533,12 @@ function FormSfida({ iniziale, clienti, onSalvato, onAnnulla }) {
             </div>
           )}
         </>
+      ) : f.tipo === "scheda" ? (
+        <div>
+          <label className="text-xs text-slate-500">Esercizi, uno per riga: Nome|kg|ripetizioni</label>
+          <textarea rows={9} value={f.voci || ""} onChange={(e) => imposta({ voci: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1 font-mono" />
+          <p className="text-[11px] text-slate-400 mt-1">Vince quando raggiunge o supera il carico su tutti gli esercizi.</p>
+        </div>
       ) : (
         <div>
           <label className="text-xs text-slate-500">Obiettivo da raggiungere</label>
@@ -567,7 +655,7 @@ function SfideCoachTab({ clienti, onCambiato }) {
                 <div className="space-y-0.5">
                   {mie.map((r) => (
                     <p key={r.id} className="text-xs text-slate-600">
-                      {fmtData(r.giorno)} · <span className="font-semibold">{fmtNum(r.valore)} {s?.unita || ""}</span>{r.nota ? ` · ${r.nota}` : ""}
+                      {fmtData(r.giorno)} · {r.voce ? r.voce + " · " : ""}<span className="font-semibold">{fmtNum(r.valore)} {s?.unita || ""}</span>{r.nota ? ` · ${r.nota}` : ""}
                       {r.video_url && <> · <a href={r.video_url} target="_blank" rel="noreferrer" className="text-sky-600 underline">video</a></>}
                     </p>
                   ))}
@@ -624,7 +712,7 @@ function SfideCoachTab({ clienti, onCambiato }) {
                 <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 ${s.attiva ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{s.attiva ? "attiva" : "in pausa"}</span>
               </div>
               <div className="flex gap-3 text-xs font-medium">
-                <button onClick={() => setForm({ id: s.id, titolo: s.titolo, descrizione: s.descrizione || "", tipo: s.tipo, unita: s.unita || "", giorni: s.giorni != null ? String(s.giorni) : "", tappe: s.tappe || "", traguardo: s.traguardo != null ? String(s.traguardo) : "", premio: s.premio || "", tutte: !s.client_ids, client_ids: s.client_ids || [] })} className="text-sky-600">Modifica</button>
+                <button onClick={() => setForm({ id: s.id, titolo: s.titolo, descrizione: s.descrizione || "", tipo: s.tipo, unita: s.unita || "", giorni: s.giorni != null ? String(s.giorni) : "", tappe: s.tappe || "", voci: s.voci || "", traguardo: s.traguardo != null ? String(s.traguardo) : "", premio: s.premio || "", tutte: !s.client_ids, client_ids: s.client_ids || [] })} className="text-sky-600">Modifica</button>
                 <button onClick={() => cambiaAttiva(s)} className="text-slate-600">{s.attiva ? "Metti in pausa" : "Riattiva"}</button>
                 <button onClick={() => elimina(s)} className="text-rose-500">Elimina</button>
               </div>
