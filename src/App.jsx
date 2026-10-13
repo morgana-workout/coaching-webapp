@@ -2061,7 +2061,10 @@ function LibreriaEserciziCoach() {
             <p className="text-sm font-medium text-slate-800">{e.nome}</p>
             <p className="text-xs text-slate-400">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
           </div>
-          <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : "senza video"}</span>
+          <span className="flex flex-col items-end gap-1 flex-shrink-0">
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : "senza video"}</span>
+            {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">descrizioni da completare</span>}
+          </span>
         </button>
       ))}
     </div>
