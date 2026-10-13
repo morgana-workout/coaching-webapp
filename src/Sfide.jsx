@@ -89,7 +89,7 @@ function descriviSfida(s) {
 /* ================================================================== */
 /* CLIENTE: tab Sfide                                                  */
 /* ================================================================== */
-function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
+function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbbandonata }) {
   const av = adesione ? avanzamento(sfida, regs) : null;
   const oggiS = oggiStr();
   const oggiReg = sfida.tipo === "giorni" ? regs.find((r) => r.giorno === oggiS) : null;
@@ -101,6 +101,16 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
   const [mostraRegs, setMostraRegs] = useState(false);
   const [valoriVoci, setValoriVoci] = useState({});
   const [videoVoci, setVideoVoci] = useState({});
+  const [confermaAbb, setConfermaAbb] = useState(false);
+
+  const abbandona = async () => {
+    setLavoro(true);
+    await supabase.from("sfide_adesioni").delete().eq("id", adesione.id);
+    setLavoro(false);
+    setConfermaAbb(false);
+    onCambiato();
+    onAbbandonata?.();
+  };
 
   const salvaVoce = async (voce) => {
     const n = Number(String(valoriVoci[voce.nome] || "").replace(",", "."));
@@ -276,6 +286,21 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato }) {
           )}
         </div>
       )}
+      {adesione && adesione.stato === "in_corso" && (
+        <div className="pt-1 border-t border-slate-100">
+          {!confermaAbb ? (
+            <button onClick={() => setConfermaAbb(true)} className="text-xs text-slate-400 underline">Abbandona la sfida</button>
+          ) : (
+            <div className="space-y-2 pt-2">
+              <p className="text-sm text-slate-600">Vuoi davvero lasciare questa sfida? 🫶🏻 I risultati che hai salvato verranno cancellati, ma potrai ricominciare quando vorrai.</p>
+              <div className="flex gap-2">
+                <button onClick={abbandona} disabled={lavoro} className="flex-1 bg-rose-500 text-white rounded-xl py-2 text-sm font-medium">{lavoro ? "Un attimo..." : "Sì, abbandono"}</button>
+                <button onClick={() => setConfermaAbb(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-600">Continuo</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
@@ -315,7 +340,7 @@ export function SfideCliente({ client }) {
     return (
       <div className="px-5 pt-6 pb-24 space-y-4">
         <button onClick={() => { setAperta(null); window.scrollTo(0, 0); }} className="text-sky-600 text-sm font-medium">← Tutte le sfide</button>
-        <SchedaSfidaCliente key={sAperta.id} sfida={sAperta} adesione={adA} regs={adA ? regs.filter((r) => r.adesione_id === adA.id) : []} client={client} onCambiato={carica} />
+        <SchedaSfidaCliente key={sAperta.id} sfida={sAperta} adesione={adA} regs={adA ? regs.filter((r) => r.adesione_id === adA.id) : []} client={client} onCambiato={carica} onAbbandonata={() => { setAperta(null); window.scrollTo(0, 0); }} />
       </div>
     );
   }
