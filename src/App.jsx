@@ -663,9 +663,9 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
 
       <AttivaNotifichePush ruolo="cliente" clientId={client.id} />
 
-      <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
-
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
+
+      <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
     </div>
   );
 }
