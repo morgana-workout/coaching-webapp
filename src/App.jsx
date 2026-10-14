@@ -1996,6 +1996,7 @@ function LibreriaEserciziCoach() {
       nome: edit.nome.trim(), gruppo: edit.gruppo || null, attrezzo: edit.attrezzo || null,
       posizionamento: edit.posizionamento || null, movimento: edit.movimento || null, errori: edit.errori || null,
       video_url: edit.video_url || null, parole_chiave: edit.parole_chiave || edit.nome.toLowerCase(),
+      senza_video: !!edit.senza_video,
     };
     const { error } = edit.id
       ? await supabase.from("esercizi_video").update(campi).eq("id", edit.id)
@@ -2030,6 +2031,7 @@ function LibreriaEserciziCoach() {
             <CampoEs edit={edit} setEdit={setEdit} label="Attrezzo" k="attrezzo" />
           </div>
           <CampoEs edit={edit} setEdit={setEdit} label="Link video YouTube" k="video_url" righe={3} hint="Un link per riga. Se ne metti più di uno puoi dare un nome: Frontale|https://youtube.com/shorts/..." />
+          <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={!!edit.senza_video} onChange={(e) => setEdit({ ...edit, senza_video: e.target.checked })} /> Questo esercizio non ha bisogno del video (non comparirà tra i video mancanti)</label>
           <CampoEs edit={edit} setEdit={setEdit} label="Posizionamento" k="posizionamento" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Movimento e ROM" k="movimento" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Errori comuni" k="errori" righe={4} />
@@ -2074,7 +2076,7 @@ function LibreriaEserciziCoach() {
             <p className="text-xs text-slate-400">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
           </div>
           <span className="flex flex-col items-end gap-1 flex-shrink-0">
-            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : "senza video"}</span>
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : e.senza_video ? "video non necessario" : "senza video"}</span>
             {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">descrizioni da completare</span>}
           </span>
         </button>
@@ -2314,8 +2316,8 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     (async () => {
       try {
         if (!isAdmin) {
-          const { data: c } = await supabase.from("clients").select("tipo_servizio").eq("id", clientId).maybeSingle();
-          if (!c || (c.tipo_servizio !== "online" && c.tipo_servizio !== "ibrido")) return;
+          const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
+          if (!c || c.video_attivi === false || (c.tipo_servizio !== "online" && c.tipo_servizio !== "ibrido")) return;
         }
         const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
         setLibreriaVideo(data || []);
@@ -5232,6 +5234,15 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               </button>
             </div>
           )}
+          {client.tipo_servizio !== "presenza" && (
+            <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+              <span className="text-sm text-slate-700">Video degli esercizi per la cliente</span>
+              <button onClick={() => salvaCliente({ video_attivi: client.video_attivi === false })}
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.video_attivi !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                <span className="w-5 h-5 bg-white rounded-full block" />
+              </button>
+            </div>
+          )}
           <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Sezione nutrizione visibile alla cliente</span>
             <button onClick={() => salvaCliente({ nutrizione_attiva: client.nutrizione_attiva === false })}
@@ -5976,7 +5987,7 @@ function DaCompletareClienti({ clients, onSelect }) {
         const giorni = await leggiTutto(() => supabase.from("training_days").select("id, client_id, scheda_archiviata").order("id"));
         const es = await leggiTutto(() => supabase.from("training_exercises").select("client_id, training_day_id, nome").order("id"));
         const piani = await leggiTutto(() => supabase.from("nutrition_plans").select("client_id").order("id"));
-        const { data: lib } = await supabase.from("esercizi_video").select("parole_chiave, video_url");
+        const { data: lib } = await supabase.from("esercizi_video").select("parole_chiave, video_url, senza_video");
         const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").eq("stato", "da_saldare").order("id"));
         if (vivo) setD({ giorni, es, piani, lib: lib || [], pag });
       } catch (e) { if (vivo) setD({ giorni: [], es: [], piani: [], lib: [], pag: [] }); }
@@ -6006,7 +6017,8 @@ function DaCompletareClienti({ clients, onSelect }) {
       const nomi = {};
       d.es.filter((e) => e.client_id === c.id && attivi.has(e.training_day_id)).forEach((e) => {
         const trovato = trovaEsercizioVideo(e.nome, d.lib);
-        if (!trovato || !(trovato.video_url || "").trim()) nomi[(e.nome || "").trim().toLowerCase()] = (e.nome || "").trim();
+        if (c.video_attivi === false) return;
+        if (!trovato || (!(trovato.video_url || "").trim() && !trovato.senza_video)) nomi[(e.nome || "").trim().toLowerCase()] = (e.nome || "").trim();
       });
       const lista = Object.values(nomi);
       if (lista.length > 0) manca.push({ k: "video", t: `Video mancanti (${lista.length}): ${lista.slice(0, 4).join(", ")}${lista.length > 4 ? ` +${lista.length - 4}` : ""}` });
