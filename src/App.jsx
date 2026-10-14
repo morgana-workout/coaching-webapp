@@ -6587,6 +6587,69 @@ function StoricoNotifiche({ clients }) {
   );
 }
 
+function CompleanniClienti({ clients }) {
+  const [mostraMancanti, setMostraMancanti] = useState(false);
+  const [quantiPassati, setQuantiPassati] = useState(10);
+  const oggi = new Date();
+  oggi.setHours(0, 0, 0, 0);
+  const anno = oggi.getFullYear();
+  const attive = clients.filter((c) => !c.archiviato);
+  const conData = attive.filter((c) => c.data_nascita).map((c) => {
+    const [y, m, d] = String(c.data_nascita).split("-").map(Number);
+    const questoAnno = new Date(anno, m - 1, d);
+    const prossimo = questoAnno < oggi ? new Date(anno + 1, m - 1, d) : questoAnno;
+    return { c, y, questoAnno, prossimo, giorni: Math.round((prossimo - oggi) / 86400000) };
+  });
+  const prossimi = conData.filter((x) => x.giorni <= 90).sort((a, b) => a.giorni - b.giorni);
+  const passati = conData.filter((x) => x.questoAnno < oggi).sort((a, b) => b.questoAnno - a.questoAnno);
+  const mancanti = attive.filter((c) => !c.data_nascita);
+  const nome = (c) => `${c.nome} ${c.cognome || ""}`.trim();
+  const dm = (dt) => `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
+  const quando = (g) => (g === 0 ? "Oggi 🎂" : g === 1 ? "Domani" : `tra ${g} giorni`);
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">🎂 Compleanni delle clienti</p>
+      <div className="space-y-2">
+        {prossimi.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun compleanno nei prossimi 90 giorni.</Card>}
+        {prossimi.map((x) => (
+          <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-amber-50/60 border-amber-200" : ""}`}>
+            <div className="min-w-0">
+              <p className="font-medium text-slate-700 text-sm">{nome(x.c)}</p>
+              <p className="text-slate-500 text-xs">Compie {x.prossimo.getFullYear() - x.y} anni · {dm(x.prossimo)}</p>
+            </div>
+            <span className="text-xs font-medium text-sky-700 bg-sky-50 rounded-full px-2 py-0.5 flex-shrink-0">{quando(x.giorni)}</span>
+          </Card>
+        ))}
+        {passati.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium mt-3 mb-1.5 px-1">Storico compleanni di quest'anno</p>
+            <div className="space-y-1.5">
+              {passati.slice(0, quantiPassati).map((x) => (
+                <Card key={x.c.id} className="p-3 flex items-center justify-between gap-3">
+                  <p className="text-slate-600 text-sm">🎂 {nome(x.c)} · {anno - x.y} anni</p>
+                  <p className="text-slate-400 text-[11px] flex-shrink-0">{dm(x.questoAnno)}/{anno}</p>
+                </Card>
+              ))}
+              {passati.length > quantiPassati && <button onClick={() => setQuantiPassati(quantiPassati + 10)} className="w-full text-sky-600 text-sm font-medium py-1">Mostra altri</button>}
+            </div>
+          </div>
+        )}
+        {mancanti.length > 0 && (
+          <div>
+            <button onClick={() => setMostraMancanti(!mostraMancanti)} className="text-sky-600 text-xs font-medium px-1">{mostraMancanti ? "Nascondi" : `Manca la data di nascita a ${mancanti.length} clienti`}</button>
+            {mostraMancanti && (
+              <Card className="p-3 mt-1.5">
+                <p className="text-slate-500 text-xs">{mancanti.map(nome).join(", ")}</p>
+                <p className="text-slate-400 text-[11px] mt-1">Aprendo la scheda di una cliente puoi aggiungere la data di nascita: comparirà qui e nel calendario.</p>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StoricoAzioniClienti({ clients }) {
   const [righe, setRighe] = useState(null);
   const [quante, setQuante] = useState(20);
@@ -6754,6 +6817,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
         <InviaNotaForm clients={clients} onFatto={() => {}} />
       </div>
+
+      <CompleanniClienti clients={clients} />
 
       <StoricoAzioniClienti clients={clients} />
 
