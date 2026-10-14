@@ -6587,6 +6587,37 @@ function StoricoNotifiche({ clients }) {
   );
 }
 
+function StoricoAzioniClienti({ clients }) {
+  const [righe, setRighe] = useState(null);
+  const [quante, setQuante] = useState(20);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("avvisi_attivita").select("client_id, tipo, giorno, created_at").order("created_at", { ascending: false }).limit(500);
+      setRighe(data || []);
+    })();
+  }, []);
+  const nome = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
+  if (righe === null) return null;
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico azioni delle clienti ({righe.length})</p>
+      <div className="space-y-2">
+        {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna azione registrata: qui vedrai quando le clienti registrano un allenamento o aggiornano il diario alimentare ✨</Card>}
+        {righe.slice(0, quante).map((r) => (
+          <Card key={r.client_id + r.tipo + r.giorno} className="p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium text-slate-700 text-sm">{nome(r.client_id)}</p>
+              <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+            </div>
+            <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+          </Card>
+        ))}
+        {righe.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
+      </div>
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -6723,6 +6754,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
         <InviaNotaForm clients={clients} onFatto={() => {}} />
       </div>
+
+      <StoricoAzioniClienti clients={clients} />
 
       <StoricoNotifiche clients={clients} />
 
