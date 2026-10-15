@@ -1507,6 +1507,26 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   const [note, setNote] = useState({});
   const [salvata, setSalvata] = useState("");
   const [, forzaAggiorna] = useState(0);
+  const [salvati, setSalvati] = useState({});
+  const [salvaMsg, setSalvaMsg] = useState("");
+  const clienteFoto = checkins[0]?.client_id;
+  useEffect(() => {
+    if (!clienteFoto) return;
+    supabase.from("confronto_foto_coach").select("*").eq("client_id", clienteFoto).then(({ data }) => {
+      const m = {}; (data || []).forEach((r) => { m[r.angolo] = r; }); setSalvati(m);
+    });
+  }, [clienteFoto]);
+  useEffect(() => {
+    const r = salvati[angolo];
+    if (r) { setIdA(r.id_prima || ""); setIdB(r.id_dopo || ""); setVista({ Prima: { ...VISTA0, ...(r.vista?.Prima || {}) }, Dopo: { ...VISTA0, ...(r.vista?.Dopo || {}) } }); setInsieme(!!r.insieme); }
+    else { setIdA(""); setIdB(""); setVista({ Prima: VISTA0, Dopo: VISTA0 }); setInsieme(false); }
+  }, [angolo, salvati]);
+  const salvaImpostazione = async (idPrima, idDopo) => {
+    const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista, insieme, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("confronto_foto_coach").upsert(riga, { onConflict: "client_id,angolo" });
+    if (!error) { setSalvati((m) => ({ ...m, [angolo]: riga })); setSalvaMsg("Salvato: la cliente vede questo confronto ✓"); setTimeout(() => setSalvaMsg(""), 3000); }
+    else setSalvaMsg("Non sono riuscita a salvare");
+  };
   const invertiLaterali = async (c) => {
     const nuovo = { foto_laterale_path: c.foto_extra_path || null, foto_extra_path: c.foto_laterale_path || null };
     const { error } = await supabase.from("checkins").update(nuovo).eq("id", c.id);
@@ -1567,10 +1587,12 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
             <div className="grid grid-cols-2 gap-3">
               {[["Prima", a, setIdA], ["Dopo", b, setIdB]].map(([titolo, c, setId]) => (
                 <div key={titolo} className="space-y-1.5">
-                  <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
-                    {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
-                  </select>
-                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => cambia(titolo, patch)} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
+                  {isAdmin ? (
+                    <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
+                      {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
+                    </select>
+                  ) : <p className="text-center text-xs font-medium text-slate-600">{titolo}: {fmtData(c?.data_check)}</p>}
+                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => { if (isAdmin) cambia(titolo, patch); }} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
                   {isAdmin && c && (angolo === "foto_laterale_path" || angolo === "foto_extra_path") && (
                     <button onClick={() => invertiLaterali(c)} className="w-full text-[11px] text-sky-600 border border-sky-100 bg-sky-50 rounded-lg py-1.5 font-medium">↔ Inverti laterale dx e sx di questo check</button>
@@ -1590,11 +1612,16 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                 </div>
               ))}
             </div>
-            <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
-              <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
-              <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
-              <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla: puoi adattare ogni foto all’altra. Tocca una foto per aprirla a schermo intero.</p>
-            </div>
+            {isAdmin ? (
+              <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
+                <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
+                <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
+                <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Tocca una foto per aprirla a schermo intero.</p>
+                <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
+                {salvaMsg && <p className="text-emerald-600 text-[11px] text-center">{salvaMsg}</p>}
+                <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
+              </div>
+            ) : <p className="text-[11px] text-slate-400 text-center">Tocca una foto per aprirla a schermo intero.</p>}
             {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
           </>
         )}
@@ -2267,7 +2294,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
   );
 }
 
-function parseCSV(testo) {
+function parseCSV(testo, sep = ",") {
   const righe = [];
   let riga = [], campo = "", dentroVirgolette = false;
   for (let i = 0; i < testo.length; i++) {
@@ -2278,7 +2305,7 @@ function parseCSV(testo) {
         else dentroVirgolette = false;
       } else campo += c;
     } else if (c === '"') dentroVirgolette = true;
-    else if (c === ",") { riga.push(campo); campo = ""; }
+    else if (c === sep) { riga.push(campo); campo = ""; }
     else if (c === "\n" || c === "\r") {
       if (c === "\r" && testo[i + 1] === "\n") i++;
       riga.push(campo); campo = "";
@@ -2958,6 +2985,71 @@ function NuovaNotaForm({ clientId, onSalvato, onAnnulla }) {
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva nota"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
       </div>
+    </Card>
+  );
+}
+
+// Importazione da CSV per la nutrizione di una singola cliente: cicli alimentari oppure alimenti (riconosciuti dall'intestazione).
+function ImportaNutrizioneCSV({ clientId, onFatto }) {
+  const [msg, setMsg] = useState("");
+  const [lavoro, setLavoro] = useState(false);
+  const num = (v) => { const t = String(v ?? "").trim().replace(",", "."); if (t === "") return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+  const dataIso = (v) => { const t = String(v ?? "").trim(); if (!t) return null; if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t; const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(t); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null; };
+  const importa = async (file) => {
+    setLavoro(true); setMsg("");
+    try {
+      let testo = (await file.text()).replace(/^\uFEFF/, "");
+      const prima = testo.split(/\r?\n/)[0] || "";
+      const sep = (prima.match(/;/g) || []).length > (prima.match(/,/g) || []).length ? ";" : ",";
+      const righe = parseCSV(testo, sep);
+      if (righe.length < 2) { setMsg("Il file è vuoto o ha solo l’intestazione."); setLavoro(false); return; }
+      const norm = (x) => x.trim().toLowerCase().replace(/\s+/g, "_").replace(/[()]/g, "");
+      const head = righe[0].map(norm);
+      const col = (...nomi) => head.findIndex((h) => nomi.includes(h));
+      const dati = righe.slice(1);
+      if (col("nome", "alimento") >= 0 && col("kcal") >= 0) {
+        const iN = col("nome", "alimento"), iM = col("marca"), iU = col("unita", "unit"), iP = col("nome_pezzo", "pezzo", "uname"), iPer = col("per", "ogni_quanti"), iK = col("kcal"), iPr = col("proteine", "proteine_g"), iC = col("carboidrati", "carboidrati_g"), iG = col("grassi", "grassi_g"), iQ = col("quantita_abituale", "quantita");
+        const { data: esist } = await supabase.from("kcal_foods").select("nome, marca").eq("client_id", clientId);
+        const chiavi = new Set((esist || []).map((x) => `${x.nome}|${x.marca || ""}`.toLowerCase()));
+        const nuovi = []; let saltati = 0;
+        for (const r of dati) {
+          const nome = (r[iN] || "").trim(); const kcal = num(r[iK]);
+          if (!nome || kcal === null) { saltati++; continue; }
+          const marca = iM >= 0 ? (r[iM] || "").trim() || null : null;
+          const k = `${nome}|${marca || ""}`.toLowerCase();
+          if (chiavi.has(k)) { saltati++; continue; }
+          chiavi.add(k);
+          let unit = iU >= 0 ? (r[iU] || "g").trim().toLowerCase() : "g";
+          if (!["g", "ml", "pz"].includes(unit)) unit = unit.startsWith("pe") || unit === "pezzo" ? "pz" : "g";
+          nuovi.push({ client_id: clientId, nome, marca, unit, uname: unit === "pz" ? ((iP >= 0 && (r[iP] || "").trim()) || "pezzo") : null, per: unit === "pz" ? 1 : (num(iPer >= 0 ? r[iPer] : null) || 100), kcal, proteine: iPr >= 0 ? num(r[iPr]) : null, carboidrati: iC >= 0 ? num(r[iC]) : null, grassi: iG >= 0 ? num(r[iG]) : null, quantita_abituale: iQ >= 0 ? num(r[iQ]) : null });
+        }
+        if (nuovi.length === 0) { setMsg(`Nessun alimento nuovo da importare (${saltati} righe saltate: vuote o già presenti).`); setLavoro(false); return; }
+        if (!confirm(`Importo ${nuovi.length} alimenti nella lista di questa cliente? (${saltati} righe saltate)`)) { setLavoro(false); return; }
+        const { error } = await supabase.from("kcal_foods").insert(nuovi);
+        setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} alimenti ✓${saltati ? ` (${saltati} saltati)` : ""}`);
+        if (!error) onFatto?.();
+      } else if (col("kcal") >= 0) {
+        const iI = col("inizio", "data_inizio"), iF = col("fine", "data_fine"), iK = col("kcal"), iPr = col("proteine", "proteine_g"), iC = col("carboidrati", "carboidrati_g"), iG = col("grassi", "grassi_g"), iNo = col("note", "nota");
+        const oggi = formatDataLocale(new Date());
+        const nuovi = dati.map((r) => ({ client_id: clientId, data_aggiornamento: oggi, data_inizio: iI >= 0 ? dataIso(r[iI]) : null, data_fine: iF >= 0 ? dataIso(r[iF]) : null, kcal: num(r[iK]) === null ? null : Math.round(num(r[iK])), proteine_g: iPr >= 0 ? num(r[iPr]) : null, carboidrati_g: iC >= 0 ? num(r[iC]) : null, grassi_g: iG >= 0 ? num(r[iG]) : null, note: iNo >= 0 ? (r[iNo] || "").trim() || null : null })).filter((x) => x.kcal !== null);
+        if (nuovi.length === 0) { setMsg("Non trovo righe con le kcal."); setLavoro(false); return; }
+        if (!confirm(`Importo ${nuovi.length} cicli alimentari per questa cliente?`)) { setLavoro(false); return; }
+        const { error } = await supabase.from("nutrition_plans").insert(nuovi);
+        setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} cicli alimentari ✓`);
+        if (!error) onFatto?.();
+      } else setMsg("Non riconosco il file: serve una colonna “kcal” (cicli) oppure “nome” + “kcal” (alimenti).");
+    } catch (e) { setMsg("Non riesco a leggere il file."); }
+    setLavoro(false);
+  };
+  return (
+    <Card className="p-4 space-y-2">
+      <p className="text-sm font-medium text-slate-700">Importa da file CSV</p>
+      <p className="text-[11px] text-slate-400">Cicli alimentari (colonne: inizio, fine, kcal, proteine, carboidrati, grassi, note) oppure lista alimenti della cliente (nome, marca, unita, nome_pezzo, per, kcal, proteine, carboidrati, grassi, quantita_abituale). Capisco da sola quale dei due è.</p>
+      <label className="block w-full text-center border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2 cursor-pointer">
+        {lavoro ? "Importo..." : "📥 Scegli file CSV"}
+        <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importa(e.target.files[0]); e.target.value = ""; }} />
+      </label>
+      {msg && <p className="text-xs text-slate-600">{msg}</p>}
     </Card>
   );
 }
@@ -5442,6 +5534,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         <div className="space-y-3">
           <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica}
             modifica={nutrizioneModifica} onAnnullaModifica={() => setNutrizioneModifica(null)} />
+          <ImportaNutrizioneCSV clientId={clientId} onFatto={carica} />
           <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica} />
         </div>
       )}
@@ -5598,8 +5691,8 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-orange-500" };
-const ORDINE_TIPO_DOT = { check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
+const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-orange-500" };
+const ORDINE_TIPO_DOT = { compleanno: 7, check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
 const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
 
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
@@ -5775,6 +5868,14 @@ function CalendarioAgenda({ clients, onSelect }) {
   clients.forEach((c) => {
     if (c.tipo_servizio !== "presenza" && c.prossimo_check) eventi.push({ data: c.prossimo_check, ora: null, tipo: "check", nome: `${c.nome} ${c.cognome}`, label: "Check da fare", clientId: c.id });
     if (c.data_scadenza && c.stato_pacchetto !== "scaduto") eventi.push({ data: c.data_scadenza, ora: null, tipo: "scadenza", nome: `${c.nome} ${c.cognome}`, label: "Pacchetto in scadenza", clientId: c.id });
+    if (!c.archiviato && c.data_nascita && /^\d{4}-\d{2}-\d{2}/.test(c.data_nascita)) {
+      const [ya, mm, dd] = c.data_nascita.slice(0, 10).split("-");
+      [anno, anno + 1].forEach((y) => {
+        const gg = mm === "02" && dd === "29" && !(new Date(y, 1, 29).getMonth() === 1) ? "28" : dd;
+        const eta = y - Number(ya);
+        if (eta > 0) eventi.push({ data: `${y}-${mm}-${gg}`, ora: null, tipo: "compleanno", nome: `${c.nome} ${c.cognome}`.trim(), label: `🎂 Compleanno — compie ${eta} anni`, clientId: c.id });
+      });
+    }
   });
   eventiCalendario.forEach((e) => {
     if (e.tipo === "personale") {
@@ -5873,6 +5974,7 @@ function CalendarioAgenda({ clients, onSelect }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Personale/extra</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Promemoria</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-pink-400" /> Compleanni</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400" /> Messaggi clienti</span>
       </div>
 
