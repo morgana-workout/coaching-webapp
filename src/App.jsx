@@ -499,6 +499,39 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   );
 }
 
+function RiepilogoSettimana({ client }) {
+  const [r, setR] = useState(null);
+  const mostraLog = client.tipo_servizio !== "presenza" || client.log_visibile_cliente;
+  const mostraKcal = client.kcal_attivo !== false;
+  useEffect(() => {
+    if (!mostraLog && !mostraKcal) return;
+    const oggi = new Date();
+    const lun = new Date(oggi); lun.setDate(oggi.getDate() - ((oggi.getDay() + 6) % 7));
+    const da = formatDataLocale(lun);
+    (async () => {
+      const [t, k] = await Promise.all([
+        mostraLog ? supabase.from("training_entries").select("data").eq("client_id", client.id).gte("data", da).limit(500) : { data: [] },
+        mostraKcal ? supabase.from("kcal_voci").select("data").eq("client_id", client.id).gte("data", da).limit(2000) : { data: [] },
+      ]);
+      setR({ all: new Set((t.data || []).map((x) => x.data)).size, diario: new Set((k.data || []).map((x) => x.data)).size });
+    })();
+  }, [client.id, mostraLog, mostraKcal]);
+  if (!r || (!mostraLog && !mostraKcal)) return null;
+  const parti = [];
+  if (mostraLog) parti.push(`${r.all} allenament${r.all === 1 ? "o" : "i"}`);
+  if (mostraKcal) parti.push(`diario compilato ${r.diario} giorn${r.diario === 1 ? "o" : "i"}`);
+  const vuoto = (mostraLog ? r.all : 0) + (mostraKcal ? r.diario : 0) === 0;
+  return (
+    <Card className="p-4 flex items-center gap-3 border-emerald-100 bg-emerald-50/50">
+      <span className="text-2xl">{vuoto ? "🌱" : "🌟"}</span>
+      <div className="min-w-0">
+        <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">La tua settimana</p>
+        <p className="font-semibold text-slate-800 text-sm">{vuoto ? "Si riparte da qui: anche un solo passo conta 💪🏻" : `Questa settimana: ${parti.join(", ")} 💪🏻`}</p>
+      </div>
+    </Card>
+  );
+}
+
 function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima = null }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
@@ -558,6 +591,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
           </Card>
         </button>
       )}
+
+      <RiepilogoSettimana client={client} />
 
       {isOnline && (
         <Card className="p-5">
@@ -3214,7 +3249,7 @@ function NotificheDellaCliente({ client }) {
   }, [client.id]);
   if (righe === null) return <Spinner />;
   const m = (n) => n.proposta_luogo || "";
-  const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : m(n).startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : m(n).startsWith("promemoria_check") ? "Promemoria: check in arrivo" : m(n).startsWith("auto_check") ? "Check ricevuto ✨" : m(n).startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : m(n).startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : m(n).startsWith("auto_traguardo_streak") ? "Costanza 🔥" : m(n).startsWith("auto_") ? "Messaggio automatico" : "Nota";
+  const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : m(n).startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : m(n).startsWith("promemoria_check") ? "Promemoria: check in arrivo" : m(n).startsWith("auto_check") ? "Check ricevuto ✨" : m(n).startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : m(n).startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : m(n).startsWith("auto_traguardo_streak") ? "Costanza 🔥" : m(n).startsWith("auto_") ? "Messaggio automatico" : m(n).startsWith("lez_prom") ? "Promemoria lezione" : m(n).startsWith("lez_mod") ? "Lezione spostata" : m(n).startsWith("lez_nuova") ? "Nuova lezione" : "Nota";
   const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-emerald-100 text-emerald-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-rose-100 text-rose-700" } : { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
   const nuove = righe.filter((n) => n.stato === "inviata");
   const vecchie = righe.filter((n) => n.stato !== "inviata");
@@ -5335,7 +5370,7 @@ async function esportaDatiCliente(client, setInCorso) {
   r.push("## Anagrafica");
   r.push(`- Codice: ${client.codice || "-"}`);
   r.push(`- Email: ${client.email || "-"} · Telefono: ${client.telefono || "-"}`);
-  r.push(`- Sesso: ${client.sesso || "-"} · Età: ${client.eta || "-"} · Data nascita: ${client.data_nascita || "-"} · Altezza: ${client.altezza_cm || "-"} cm`);
+  r.push(`- Sesso: ${client.sesso || "-"} · Età: ${calcolaEta(client.data_nascita) ?? client.eta ?? "-"} · Data nascita: ${client.data_nascita || "-"} · Altezza: ${client.altezza_cm || "-"} cm`);
   r.push(`- Tipo servizio: ${client.tipo_servizio || "-"} · Piano: ${client.piano || "-"}`);
   r.push(`- Livello attività: ${client.livello_attivita || "-"}`);
   r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${client.obiettivo_attuale || "-"}`);
@@ -5953,6 +5988,28 @@ const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: 
 const ORDINE_TIPO_DOT = { compleanno: 7, check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
 const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
 
+// Avvisa la cliente (notifica in app + push) quando una lezione viene inserita o spostata
+async function avvisaLezioneCliente(ev, tipoAvviso) {
+  try {
+    if (!ev || ev.tipo !== "lezione" || !ev.client_id || !ev.data) return;
+    const oggi = new Date(); oggi.setHours(12, 0, 0, 0);
+    const d = new Date(ev.data + "T12:00:00");
+    const diff = Math.round((d - oggi) / 86400000);
+    if (diff < 0) return;
+    const giorni = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+    const quando = diff === 0 ? "oggi" : diff === 1 ? "domani" : `${giorni[d.getDay()]} ${ev.data.split("-").reverse().slice(0, 2).join("/")}`;
+    const ora = ev.ora ? ` alle ${ev.ora.slice(0, 5)}` : "";
+    const dove = ev.luogo ? ` (${ev.luogo})` : "";
+    const messaggio = tipoAvviso === "mod"
+      ? `Ho spostato la tua lezione: ora è ${quando}${ora}${dove} 🫶🏻`
+      : `Ti ho segnato una lezione ${quando}${ora}${dove} 🫶🏻 La trovi nella sezione Appuntamenti ✨`;
+    const { data: n } = await supabase.from("notifiche").insert({
+      client_id: ev.client_id, tipo: "nota", messaggio, proposta_data: ev.data, proposta_luogo: `lez_${tipoAvviso}_${ev.id}`, stato: "inviata",
+    }).select("id").single();
+    if (n?.id) inviaPush({ evento: "nota", notifica_id: n.id });
+  } catch (e) { /* non blocca mai il salvataggio */ }
+}
+
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
   const [f, setF] = useState({
     client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10),
@@ -5967,7 +6024,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       ? { tipo: "personale", data: f.data, ora: f.ora || null, titolo: f.titolo.trim(), nota: f.nota || null, stato: "confermato" }
       : { client_id: f.client_id, tipo: f.tipo, data: f.data, ora: f.ora || null, nota: f.nota || null, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
     const { data: creato } = await supabase.from("calendar_events").insert(payload).select().single();
-    if (creato && f.tipo === "lezione") await collegaLezionePacchetto(f.client_id, creato);
+    if (creato && f.tipo === "lezione") { await collegaLezionePacchetto(f.client_id, creato); await avvisaLezioneCliente(creato, "nuova"); }
     setSalvando(false);
     onSalvato();
   };
@@ -6035,6 +6092,9 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
       : { data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato };
     await supabase.from("calendar_events").update(payload).eq("id", evento.id);
     if (!isPersonale) await sincronizzaLezionePacchetto(evento.id);
+    if (evento.tipo === "lezione" && f.stato === "confermato" && (f.data !== evento.data || (f.ora || "") !== (evento.ora ? evento.ora.slice(0, 5) : "") || (f.luogo || "") !== (evento.luogo || ""))) {
+      await avvisaLezioneCliente({ ...evento, data: f.data, ora: f.ora || null, luogo: f.luogo || null }, "mod");
+    }
     setSalvando(false);
     onSalvato();
   };
@@ -7046,6 +7106,63 @@ function StoricoAzioniClienti({ clients }) {
   );
 }
 
+function ClientiDaRiattivare({ clients, onSelect }) {
+  const [ult, setUlt] = useState(null);
+  const [contatti, setContatti] = useState({});
+  const [aperto, setAperto] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("ultima_attivita_clienti");
+      setUlt(Object.fromEntries((data || []).map((x) => [x.client_id, x.ultima])));
+      const { data: w } = await supabase.from("contatti_whatsapp").select("client_id, ultimo_contatto");
+      setContatti(Object.fromEntries((w || []).map((x) => [x.client_id, x.ultimo_contatto])));
+    })();
+  }, []);
+  if (!ult) return null;
+  const oggi = new Date(); oggi.setHours(12, 0, 0, 0);
+  const lista = clients
+    .filter((c) => !c.archiviato && (c.tipo_servizio !== "presenza" || c.log_visibile_cliente || c.kcal_attivo !== false))
+    .map((c) => {
+      const u = ult[c.id];
+      const giorni = u ? Math.floor((oggi - new Date(u + "T12:00:00")) / 86400000) : null;
+      return { c, giorni };
+    })
+    .filter((x) => x.giorni === null || x.giorni >= 7)
+    .sort((a, b) => (b.giorni ?? 9999) - (a.giorni ?? 9999));
+  if (lista.length === 0) return null;
+  const scrivi = async (c) => {
+    const adesso = new Date().toISOString();
+    const { error } = await supabase.from("contatti_whatsapp").upsert({ client_id: c.id, ultimo_contatto: adesso }, { onConflict: "client_id" });
+    if (!error) setContatti({ ...contatti, [c.id]: adesso });
+  };
+  const telefono = (t) => { let x = String(t || "").replace(/[^\d+]/g, ""); if (x.startsWith("+")) x = x.slice(1); else if (x.startsWith("00")) x = x.slice(2); else if (x.length === 10 && x.startsWith("3")) x = "39" + x; return x; };
+  return (
+    <div>
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">
+        <span>💤 Clienti da riattivare ({lista.length})</span><span>{aperto ? "▲" : "▼"}</span>
+      </button>
+      {aperto && (
+        <div className="space-y-2">
+          {lista.map(({ c, giorni }) => {
+            const tel = telefono(c.telefono);
+            const msg = encodeURIComponent(`Ciao ${c.nome}! 🫶🏻 Come va? Ti ho pensata: se hai bisogno di una mano a ripartire, io ci sono ✨`);
+            const wa = contatti[c.id] ? Math.floor((Date.now() - new Date(contatti[c.id]).getTime()) / 86400000) : null;
+            return (
+              <Card key={c.id} className="p-3 flex items-center gap-3">
+                <button onClick={() => onSelect?.(c.id)} className="flex-1 min-w-0 text-left">
+                  <p className="font-medium text-slate-700 text-sm truncate">{c.nome} {c.cognome}</p>
+                  <p className="text-slate-400 text-[11px]">{giorni === null ? "Nessuna attività registrata" : `Ultima attività ${giorni} giorni fa`}{wa !== null ? ` · scritto su WhatsApp ${wa === 0 ? "oggi" : wa + " giorni fa"}` : ""}</p>
+                </button>
+                {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-emerald-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -7185,6 +7302,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
 
       <CompleanniClienti clients={clients} />
 
+      <ClientiDaRiattivare clients={clients} onSelect={onSelect} />
       <StoricoAzioniClienti clients={clients} />
 
       <StoricoNotifiche clients={clients} />
