@@ -1691,6 +1691,16 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
   );
 }
 
+// Il ciclo alimentare in vigore oggi: l'ultimo già iniziato (e non scaduto); se tutti sono scaduti, l'ultimo iniziato.
+function pianoAttivo(lista) {
+  const oggi = formatDataLocale(new Date());
+  const k = (r) => r.data_inizio || r.data_aggiornamento || "";
+  const iniz = (lista || []).filter((r) => r.kcal != null && k(r) && k(r) <= oggi);
+  const validi = iniz.filter((r) => !r.data_fine || r.data_fine >= oggi);
+  const pool = validi.length ? validi : iniz;
+  return [...pool].sort((a, b) => k(b).localeCompare(k(a)) || (b.created_at || "").localeCompare(a.created_at || ""))[0] || null;
+}
+
 function formattaPeriodo(r) {
   const ini = r.data_inizio ? r.data_inizio.split("-").reverse().join("/") : r.data_aggiornamento?.split("-").reverse().join("/");
   const fine = r.data_fine ? r.data_fine.split("-").reverse().join("/") : null;
@@ -1798,6 +1808,17 @@ function ClientNutrizione({ piano, storico }) {
           </div>
         ))}
       </Card>
+      {Array.isArray(piano.pasti) && piano.pasti.length > 0 && (
+        <Card className="p-4 space-y-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Suddivisione per pasti</p>
+          {piano.pasti.map((x, i) => (
+            <div key={i} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+              <div className="flex justify-between text-sm"><span className="font-medium text-slate-700">{x.nome}</span>{x.kcal != null && <span className="text-slate-500">{x.kcal} kcal</span>}</div>
+              <p className="text-xs text-slate-500 mt-0.5">Proteine {x.proteine_g ?? "—"} g · Carboidrati {x.carboidrati_g ?? "—"} g · Grassi {x.grassi_g ?? "—"} g</p>
+            </div>
+          ))}
+        </Card>
+      )}
       {piano.note && (
         <Card className="p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Note di Morgana</p>
@@ -2793,9 +2814,8 @@ function ClientApp({ session, anteprima = null }) {
       const { data: ck } = await supabase.from("checkins").select("*").eq("client_id", c.id).order("data_check", { ascending: true });
       setCheckins(ck || []);
       const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
-      setPiano(nu);
       const { data: nuStorico } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: true });
-      setPianoStorico(nuStorico || []);
+      { const iniziati = (nuStorico || []).filter((r) => { const d = r.data_inizio || r.data_aggiornamento; return !d || d <= formatDataLocale(new Date()); }); setPianoStorico(iniziati); setPiano(pianoAttivo(iniziati)); }
       try { if (!anteprima) await generaPromemoriCliente(c); } catch (e) { /* non blocca mai il caricamento */ }
       const { count } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("stato", "inviata");
       setNonLette(count || 0);
@@ -3029,11 +3049,39 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} alimenti ✓${saltati ? ` (${saltati} saltati)` : ""}`);
         if (!error) onFatto?.();
       } else if (col("kcal") >= 0) {
-        const iI = col("inizio", "data_inizio"), iF = col("fine", "data_fine"), iK = col("kcal"), iPr = col("proteine", "proteine_g"), iC = col("carboidrati", "carboidrati_g"), iG = col("grassi", "grassi_g"), iNo = col("note", "nota");
-        const oggi = formatDataLocale(new Date());
-        const nuovi = dati.map((r) => ({ client_id: clientId, data_aggiornamento: oggi, data_inizio: iI >= 0 ? dataIso(r[iI]) : null, data_fine: iF >= 0 ? dataIso(r[iF]) : null, kcal: num(r[iK]) === null ? null : Math.round(num(r[iK])), proteine_g: iPr >= 0 ? num(r[iPr]) : null, carboidrati_g: iC >= 0 ? num(r[iC]) : null, grassi_g: iG >= 0 ? num(r[iG]) : null, note: iNo >= 0 ? (r[iNo] || "").trim() || null : null })).filter((x) => x.kcal !== null);
-        if (nuovi.length === 0) { setMsg("Non trovo righe con le kcal."); setLavoro(false); return; }
-        if (!confirm(`Importo ${nuovi.length} cicli alimentari per questa cliente?`)) { setLavoro(false); return; }
+        const iS = col("settimana", "ciclo"), iI = col("inizio", "data_inizio"), iF = col("fine", "data_fine"), iPa = col("pasto"), iK = col("kcal"), iPr = col("proteine", "proteine_g"), iC = col("carboidrati", "carboidrati_g"), iG = col("grassi", "grassi_g"), iNo = col("note", "nota");
+        const prossimoLunedi = (d) => { const x = new Date(d + "T00:00:00"); x.setDate(x.getDate() + (((8 - x.getDay()) % 7) || 7)); return formatDataLocale(x); };
+        const gruppi = []; const mappa = {};
+        dati.forEach((r, n) => {
+          const chiave = (iS >= 0 && (r[iS] || "").trim()) || (iI >= 0 && (r[iI] || "").trim()) || (iPa >= 0 ? "unico" : "riga" + n);
+          if (!mappa[chiave]) { mappa[chiave] = []; gruppi.push(mappa[chiave]); }
+          mappa[chiave].push(r);
+        });
+        const cicli = gruppi.map((righe) => {
+          const pasti = []; let tot = null, nota = null, ini = null, fin = null;
+          righe.forEach((r) => {
+            if (!ini && iI >= 0) ini = dataIso(r[iI]);
+            if (!fin && iF >= 0) fin = dataIso(r[iF]);
+            if (!nota && iNo >= 0 && (r[iNo] || "").trim()) nota = r[iNo].trim();
+            const nomePasto = iPa >= 0 ? (r[iPa] || "").trim() : "";
+            const v = { kcal: num(r[iK]), proteine_g: iPr >= 0 ? num(r[iPr]) : null, carboidrati_g: iC >= 0 ? num(r[iC]) : null, grassi_g: iG >= 0 ? num(r[iG]) : null };
+            if (nomePasto && !/^totale/i.test(nomePasto)) pasti.push({ nome: nomePasto, ...v });
+            else if (!tot) tot = v;
+          });
+          if (!tot && pasti.length) {
+            const somma = (k) => pasti.reduce((t, x) => t + (x[k] || 0), 0);
+            tot = { kcal: somma("kcal"), proteine_g: somma("proteine_g"), carboidrati_g: somma("carboidrati_g"), grassi_g: somma("grassi_g") };
+          }
+          return { ini, fin, pasti, tot, nota };
+        }).filter((c) => c.tot && c.tot.kcal !== null && c.tot.kcal > 0);
+        if (cicli.length === 0) { setMsg("Non trovo righe con le kcal."); setLavoro(false); return; }
+        // Date: se non indicate, il primo ciclo parte oggi e ogni ciclo successivo parte il lunedì dopo.
+        let prec = null;
+        cicli.forEach((c) => { c.start = c.ini || (prec ? prossimoLunedi(prec) : formatDataLocale(new Date())); prec = c.start; });
+        cicli.forEach((c, i) => { c.end = c.fin || (cicli[i + 1] ? addGiorni(cicli[i + 1].start, -1) : null); });
+        const nuovi = cicli.map((c) => ({ client_id: clientId, data_aggiornamento: c.start, data_inizio: c.start, data_fine: c.end, kcal: Math.round(c.tot.kcal), proteine_g: c.tot.proteine_g, carboidrati_g: c.tot.carboidrati_g, grassi_g: c.tot.grassi_g, note: c.nota, pasti: c.pasti.length ? c.pasti : null }));
+        const fd = (d) => d.split("-").reverse().slice(0, 2).join("/");
+        if (!confirm(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
         const { error } = await supabase.from("nutrition_plans").insert(nuovi);
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} cicli alimentari ✓`);
         if (!error) onFatto?.();
@@ -3044,7 +3092,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
   return (
     <Card className="p-4 space-y-2">
       <p className="text-sm font-medium text-slate-700">Importa da file CSV</p>
-      <p className="text-[11px] text-slate-400">Cicli alimentari (colonne: inizio, fine, kcal, proteine, carboidrati, grassi, note) oppure lista alimenti della cliente (nome, marca, unita, nome_pezzo, per, kcal, proteine, carboidrati, grassi, quantita_abituale). Capisco da sola quale dei due è.</p>
+      <p className="text-[11px] text-slate-400">Cicli alimentari (colonne: settimana, inizio, fine, pasto, kcal, proteine, carboidrati, grassi, note; le date sono facoltative e se mancano ogni ciclo parte il lunedì dopo) oppure lista alimenti della cliente (nome, marca, unita, nome_pezzo, per, kcal, proteine, carboidrati, grassi, quantita_abituale). Capisco da sola quale dei due è.</p>
       <label className="block w-full text-center border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2 cursor-pointer">
         {lavoro ? "Importo..." : "📥 Scegli file CSV"}
         <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importa(e.target.files[0]); e.target.value = ""; }} />
@@ -3103,6 +3151,15 @@ function AnteprimaCliente({ client }) {
   );
 }
 
+function pastiPerForm(src) {
+  return (src?.pasti || []).map((x) => ({ nome: x.nome || "", kcal: x.kcal ?? "", p: x.proteine_g ?? "", c: x.carboidrati_g ?? "", g: x.grassi_g ?? "" }));
+}
+function pastiDaForm(lista) {
+  const n = (v) => (v === "" || v == null ? null : Number(v));
+  const out = (lista || []).filter((x) => (x.nome || "").trim()).map((x) => ({ nome: x.nome.trim(), kcal: n(x.kcal), proteine_g: n(x.p), carboidrati_g: n(x.c), grassi_g: n(x.g) }));
+  return out.length ? out : null;
+}
+
 function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifica }) {
   const oggi = new Date().toISOString().slice(0, 10);
   const sorgente = modifica || ultimo;
@@ -3111,6 +3168,7 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
     grassi_g: sorgente?.grassi_g || "", note: modifica ? (modifica.note || "") : "",
     data_inizio: modifica ? (modifica.data_inizio || "") : oggi,
     data_fine: modifica ? (modifica.data_fine || "") : "",
+    pasti: pastiPerForm(sorgente),
   });
   const [salvando, setSalvando] = useState(false);
 
@@ -3120,6 +3178,7 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
       grassi_g: sorgente?.grassi_g || "", note: modifica ? (modifica.note || "") : "",
       data_inizio: modifica ? (modifica.data_inizio || "") : oggi,
       data_fine: modifica ? (modifica.data_fine || "") : "",
+      pasti: pastiPerForm(sorgente),
     });
   }, [modifica?.id]);
 
@@ -3134,6 +3193,7 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
       kcal: f.kcal || null, proteine_g: f.proteine_g || null, carboidrati_g: f.carboidrati_g || null,
       grassi_g: f.grassi_g || null, note: f.note || null,
       data_inizio: f.data_inizio || null, data_fine: f.data_fine || null,
+      pasti: pastiDaForm(f.pasti),
     };
     if (modifica) {
       await supabase.from("nutrition_plans").update(payload).eq("id", modifica.id);
@@ -3167,6 +3227,29 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
         {campo("Proteine (g)", "proteine_g")}
         {campo("Carboidrati (g)", "carboidrati_g")}
         {campo("Grassi (g)", "grassi_g")}
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-slate-500">Suddivisione per pasti (facoltativa)</p>
+          <button onClick={() => setF({ ...f, pasti: [...(f.pasti || []), { nome: "", kcal: "", p: "", c: "", g: "" }] })} className="text-xs text-sky-600 font-medium">+ Pasto</button>
+        </div>
+        {(f.pasti || []).map((r, i) => {
+          const set = (k) => (e) => setF({ ...f, pasti: f.pasti.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) });
+          return (
+            <div key={i} className="space-y-1">
+              <div className="flex gap-1.5">
+                <input value={r.nome} onChange={set("nome")} placeholder="Pasto (es. Colazione)" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <button onClick={() => setF({ ...f, pasti: f.pasti.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-slate-600 px-2">✕</button>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                <input type="number" value={r.kcal} onChange={set("kcal")} placeholder="kcal" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <input type="number" value={r.p} onChange={set("p")} placeholder="P g" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <input type="number" value={r.c} onChange={set("c")} placeholder="C g" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <input type="number" value={r.g} onChange={set("g")} placeholder="G g" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+              </div>
+            </div>
+          );
+        })}
       </div>
       <textarea placeholder="Note per la cliente" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
@@ -5236,9 +5319,9 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     const { data: nt } = await supabase.from("notes").select("*").eq("client_id", clientId).order("data", { ascending: false });
     setNotes(nt || []);
     const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", clientId).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
-    setNutrizione(nu);
     const { data: nuStorico } = await supabase.from("nutrition_plans").select("*").eq("client_id", clientId).order("data_aggiornamento", { ascending: true });
     setNutrizioneStorico(nuStorico || []);
+    setNutrizione(pianoAttivo(nuStorico) || nu);
     const { data: pg } = await supabase.from("payments").select("*").eq("client_id", clientId).order("data_pagamento", { ascending: false });
     setPagamenti(pg || []);
   };
