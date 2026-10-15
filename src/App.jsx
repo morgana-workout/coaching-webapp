@@ -1707,7 +1707,7 @@ function formattaPeriodo(r) {
   return fine ? `${ini} → ${fine}` : `dal ${ini}`;
 }
 
-function StoricoNutrizione({ storico, isAdmin, onModifica }) {
+function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   const [vista, setVista] = useState("aggiornamenti");
   const conKcal = (storico || []).filter((r) => r.kcal != null && r.data_aggiornamento);
   if (conKcal.length === 0) return null;
@@ -1756,12 +1756,15 @@ function StoricoNutrizione({ storico, isAdmin, onModifica }) {
           {[...conKcal].reverse().map((r) => {
             const Riga = isAdmin ? "button" : "div";
             return (
-              <Riga key={r.id} onClick={isAdmin ? () => onModifica?.(r) : undefined}
-                className={`w-full flex justify-between items-center text-sm border-b border-slate-100 pb-1.5 ${isAdmin ? "text-left hover:bg-slate-50 rounded px-1 -mx-1" : ""}`}>
-                <span className="text-slate-500">{formattaPeriodo(r)}</span>
-                <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
-                <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
-              </Riga>
+              <li key={r.id} className="flex items-center gap-1">
+                <Riga onClick={isAdmin ? () => onModifica?.(r) : undefined}
+                  className={`w-full flex justify-between items-center text-sm border-b border-slate-100 pb-1.5 ${isAdmin ? "text-left hover:bg-slate-50 rounded px-1 -mx-1" : ""}`}>
+                  <span className="text-slate-500">{formattaPeriodo(r)}</span>
+                  <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
+                  <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
+                </Riga>
+                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-red-500 px-1.5 flex-shrink-0">🗑</button>}
+              </li>
             );
           })}
         </ul>
@@ -3082,6 +3085,10 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
         const nuovi = cicli.map((c) => ({ client_id: clientId, data_aggiornamento: c.start, data_inizio: c.start, data_fine: c.end, kcal: Math.round(c.tot.kcal), proteine_g: c.tot.proteine_g, carboidrati_g: c.tot.carboidrati_g, grassi_g: c.tot.grassi_g, note: c.nota, pasti: c.pasti.length ? c.pasti : null }));
         const fd = (d) => d.split("-").reverse().slice(0, 2).join("/");
         if (!confirm(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
+        const { count: giaPresenti } = await supabase.from("nutrition_plans").select("id", { count: "exact", head: true }).eq("client_id", clientId);
+        if (giaPresenti > 0 && confirm(`Questa cliente ha già ${giaPresenti} cicli salvati. OK = li elimino e metto solo quelli nuovi. Annulla = li tengo e aggiungo i nuovi (rischi di averli doppi).`)) {
+          await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
+        }
         const { error } = await supabase.from("nutrition_plans").insert(nuovi);
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} cicli alimentari ✓`);
         if (!error) onFatto?.();
@@ -5669,7 +5676,23 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica}
             modifica={nutrizioneModifica} onAnnullaModifica={() => setNutrizioneModifica(null)} />
           <ImportaNutrizioneCSV clientId={clientId} onFatto={carica} />
-          <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica} />
+          <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica}
+            onElimina={async (r) => {
+              if (!confirm(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
+              const { error } = await supabase.from("nutrition_plans").delete().eq("id", r.id);
+              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              if (nutrizioneModifica?.id === r.id) setNutrizioneModifica(null);
+              carica();
+            }} />
+          {nutrizioneStorico.length > 0 && (
+            <button onClick={async () => {
+              if (!confirm(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
+              const { error } = await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
+              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              setNutrizioneModifica(null);
+              carica();
+            }} className="w-full border border-red-100 bg-red-50 text-red-600 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
+          )}
         </div>
       )}
 
