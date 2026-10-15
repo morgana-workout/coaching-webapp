@@ -499,7 +499,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   );
 }
 
-function ClientHome({ client, onAggiornato, menu = [], onApri }) {
+function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima = null }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
   const richiestaRef = React.useRef(null);
@@ -544,6 +544,20 @@ function ClientHome({ client, onAggiornato, menu = [], onApri }) {
         <h1 className="text-2xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
         <p className="text-slate-500 text-sm mt-1">Costanza batte perfezione, sempre.</p>
       </div>
+
+      {!isBulb && lezioneProssima && (
+        <button onClick={() => onApri?.("lezioni")} className="w-full text-left">
+          <Card className="p-4 flex items-center gap-3 border-sky-200 bg-sky-50/50">
+            <span className="text-2xl">📅</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione{lezioneProssima.stato === "richiesta" ? " (da confermare)" : ""}</p>
+              <p className="font-semibold text-slate-800">{lezioneProssima.data.split("-").reverse().join("/")}{lezioneProssima.ora ? ` · ${lezioneProssima.ora.slice(0, 5)}` : ""}</p>
+              {lezioneProssima.luogo && <p className="text-slate-500 text-xs">{lezioneProssima.luogo}</p>}
+            </div>
+            <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+          </Card>
+        </button>
+      )}
 
       {isOnline && (
         <Card className="p-5">
@@ -2796,6 +2810,7 @@ function ClientApp({ session, anteprima = null }) {
   const [caricando, setCaricando] = useState(true);
   const [nonLette, setNonLette] = useState(0);
   const [chatNonLetti, setChatNonLetti] = useState(0);
+  const [lezioneProssima, setLezioneProssima] = useState(null);
 
   const carica = async () => {
     setCaricando(true);
@@ -2839,6 +2854,8 @@ function ClientApp({ session, anteprima = null }) {
       setNonLette(count || 0);
       const { count: chatCount } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("mittente", "coach").eq("letto", false);
       setChatNonLetti(chatCount || 0);
+      const { data: lzP } = await supabase.from("calendar_events").select("id, data, ora, luogo, stato").eq("client_id", c.id).eq("tipo", "lezione").in("stato", ["confermato", "richiesta"]).gte("data", formatDataLocale(new Date())).order("data").order("ora").limit(1);
+      setLezioneProssima(lzP?.[0] || null);
     }
     setCaricando(false);
   };
@@ -2858,7 +2875,7 @@ function ClientApp({ session, anteprima = null }) {
     ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
-    ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
+    ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
     { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
@@ -2877,7 +2894,7 @@ function ClientApp({ session, anteprima = null }) {
         {!anteprima && <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>}
       </div>
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
-        {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} />}
+        {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} lezioneProssima={lezioneProssima} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
