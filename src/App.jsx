@@ -3054,6 +3054,35 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
   );
 }
 
+// Solo coach: quando ho scritto per l'ultima volta a questa cliente su WhatsApp (data e ora), registrato dall'app.
+function ContattoWhatsapp({ client }) {
+  const [quando, setQuando] = useState(undefined);
+  useEffect(() => {
+    setQuando(undefined);
+    supabase.from("contatti_whatsapp").select("ultimo_contatto").eq("client_id", client.id).maybeSingle().then(({ data }) => setQuando(data?.ultimo_contatto || null));
+  }, [client.id]);
+  const registra = async () => {
+    const adesso = new Date().toISOString();
+    const { error } = await supabase.from("contatti_whatsapp").upsert({ client_id: client.id, ultimo_contatto: adesso }, { onConflict: "client_id" });
+    if (!error) setQuando(adesso);
+  };
+  let tel = String(client.telefono || "").replace(/[^\d+]/g, "");
+  if (tel.startsWith("+")) tel = tel.slice(1); else if (tel.startsWith("00")) tel = tel.slice(2); else if (tel.length === 10 && tel.startsWith("3")) tel = "39" + tel;
+  const fmt = (iso) => { const d = new Date(iso); return d.toLocaleDateString("it-IT", { weekday: "short", day: "2-digit", month: "2-digit" }) + " alle " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" }); };
+  const giorniFa = quando ? Math.floor((Date.now() - new Date(quando).getTime()) / 86400000) : null;
+  return (
+    <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl px-4 py-2.5 text-sm space-y-2">
+      <p className="text-slate-600">💬 Ultimo contatto WhatsApp: {quando === undefined ? "..." : quando ? <span className="font-medium">{fmt(quando)}{giorniFa >= 1 ? ` (${giorniFa} giorn${giorniFa === 1 ? "o" : "i"} fa)` : " (oggi)"}</span> : <span className="text-slate-400">nessuno registrato</span>}</p>
+      <div className="flex gap-2">
+        {tel.length >= 9 ? (
+          <a href={`https://wa.me/${tel}`} target="_blank" rel="noreferrer" onClick={registra} className="flex-1 text-center bg-emerald-600 text-white text-xs font-medium rounded-lg py-2">Scrivi su WhatsApp</a>
+        ) : <span className="flex-1 text-center text-[11px] text-slate-400 py-2">Aggiungi il telefono nei Dati per aprire la chat</span>}
+        <button onClick={registra} className="flex-1 border border-emerald-200 bg-white text-emerald-700 text-xs font-medium rounded-lg py-2">Ho già scritto</button>
+      </div>
+    </div>
+  );
+}
+
 function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifica }) {
   const oggi = new Date().toISOString().slice(0, 10);
   const sorgente = modifica || ultimo;
@@ -5237,6 +5266,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={() => salvaCliente({ archiviato: false })} disabled={salvando} className="flex-shrink-0 text-sky-600 font-medium">Riattiva</button>
         </div>
       )}
+      <ContattoWhatsapp client={client} />
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${tab === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{t.label}</button>
