@@ -2748,7 +2748,7 @@ function ClientApprofondimenti() {
   );
 }
 
-function ClientApp({ session }) {
+function ClientApp({ session, anteprima = null }) {
   const [tab, setTab] = useState("home");
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
@@ -2761,10 +2761,10 @@ function ClientApp({ session }) {
   const carica = async () => {
     setCaricando(true);
     try {
-      await conTimeout(supabase.rpc("sincronizza_stati_check"));
+      if (!anteprima) await conTimeout(supabase.rpc("sincronizza_stati_check"));
     } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
-    let { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).maybeSingle();
-    if (!c) {
+    let { data: c } = anteprima ? await supabase.from("clients").select("*").eq("id", anteprima.id).maybeSingle() : await supabase.from("clients").select("*").eq("user_id", session.user.id).maybeSingle();
+    if (!c && !anteprima) {
       // Primo accesso dopo un'auto-registrazione: la scheda cliente non esiste ancora,
       // la creiamo ora usando nome/cognome inseriti in fase di registrazione (salvati sull'utente
       // di autenticazione), così Morgana la trova già pronta da compilare con pacchetto e dati.
@@ -2796,7 +2796,7 @@ function ClientApp({ session }) {
       setPiano(nu);
       const { data: nuStorico } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: true });
       setPianoStorico(nuStorico || []);
-      try { await generaPromemoriCliente(c); } catch (e) { /* non blocca mai il caricamento */ }
+      try { if (!anteprima) await generaPromemoriCliente(c); } catch (e) { /* non blocca mai il caricamento */ }
       const { count } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("stato", "inviata");
       setNonLette(count || 0);
       const { count: chatCount } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("mittente", "coach").eq("letto", false);
@@ -2805,7 +2805,7 @@ function ClientApp({ session }) {
     setCaricando(false);
   };
 
-  useEffect(() => { carica(); }, [session.user.id]);
+  useEffect(() => { carica(); }, [session?.user?.id, anteprima?.id]);
 
   if (caricando) return <Spinner />;
   if (!client) return <div className="px-6 pt-16 text-center text-slate-500 text-sm">Il tuo account non è ancora collegato a una scheda cliente. Contatta Morgana.</div>;
@@ -2824,7 +2824,7 @@ function ClientApp({ session }) {
     { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
     { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
-  ];
+  ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
 
   return (
     <div className="h-[100dvh] flex flex-col bg-slate-50 max-w-md mx-auto">
@@ -2836,7 +2836,7 @@ function ClientApp({ session }) {
         ) : (
           <img src="/logo.png" alt="MorGainz" className="h-11 w-auto" />
         )}
-        <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
+        {!anteprima && <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>}
       </div>
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
         {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} />}
@@ -3080,6 +3080,26 @@ function ContattoWhatsapp({ client }) {
         <button onClick={registra} className="flex-1 border border-emerald-200 bg-white text-emerald-700 text-xs font-medium rounded-lg py-2">Ho già scritto</button>
       </div>
     </div>
+  );
+}
+
+// Solo coach: apre la schermata della cliente così come la vede lei (senza chat e notifiche, per non segnarle come lette).
+function AnteprimaCliente({ client }) {
+  const [aperta, setAperta] = useState(false);
+  return (
+    <>
+      <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">👁 Vedi l’app come la vede {client.nome}</button>
+      {aperta && createPortal(
+        <div className="fixed inset-0 z-[90] bg-slate-200 flex flex-col">
+          <div className="flex-shrink-0 bg-amber-100 text-amber-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
+            <span>👁 Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
+            <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-amber-300 rounded-lg px-3 py-1 font-medium">Esci</button>
+          </div>
+          <div className="flex-1 min-h-0 [&>div]:!h-full"><ClientApp session={null} anteprima={client} /></div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -5266,6 +5286,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={() => salvaCliente({ archiviato: false })} disabled={salvando} className="flex-shrink-0 text-sky-600 font-medium">Riattiva</button>
         </div>
       )}
+      <AnteprimaCliente client={client} />
       <ContattoWhatsapp client={client} />
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
