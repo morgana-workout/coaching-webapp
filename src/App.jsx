@@ -29,6 +29,23 @@ const CALENDLY_URL = "https://calendly.com/morgana-workout/30min";
 
 const LUOGHI = ["Via San Secondo 39, Torino", "Via Fratelli Calandra 6, Torino"];
 
+// Scelta del luogo: le due sedi Bulb oppure un luogo scritto a mano (casa, parco, altra palestra...).
+function SelezionaLuogo({ value, onChange, vuoto, className = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" }) {
+  const [altro, setAltro] = useState(!!value && !LUOGHI.includes(value));
+  const isAltro = altro || (!!value && !LUOGHI.includes(value));
+  return (
+    <>
+      <select value={isAltro ? "__altro" : (value || "")} className={className}
+        onChange={(e) => { if (e.target.value === "__altro") { setAltro(true); onChange(LUOGHI.includes(value) ? "" : (value || "")); } else { setAltro(false); onChange(e.target.value); } }}>
+        {vuoto && <option value="">{vuoto}</option>}
+        {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+        <option value="__altro">Altro luogo (casa, parco, altra palestra…)</option>
+      </select>
+      {isAltro && <input value={LUOGHI.includes(value) ? "" : (value || "")} onChange={(e) => onChange(e.target.value)} placeholder="Scrivi il luogo (es. a casa, Parco del Valentino, Palestra X)" className={className + " mt-1.5"} />}
+    </>
+  );
+}
+
 function fasceOrarie() {
   const slots = [];
   for (let h = 7; h <= 19; h++) {
@@ -474,9 +491,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       </div>
       <div>
         <label className="text-xs text-slate-500">Sede</label>
-        <select value={luogo} onChange={(e) => setLuogo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
+        <SelezionaLuogo value={luogo} onChange={setLuogo} />
       </div>
       <textarea placeholder="Nota (facoltativa)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{inviando ? "Invio..." : "Invia richiesta"}</button>
@@ -5907,9 +5922,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       {f.tipo === "lezione" && (
         <div>
           <label className="text-xs text-slate-500">Sede</label>
-          <select value={f.luogo} onChange={(e) => setF({ ...f, luogo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-            {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
+          <SelezionaLuogo value={f.luogo} onChange={(v) => setF({ ...f, luogo: v })} />
         </div>
       )}
       <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -5965,10 +5978,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
         </select>
       </div>
       {evento.tipo === "lezione" && (
-        <select value={f.luogo} onChange={(e) => setF({ ...f, luogo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">— sede —</option>
-          {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
+        <SelezionaLuogo value={f.luogo} vuoto="— sede —" onChange={(v) => setF({ ...f, luogo: v })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       )}
       {isPersonale ? (
         <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -6203,9 +6213,7 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
           {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
-      <select value={luogo} onChange={(e) => setLuogo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-      </select>
+      <SelezionaLuogo value={luogo} onChange={setLuogo} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <textarea placeholder="Messaggio (facoltativo)" value={messaggio} onChange={(e) => setMessaggio(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="flex gap-2">
         <button onClick={invia} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia proposta"}</button>
