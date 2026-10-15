@@ -3182,6 +3182,72 @@ function pastiDaForm(lista) {
   return out.length ? out : null;
 }
 
+// Solo coach: le notifiche inviate a questa cliente (nuove = non ancora viste, e storico) e le sue azioni nell'app.
+function NotificheDellaCliente({ client }) {
+  const [righe, setRighe] = useState(null);
+  const [azioni, setAzioni] = useState([]);
+  const [quante, setQuante] = useState(20);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("notifiche").select("*").eq("client_id", client.id).order("created_at", { ascending: false }).limit(300);
+      setRighe(data || []);
+      const { data: az } = await supabase.from("avvisi_attivita").select("tipo, giorno, created_at").eq("client_id", client.id).order("created_at", { ascending: false }).limit(60);
+      setAzioni(az || []);
+    })();
+  }, [client.id]);
+  if (righe === null) return <Spinner />;
+  const m = (n) => n.proposta_luogo || "";
+  const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : m(n).startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : m(n).startsWith("promemoria_check") ? "Promemoria: check in arrivo" : m(n).startsWith("auto_check") ? "Check ricevuto ✨" : m(n).startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : m(n).startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : m(n).startsWith("auto_traguardo_streak") ? "Costanza 🔥" : m(n).startsWith("auto_") ? "Messaggio automatico" : "Nota";
+  const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-emerald-100 text-emerald-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-rose-100 text-rose-700" } : { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+  const nuove = righe.filter((n) => n.stato === "inviata");
+  const vecchie = righe.filter((n) => n.stato !== "inviata");
+  const Riga = ({ n }) => {
+    const b = badge(n);
+    return (
+      <Card className="p-3 space-y-1">
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-medium text-slate-700 text-sm">{titolo(n)}</p>
+          <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 flex-shrink-0 ${b.c}`}>{b.t}</span>
+        </div>
+        {n.tipo === "proposta_lezione" && <p className="text-slate-600 text-xs">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>}
+        {n.messaggio && <p className="text-slate-600 text-xs whitespace-pre-wrap">{n.messaggio}</p>}
+        <p className="text-slate-400 text-[11px]">Inviata il {new Date(n.created_at).toLocaleDateString("it-IT")} alle {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+      </Card>
+    );
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Nuove, non ancora viste da {client.nome} ({nuove.length})</p>
+        <div className="space-y-2">
+          {nuove.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna notifica in attesa: ha visto tutto ✨</Card>}
+          {nuove.map((n) => <Riga key={n.id} n={n} />)}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico notifiche ({vecchie.length})</p>
+        <div className="space-y-2">
+          {vecchie.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna notifica nello storico.</Card>}
+          {vecchie.slice(0, quante).map((n) => <Riga key={n.id} n={n} />)}
+          {vecchie.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Azioni di {client.nome} nell’app ({azioni.length})</p>
+        <div className="space-y-2">
+          {azioni.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna azione registrata finora.</Card>}
+          {azioni.map((r, i) => (
+            <Card key={i} className="p-3 flex items-center justify-between gap-3">
+              <p className="text-slate-600 text-sm">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+              <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifica }) {
   const oggi = new Date().toISOString().slice(0, 10);
   const sorgente = modifica || ultimo;
@@ -5370,6 +5436,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "nutrizione", label: "Nutrizione" },
     { key: "kcal", label: "Alimentazione" },
     { key: "chat", label: "Chat" },
+    { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
   ];
 
@@ -5712,6 +5779,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
+
+      {tab === "notifiche" && <NotificheDellaCliente client={client} />}
 
       {tab === "note" && (
         <div className="space-y-3">
