@@ -4060,7 +4060,7 @@ function CambiaPasswordPropria() {
   );
 }
 
-// Scheda riassuntiva automatica: si compone da sola dai dati aggiornati (allenamento senza carichi, mobilità, attivazione, nutrizione).
+// Scheda riassuntiva automatica e compatta: si compone da sola dai dati aggiornati (allenamento senza carichi, mobilità, attivazione, nutrizione).
 function SchedaRiassuntiva({ client, onClose }) {
   const [dati, setDati] = useState(null);
   useEffect(() => {
@@ -4078,6 +4078,8 @@ function SchedaRiassuntiva({ client, onClose }) {
 
   const oggi = formatDataLocale(new Date());
   const fmt = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const fmtC = (d) => (d ? d.split("-").reverse().slice(0, 2).join("/") : "");
+  const corto = (t, n = 34) => { const s = String(t || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
   const piani = dati?.piani || [];
   const inCorso = piani.find((p) => (p.data_inizio || p.data_aggiornamento) <= oggi && (!p.data_fine || p.data_fine >= oggi));
   const prossimi = piani.filter((p) => (p.data_inizio || p.data_aggiornamento) > oggi);
@@ -4086,50 +4088,28 @@ function SchedaRiassuntiva({ client, onClose }) {
   const altri = principale && prossimi.length ? prossimi.filter((p) => p.id !== principale.id).slice(0, 1) : [];
   const mobilita = (dati?.es || []).filter((x) => x.tipo === "mobilita" && !x.training_day_id);
   const vuoto = dati && dati.giorni.length === 0 && mobilita.length === 0 && piani.length === 0;
-
-  const Riga = ({ x }) => (
-    <li className="text-sm text-slate-700">
-      <span className="font-medium">{x.nome}</span>{x.note ? <span className="text-slate-500"> — {x.note}</span> : null}
-      {x.esecuzione ? <span className="block text-[11px] text-slate-400 leading-snug">{x.esecuzione}</span> : null}
-    </li>
-  );
-  const Ciclo = ({ p, titolo }) => (
-    <div className="space-y-2">
-      <p className="text-sm font-semibold text-slate-700">{titolo}{p.data_inizio ? ` · dal ${fmt(p.data_inizio)}${p.data_fine ? ` al ${fmt(p.data_fine)}` : ""}` : ""}</p>
-      <p className="text-sm text-slate-600">Totale giornaliero: <b>{p.kcal} kcal</b> · P {p.proteine_g} g · C {p.carboidrati_g} g · G {p.grassi_g} g</p>
-      {Array.isArray(p.pasti) && p.pasti.length > 0 && (
-        <table className="w-full text-xs">
-          <thead><tr className="text-slate-400 text-left"><th className="py-1 font-medium">Pasto</th><th className="font-medium text-right">kcal</th><th className="font-medium text-right">P</th><th className="font-medium text-right">C</th><th className="font-medium text-right">G</th></tr></thead>
-          <tbody>
-            {p.pasti.map((m, i) => (
-              <tr key={i} className="border-t border-slate-100 text-slate-700">
-                <td className="py-1">{m.nome}</td><td className="text-right">{m.kcal ?? ""}</td><td className="text-right">{m.proteine_g ?? ""}</td><td className="text-right">{m.carboidrati_g ?? ""}</td><td className="text-right">{m.grassi_g ?? ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {p.note && <p className="text-xs text-slate-500">{p.note}</p>}
-    </div>
-  );
+  const th = "text-left font-medium text-slate-400 py-0.5";
+  const td = "py-[3px] border-t border-slate-100";
 
   return createPortal(
     <div className="scheda-overlay fixed inset-0 bg-black/50 z-50 overflow-y-auto p-3 print:bg-white print:p-0">
       <style>{`
+        @page { size: A4; margin: 10mm; }
         @media print {
           html, body { height: auto !important; }
           #root { display: none !important; }
           .scheda-overlay { position: static !important; overflow: visible !important; background: white !important; }
-          .scheda-foglio { box-shadow: none !important; border-radius: 0 !important; max-width: 100% !important; margin: 0 !important; }
+          .scheda-foglio { box-shadow: none !important; border-radius: 0 !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; font-size: 10px !important; }
           .no-print { display: none !important; }
-          .scheda-blocco { break-inside: avoid; }
+          .scheda-blocco { break-inside: avoid; page-break-inside: avoid; }
+          .scheda-foglio table { font-size: 10px !important; }
         }
       `}</style>
-      <div className="scheda-foglio bg-white rounded-2xl shadow-xl w-full max-w-lg mx-auto p-5 space-y-5">
-        <div className="flex justify-between items-start">
+      <div className="scheda-foglio bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-auto p-4 space-y-3 text-slate-800">
+        <div className="flex justify-between items-start border-b border-slate-200 pb-2">
           <div>
-            <p className="text-slate-800 font-semibold text-lg">Il tuo programma ✨</p>
-            <p className="text-slate-400 text-xs">{[client.nome, client.cognome].filter(Boolean).join(" ")} · Coaching by Morgana · aggiornato al {fmt(oggi)}</p>
+            <p className="font-semibold text-base leading-tight">Il tuo programma ✨</p>
+            <p className="text-slate-500 text-[11px]">{[client.nome, client.cognome].filter(Boolean).join(" ")} · Coaching by Morgana · aggiornato al {fmt(oggi)}</p>
           </div>
           <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={20} /></button>
         </div>
@@ -4150,53 +4130,74 @@ function SchedaRiassuntiva({ client, onClose }) {
         )}
 
         {mobilita.length > 0 && (
-          <div className="scheda-blocco space-y-2">
-            <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">🧘🏻 Mobilità (tutti i giorni)</p>
-            <ul className="space-y-1.5 list-disc pl-5">{mobilita.map((x) => <Riga key={x.id} x={x} />)}</ul>
+          <div className="scheda-blocco">
+            <p className="text-[10px] uppercase tracking-wide text-teal-700 font-semibold mb-0.5">🧘🏻 Mobilità · ogni giorno</p>
+            <table className="w-full text-[11px]">
+              <tbody>
+                {mobilita.map((x) => (
+                  <tr key={x.id}><td className={`${td} pr-2`}>{x.nome}</td><td className={`${td} text-right text-slate-600 whitespace-nowrap`}>{corto(x.note, 40)}</td></tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
-        {dati?.giorni.map((g) => {
-          const att = dati.es.filter((x) => x.training_day_id === g.id && x.tipo === "attivazione");
-          const forza = dati.es.filter((x) => x.training_day_id === g.id && x.tipo !== "attivazione" && x.tipo !== "mobilita");
-          return (
-            <div key={g.id} className="scheda-blocco space-y-2 border-t border-slate-100 pt-4">
-              <p className="text-slate-800 font-semibold">{g.nome}</p>
-              {att.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">Attivazione</p>
-                  <ul className="space-y-1.5 list-disc pl-5">{att.map((x) => <Riga key={x.id} x={x} />)}</ul>
+        {dati?.giorni.length > 0 && (
+          <div className="grid grid-cols-1 gap-3 print:grid-cols-2">
+            {dati.giorni.map((g) => {
+              const att = dati.es.filter((x) => x.training_day_id === g.id && x.tipo === "attivazione");
+              const forza = dati.es.filter((x) => x.training_day_id === g.id && x.tipo !== "attivazione" && x.tipo !== "mobilita");
+              return (
+                <div key={g.id} className="scheda-blocco border border-slate-200 rounded-lg p-2">
+                  <p className="font-semibold text-[12px] mb-1">{g.nome}</p>
+                  {att.length > 0 && (
+                    <p className="text-[10.5px] text-teal-800 bg-teal-50 rounded px-1.5 py-1 mb-1 leading-snug">
+                      <b>Attivazione:</b> {att.map((x) => `${x.nome}${x.note ? ` ${corto(x.note, 22)}` : ""}`).join(" · ")}
+                    </p>
+                  )}
+                  {forza.length > 0 ? (
+                    <table className="w-full text-[11px]">
+                      <thead><tr><th className={th}>Esercizio</th><th className={`${th} text-right`}>Serie</th><th className={`${th} text-right`}>Rip</th></tr></thead>
+                      <tbody>
+                        {forza.map((x) => (
+                          <tr key={x.id}>
+                            <td className={`${td} pr-1`}>{x.nome}</td>
+                            <td className={`${td} text-right tabular-nums`}>{x.serie ?? ""}</td>
+                            <td className={`${td} text-right whitespace-nowrap tabular-nums`}>{x.ripetizioni ?? ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : <p className="text-[11px] text-slate-400">Nessun esercizio.</p>}
                 </div>
-              )}
-              {forza.length > 0 ? (
-                <table className="w-full text-sm">
-                  <thead><tr className="text-slate-400 text-xs text-left"><th className="py-1 font-medium">Esercizio</th><th className="font-medium text-right whitespace-nowrap">Serie × Rip</th></tr></thead>
-                  <tbody>
-                    {forza.map((x) => (
-                      <tr key={x.id} className="border-t border-slate-100 align-top">
-                        <td className="py-1.5 pr-2 text-slate-800">{x.nome}{x.note ? <span className="block text-[11px] text-slate-400 leading-snug">{x.note}</span> : null}</td>
-                        <td className="py-1.5 text-right text-slate-700 whitespace-nowrap">{[x.serie, x.ripetizioni].some((v) => v) ? `${x.serie || "–"} × ${x.ripetizioni || "–"}` : ""}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : <p className="text-xs text-slate-400">Nessun esercizio inserito.</p>}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
 
         {principale && (
-          <div className="scheda-blocco space-y-3 border-t border-slate-100 pt-4">
-            <p className="text-xs uppercase tracking-wide text-sky-700 font-semibold">🍽️ Nutrizione</p>
-            <Ciclo p={principale} titolo={inCorso ? "Ciclo in corso" : principale === ultimo && !prossimi.length ? "Ultimo ciclo" : "Prossimo ciclo"} />
-            {altri.map((p) => <Ciclo key={p.id} p={p} titolo="Poi" />)}
+          <div className="scheda-blocco">
+            <p className="text-[10px] uppercase tracking-wide text-sky-700 font-semibold mb-0.5">🍽️ Nutrizione · {inCorso ? "ciclo in corso" : principale === ultimo && !prossimi.length ? "ultimo ciclo" : "prossimo ciclo"}{principale.data_inizio ? ` · ${fmtC(principale.data_inizio)}${principale.data_fine ? `–${fmtC(principale.data_fine)}` : ""}` : ""}</p>
+            <table className="w-full text-[11px]">
+              <thead><tr><th className={th}>Pasto</th><th className={`${th} text-right`}>kcal</th><th className={`${th} text-right`}>P</th><th className={`${th} text-right`}>C</th><th className={`${th} text-right`}>G</th></tr></thead>
+              <tbody>
+                {Array.isArray(principale.pasti) && principale.pasti.map((m, i) => (
+                  <tr key={i}><td className={td}>{m.nome}</td><td className={`${td} text-right tabular-nums`}>{m.kcal ?? ""}</td><td className={`${td} text-right tabular-nums`}>{m.proteine_g ?? ""}</td><td className={`${td} text-right tabular-nums`}>{m.carboidrati_g ?? ""}</td><td className={`${td} text-right tabular-nums`}>{m.grassi_g ?? ""}</td></tr>
+                ))}
+                <tr className="font-semibold bg-slate-50"><td className={td}>Totale</td><td className={`${td} text-right tabular-nums`}>{principale.kcal}</td><td className={`${td} text-right tabular-nums`}>{principale.proteine_g}</td><td className={`${td} text-right tabular-nums`}>{principale.carboidrati_g}</td><td className={`${td} text-right tabular-nums`}>{principale.grassi_g}</td></tr>
+              </tbody>
+            </table>
+            {principale.note && <p className="text-[10.5px] text-slate-500 mt-1">{corto(principale.note, 160)}</p>}
+            {altri.map((p) => (
+              <p key={p.id} className="text-[10.5px] text-slate-600 mt-1">Poi dal {fmtC(p.data_inizio)}: <b>{p.kcal} kcal</b> · P {p.proteine_g} · C {p.carboidrati_g} · G {p.grassi_g}</p>
+            ))}
           </div>
         )}
 
         {!vuoto && dati && (
           <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
         )}
-        <p className="text-center text-slate-300 text-[10px]">Questa pagina si aggiorna da sola ogni volta che Morgana modifica il tuo piano.</p>
+        <p className="text-center text-slate-300 text-[9px]">Si aggiorna da sola ogni volta che Morgana modifica il tuo piano · P proteine, C carboidrati, G grassi (g)</p>
       </div>
     </div>,
     document.body
