@@ -535,6 +535,7 @@ function RiepilogoSettimana({ client }) {
 function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima = null }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
+  const [schedaAperta, setSchedaAperta] = useState(false);
   const richiestaRef = React.useRef(null);
   useEffect(() => {
     if ((prenotaAperto || inviata) && richiestaRef.current) {
@@ -613,21 +614,12 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </Card>
       )}
 
-      {isOnline && (client.scheda_pdf_path || client.link_scheda) && (
-        <button
-          onClick={async () => {
-            if (client.scheda_pdf_path) {
-              const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
-              if (data?.signedUrl) window.open(data.signedUrl, "_blank");
-            } else {
-              window.open(client.link_scheda, "_blank");
-            }
-          }}
-          className="w-full bg-slate-800 text-white rounded-2xl p-4 flex items-center gap-3"
-        >
-          <Dumbbell size={22} /><span className="font-medium text-sm">Scheda</span>
+      {isOnline && (
+        <button onClick={() => setSchedaAperta(true)} className="w-full bg-slate-800 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Dumbbell size={22} /><span className="font-medium text-sm">Il mio programma</span>
         </button>
       )}
+      {schedaAperta && <SchedaRiassuntiva client={client} onClose={() => setSchedaAperta(false)} />}
 
       {isBulb && pacchettoSingolo && (
         <Card className="p-5">
@@ -4068,6 +4060,149 @@ function CambiaPasswordPropria() {
   );
 }
 
+// Scheda riassuntiva automatica: si compone da sola dai dati aggiornati (allenamento senza carichi, mobilità, attivazione, nutrizione).
+function SchedaRiassuntiva({ client, onClose }) {
+  const [dati, setDati] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const [g, e, n] = await Promise.all([
+        supabase.from("training_days").select("*").eq("client_id", client.id).order("ordine"),
+        supabase.from("training_exercises").select("*").eq("client_id", client.id).order("ordine"),
+        supabase.from("nutrition_plans").select("*").eq("client_id", client.id).order("data_inizio", { ascending: true, nullsFirst: false }),
+      ]);
+      if (vivo) setDati({ giorni: (g.data || []).filter((x) => !x.scheda_archiviata), es: e.data || [], piani: n.data || [] });
+    })();
+    return () => { vivo = false; };
+  }, [client.id]);
+
+  const oggi = formatDataLocale(new Date());
+  const fmt = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const piani = dati?.piani || [];
+  const inCorso = piani.find((p) => (p.data_inizio || p.data_aggiornamento) <= oggi && (!p.data_fine || p.data_fine >= oggi));
+  const prossimi = piani.filter((p) => (p.data_inizio || p.data_aggiornamento) > oggi);
+  const ultimo = piani.length ? piani[piani.length - 1] : null;
+  const principale = inCorso || (prossimi.length ? prossimi[0] : ultimo);
+  const altri = principale && prossimi.length ? prossimi.filter((p) => p.id !== principale.id).slice(0, 1) : [];
+  const mobilita = (dati?.es || []).filter((x) => x.tipo === "mobilita" && !x.training_day_id);
+  const vuoto = dati && dati.giorni.length === 0 && mobilita.length === 0 && piani.length === 0;
+
+  const Riga = ({ x }) => (
+    <li className="text-sm text-slate-700">
+      <span className="font-medium">{x.nome}</span>{x.note ? <span className="text-slate-500"> — {x.note}</span> : null}
+      {x.esecuzione ? <span className="block text-[11px] text-slate-400 leading-snug">{x.esecuzione}</span> : null}
+    </li>
+  );
+  const Ciclo = ({ p, titolo }) => (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold text-slate-700">{titolo}{p.data_inizio ? ` · dal ${fmt(p.data_inizio)}${p.data_fine ? ` al ${fmt(p.data_fine)}` : ""}` : ""}</p>
+      <p className="text-sm text-slate-600">Totale giornaliero: <b>{p.kcal} kcal</b> · P {p.proteine_g} g · C {p.carboidrati_g} g · G {p.grassi_g} g</p>
+      {Array.isArray(p.pasti) && p.pasti.length > 0 && (
+        <table className="w-full text-xs">
+          <thead><tr className="text-slate-400 text-left"><th className="py-1 font-medium">Pasto</th><th className="font-medium text-right">kcal</th><th className="font-medium text-right">P</th><th className="font-medium text-right">C</th><th className="font-medium text-right">G</th></tr></thead>
+          <tbody>
+            {p.pasti.map((m, i) => (
+              <tr key={i} className="border-t border-slate-100 text-slate-700">
+                <td className="py-1">{m.nome}</td><td className="text-right">{m.kcal ?? ""}</td><td className="text-right">{m.proteine_g ?? ""}</td><td className="text-right">{m.carboidrati_g ?? ""}</td><td className="text-right">{m.grassi_g ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {p.note && <p className="text-xs text-slate-500">{p.note}</p>}
+    </div>
+  );
+
+  return createPortal(
+    <div className="scheda-overlay fixed inset-0 bg-black/50 z-50 overflow-y-auto p-3 print:bg-white print:p-0">
+      <style>{`
+        @media print {
+          html, body { height: auto !important; }
+          #root { display: none !important; }
+          .scheda-overlay { position: static !important; overflow: visible !important; background: white !important; }
+          .scheda-foglio { box-shadow: none !important; border-radius: 0 !important; max-width: 100% !important; margin: 0 !important; }
+          .no-print { display: none !important; }
+          .scheda-blocco { break-inside: avoid; }
+        }
+      `}</style>
+      <div className="scheda-foglio bg-white rounded-2xl shadow-xl w-full max-w-lg mx-auto p-5 space-y-5">
+        <div className="flex justify-between items-start">
+          <div>
+            <p className="text-slate-800 font-semibold text-lg">Il tuo programma ✨</p>
+            <p className="text-slate-400 text-xs">{[client.nome, client.cognome].filter(Boolean).join(" ")} · Coaching by Morgana · aggiornato al {fmt(oggi)}</p>
+          </div>
+          <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={20} /></button>
+        </div>
+
+        {!dati && <p className="text-slate-400 text-sm">Caricamento...</p>}
+        {vuoto && (
+          <div className="text-center text-slate-500 text-sm space-y-3 py-4">
+            <p>Il tuo programma comparirà qui appena Morgana lo prepara ✨</p>
+            {(client.scheda_pdf_path || client.link_scheda) && (
+              <button className="text-sky-600 font-medium" onClick={async () => {
+                if (client.scheda_pdf_path) {
+                  const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
+                  if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                } else window.open(client.link_scheda, "_blank");
+              }}>Apri il programma precedente (PDF)</button>
+            )}
+          </div>
+        )}
+
+        {mobilita.length > 0 && (
+          <div className="scheda-blocco space-y-2">
+            <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">🧘🏻 Mobilità (tutti i giorni)</p>
+            <ul className="space-y-1.5 list-disc pl-5">{mobilita.map((x) => <Riga key={x.id} x={x} />)}</ul>
+          </div>
+        )}
+
+        {dati?.giorni.map((g) => {
+          const att = dati.es.filter((x) => x.training_day_id === g.id && x.tipo === "attivazione");
+          const forza = dati.es.filter((x) => x.training_day_id === g.id && x.tipo !== "attivazione" && x.tipo !== "mobilita");
+          return (
+            <div key={g.id} className="scheda-blocco space-y-2 border-t border-slate-100 pt-4">
+              <p className="text-slate-800 font-semibold">{g.nome}</p>
+              {att.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs uppercase tracking-wide text-teal-700 font-semibold">Attivazione</p>
+                  <ul className="space-y-1.5 list-disc pl-5">{att.map((x) => <Riga key={x.id} x={x} />)}</ul>
+                </div>
+              )}
+              {forza.length > 0 ? (
+                <table className="w-full text-sm">
+                  <thead><tr className="text-slate-400 text-xs text-left"><th className="py-1 font-medium">Esercizio</th><th className="font-medium text-right whitespace-nowrap">Serie × Rip</th></tr></thead>
+                  <tbody>
+                    {forza.map((x) => (
+                      <tr key={x.id} className="border-t border-slate-100 align-top">
+                        <td className="py-1.5 pr-2 text-slate-800">{x.nome}{x.note ? <span className="block text-[11px] text-slate-400 leading-snug">{x.note}</span> : null}</td>
+                        <td className="py-1.5 text-right text-slate-700 whitespace-nowrap">{[x.serie, x.ripetizioni].some((v) => v) ? `${x.serie || "–"} × ${x.ripetizioni || "–"}` : ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p className="text-xs text-slate-400">Nessun esercizio inserito.</p>}
+            </div>
+          );
+        })}
+
+        {principale && (
+          <div className="scheda-blocco space-y-3 border-t border-slate-100 pt-4">
+            <p className="text-xs uppercase tracking-wide text-sky-700 font-semibold">🍽️ Nutrizione</p>
+            <Ciclo p={principale} titolo={inCorso ? "Ciclo in corso" : principale === ultimo && !prossimi.length ? "Ultimo ciclo" : "Prossimo ciclo"} />
+            {altri.map((p) => <Ciclo key={p.id} p={p} titolo="Poi" />)}
+          </div>
+        )}
+
+        {!vuoto && dati && (
+          <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
+        )}
+        <p className="text-center text-slate-300 text-[10px]">Questa pagina si aggiorna da sola ogni volta che Morgana modifica il tuo piano.</p>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function SchedaPdfUpload({ client, onCaricato }) {
   const [caricando, setCaricando] = useState(false);
   const [errore, setErrore] = useState("");
@@ -5632,6 +5767,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [nutrizioneStorico, setNutrizioneStorico] = useState([]);
   const [pagamenti, setPagamenti] = useState([]);
   const [tab, setTab] = useState("riepilogo");
+  const [schedaRiass, setSchedaRiass] = useState(false);
   const [esportazioneInCorso, setEsportazioneInCorso] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
@@ -5989,6 +6125,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "allenamento" && (
         <div className="space-y-5">
           <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
+          <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
+          {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
           <DiarioAllenamento clientId={clientId} isAdmin />
         </div>
       )}
@@ -6613,7 +6751,6 @@ function DaCompletareClienti({ clients, onSelect }) {
       if (online && !c.prossimo_check) manca.push({ k: "nocheck", t: "Data del prossimo check non impostata" });
       if (!online) return { c, manca };
       if (!conGiorni.has(c.id)) manca.push({ k: "csv", t: "Scheda CSV (allenamento) da caricare" });
-      if (!c.scheda_pdf_path && !(c.link_scheda || "").trim()) manca.push({ k: "pdf", t: "Scheda PDF da caricare" });
       if (c.nutrizione_attiva !== false && !conPiano.has(c.id)) manca.push({ k: "nutri", t: "Piano nutrizionale da inserire" });
       const nomi = {};
       d.es.filter((e) => e.client_id === c.id && attivi.has(e.training_day_id)).forEach((e) => {
