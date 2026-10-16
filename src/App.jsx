@@ -2395,6 +2395,10 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
         </Card>
       )}
 
+      {esercizi.length > 0 && (
+        <button onClick={aggiungiData} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5">+ Nuova data di allenamento</button>
+      )}
+
       {esercizi.length === 0 ? (
         <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
       ) : (
@@ -2456,7 +2460,6 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
           className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         <button onClick={aggiungiEsercizio} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
       </div>
-      <button onClick={aggiungiData} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">+ Nuova data di allenamento</button>
       {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
     </div>
   );
