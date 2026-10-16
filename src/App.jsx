@@ -4204,7 +4204,6 @@ function SchedaRiassuntiva({ client, onClose }) {
         {!vuoto && dati && (
           <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
         )}
-        <p className="text-center text-slate-300 text-[9px]">Si aggiorna da sola ogni volta che Morgana modifica il tuo piano · P proteine, C carboidrati, G grassi (g)</p>
       </div>
     </div>,
     document.body
