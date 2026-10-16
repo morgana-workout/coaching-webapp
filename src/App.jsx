@@ -2240,7 +2240,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
     const { data: tutti } = await supabase.from("training_exercises").select("*").eq("training_day_id", giorno.id).order("ordine");
     const isPrep = (e) => e.tipo === "mobilita" || e.tipo === "attivazione";
     const es = (tutti || []).filter((e) => !isPrep(e));
-    setPrep((tutti || []).filter(isPrep));
+    setPrep((tutti || []).filter((e) => e.tipo === "attivazione"));
     setEsercizi(es);
     if (es && es.length > 0) {
       const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", es.map((e) => e.id));
@@ -2268,7 +2268,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
   const aggiungiPrep = async () => {
     if (!prepNome.trim()) return;
     await supabase.from("training_exercises").insert({
-      client_id: clientId, training_day_id: giorno.id, nome: prepNome.trim(), note: prepNote.trim() || null, esecuzione: prepEsec.trim() || null, tipo: prepTipo, ordine: prep.length + 1,
+      client_id: clientId, training_day_id: giorno.id, nome: prepNome.trim(), note: prepNote.trim() || null, esecuzione: prepEsec.trim() || null, tipo: "attivazione", ordine: prep.length + 1,
     });
     setPrepNome(""); setPrepNote(""); setPrepEsec("");
     carica();
@@ -2337,6 +2337,50 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
     <div className="space-y-3">
       <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
         className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+
+      {(prep.length > 0 || isAdmin) && (
+        <Card className="p-3 space-y-2 border-teal-100 bg-teal-50/40">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Attivazione</p>
+            <p className="text-[11px] text-slate-400">Da fare prima di questo allenamento. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
+          </div>
+          {prep.map((es) => {
+            const info = trovaEsercizioVideo(es.nome, libreriaVideo);
+            return (
+              <div key={es.id} className="flex items-start gap-2 py-1.5 border-t border-teal-100 first:border-0">
+                <div className="flex-1 min-w-0">
+                  {isAdmin ? <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} /> : <p className="font-medium text-slate-800 text-sm">{es.nome}</p>}
+                  {isAdmin ? (
+                    <input defaultValue={es.note || ""} placeholder="Quanto / per quanto (es. 2 x 10 per lato)"
+                      onBlur={(e) => { if ((e.target.value || "") !== (es.note || "")) aggiornaEsercizioCampo(es.id, "note", e.target.value.trim() || null); }}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                  ) : es.note && <p className="text-slate-600 text-xs mt-0.5 whitespace-pre-wrap">{es.note}</p>}
+                  <div className="flex gap-3 items-center">
+                    {(es.esecuzione || isAdmin) && <button onClick={() => setPrepAperti({ ...prepAperti, [es.id]: !prepAperti[es.id] })} className="text-sky-600 text-[11px] font-medium mt-1">{prepAperti[es.id] ? "▲ Chiudi esecuzione" : "▼ Esecuzione"}</button>}
+                    {info && <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>}
+                  </div>
+                  {prepAperti[es.id] && (isAdmin ? (
+                    <textarea defaultValue={es.esecuzione || ""} rows={3} placeholder="Come si esegue (si apre alla cliente, senza video)"
+                      onBlur={(e) => { if ((e.target.value || "") !== (es.esecuzione || "")) aggiornaEsercizioCampo(es.id, "esecuzione", e.target.value.trim() || null); }}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                  ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-white/70 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
+                </div>
+                {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+              </div>
+            );
+          })}
+          {isAdmin && (
+            <div className="space-y-2 pt-1">
+              <input value={prepNome} onChange={(e) => setPrepNome(e.target.value)} placeholder="Nome attivazione (es. Clamshell)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <textarea value={prepEsec} onChange={(e) => setPrepEsec(e.target.value)} rows={2} placeholder="Come si esegue (facoltativo)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <div className="flex gap-2">
+                <input value={prepNote} onChange={(e) => setPrepNote(e.target.value)} placeholder="Quanto / per quanto (es. 3 x 10 per lato)" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+                <button onClick={aggiungiPrep} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {esercizi.length > 0 && (
         <button onClick={aggiungiData} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5">+ Nuova data di allenamento</button>
@@ -2441,7 +2485,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
   const [note, setNote] = useState("");
   const [esec, setEsec] = useState("");
   const carica = async () => {
-    const { data } = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).in("tipo", ["mobilita", "attivazione"]).order("ordine");
+    const { data } = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
     setRighe(data || []);
   };
   useEffect(() => { carica(); }, [clientId]);
@@ -2457,18 +2501,17 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
   return (
     <div className="sticky top-0 z-20 -mx-5 px-5 py-2 bg-white/95 backdrop-blur border-b border-teal-100">
       <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
-        <span className="text-sm font-semibold text-teal-700">🧘🏻 Mobilità e attivazione <span className="text-slate-400 font-normal">({righe.length})</span></span>
+        <span className="text-sm font-semibold text-teal-700">🧘🏻 Mobilità <span className="text-slate-400 font-normal">({righe.length})</span></span>
         <span className="text-slate-400 text-xs">{aperto ? "▲ Chiudi" : "▼ Apri"}</span>
       </button>
       {aperto && (
         <div className="mt-2 space-y-3 max-h-[60vh] overflow-y-auto pb-1">
           <p className="text-[11px] text-slate-400">Da fare prima di ogni allenamento. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
-          {["mobilita", "attivazione"].map((t) => {
+          {["mobilita"].map((t) => {
             const gruppo = righe.filter((x) => x.tipo === t);
             if (gruppo.length === 0) return null;
             return (
               <div key={t}>
-                <p className="text-xs font-semibold text-slate-600 mb-1">{t === "mobilita" ? "Mobilità" : "Attivazione"}</p>
                 {gruppo.map((es) => {
                   const info = trovaEsercizioVideo(es.nome, libreriaVideo);
                   return (
@@ -2499,10 +2542,6 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
           })}
           {isAdmin && (
             <div className="space-y-2 pt-1">
-              <div className="flex gap-2">
-                <button onClick={() => setTipo("mobilita")} className={`flex-1 py-1.5 rounded-lg text-xs ${tipo === "mobilita" ? "bg-teal-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Mobilità</button>
-                <button onClick={() => setTipo("attivazione")} className={`flex-1 py-1.5 rounded-lg text-xs ${tipo === "attivazione" ? "bg-teal-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Attivazione</button>
-              </div>
               <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome (es. Cat cow)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
               <textarea value={esec} onChange={(e) => setEsec(e.target.value)} rows={2} placeholder="Come si esegue (facoltativo)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
               <div className="flex gap-2">
@@ -2594,7 +2633,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     let giorniLocali = [...giorniIniziali];
     const cacheGiorni = {};
     let giorniCreati = 0, eserciziCreati = 0, saltati = 0, prepCreati = 0;
-    const { data: prepEsistenti } = await supabase.from("training_exercises").select("id, nome, tipo").eq("client_id", clientId).is("training_day_id", null).in("tipo", ["mobilita", "attivazione"]);
+    const { data: prepEsistenti } = await supabase.from("training_exercises").select("id, nome, tipo").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita");
     const prepLista = [...(prepEsistenti || [])];
 
     for (let r = 1; r < righe.length; r++) {
@@ -2606,8 +2645,8 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       const tipoGrezzo = idx.tipo !== -1 ? (riga[idx.tipo] || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
       const tipoRiga = tipoGrezzo.startsWith("mobil") ? "mobilita" : tipoGrezzo.startsWith("attiv") ? "attivazione" : "forza";
       if (!nomeEsercizio) continue;
-      if (tipoRiga !== "forza") {
-        // Mobilità e attivazione: uguali per tutti i giorni, quindi legate alla cliente e non a un giorno
+      if (tipoRiga === "mobilita") {
+        // Mobilità: uguale per tutti i giorni, quindi legata alla cliente e non a un giorno
         const campi = {
           note: idx.note !== -1 ? (riga[idx.note] || "").trim() || null : null,
           esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
@@ -2622,6 +2661,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
         continue;
       }
       if (!giornoVal) continue;
+      if (tipoRiga === "attivazione") prepCreati++;
 
       const nomeGiornoCompleto = schedaVal ? `${schedaVal} - ${giornoVal}` : giornoVal;
       let giornoId = cacheGiorni[nomeGiornoCompleto];
@@ -2652,7 +2692,8 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       if (idx.note !== -1 && riga[idx.note]?.trim()) noteParti.push(riga[idx.note].trim());
 
       await supabase.from("training_exercises").insert({
-        client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: "forza",
+        client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: tipoRiga,
+        esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
         ordine: nomiEsistenti.length + 1,
         serie: idx.serie !== -1 && riga[idx.serie]?.trim() ? Number(riga[idx.serie].trim()) : null,
         ripetizioni: idx.ripetizioni !== -1 ? (riga[idx.ripetizioni] || "").trim() || null : null,
@@ -2662,7 +2703,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     }
     await carica();
     setImportando(false);
-    alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file${prepCreati ? `, più ${prepCreati} di mobilità/attivazione (valgono per tutti i giorni)` : ""}.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
+    alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file${prepCreati ? `, di cui ${prepCreati} di mobilità/attivazione` : ""}.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
   };
 
   const esportaLogCompleto = async (giorniDaEsportare) => {
