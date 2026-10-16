@@ -2335,8 +2335,12 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
 
   return (
     <div className="space-y-3">
-      <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
-        className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+      {isAdmin ? (
+        <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
+          className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+      ) : (
+        <h3 className="text-lg font-semibold text-slate-800 px-1 -mx-1 w-full">{giorno.nome}</h3>
+      )}
 
       {(prep.length > 0 || isAdmin) && (
         <Card className="p-3 space-y-2 border-teal-100 bg-teal-50/40">
@@ -2387,7 +2391,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
       )}
 
       {esercizi.length === 0 ? (
-        <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
+        <Card className="p-6 text-center text-slate-400 text-sm">{isAdmin ? "Nessun esercizio ancora. Aggiungine uno qui sotto." : "Gli esercizi di questo giorno li aggiunge Morgana ✨"}</Card>
       ) : (
         <Card className="overflow-x-auto">
           {/* Colonna esercizio senza "sticky": su alcuni browser mobile, sticky su una cella
@@ -2412,10 +2416,12 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                 <tr key={es.id} className="border-t border-slate-100 align-top">
                   <td className="px-3 py-2" style={{ width: 220, minWidth: 220, maxWidth: 220 }}>
                     <div className="flex items-center gap-1">
-                      <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
+                      {isAdmin ? <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} /> : <p className="font-medium text-slate-800 text-sm flex-1 min-w-0 break-words whitespace-normal">{es.nome}</p>}
+                      {isAdmin && <>
                       <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
                       <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
                       <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
+                      </>}
                     </div>
                     {(es.serie || es.ripetizioni) && (
                       <p className="text-slate-600 text-[11px] font-medium mt-0.5">
@@ -2442,11 +2448,13 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
         </Card>
       )}
 
+      {isAdmin && (
       <div className="flex gap-2">
         <input value={nuovoEsercizio} onChange={(e) => setNuovoEsercizio(e.target.value)} placeholder="Nuovo esercizio (es. Squat)"
           className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         <button onClick={aggiungiEsercizio} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
       </div>
+      )}
       {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
     </div>
   );
@@ -2779,7 +2787,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
             </div>
           );
         })}
-        {giorni.length < 30 && (
+        {isAdmin && giorni.length < 30 && (
           <button onClick={creaGiorno} title="Nuovo giorno" className="flex-1 basis-0 min-w-[26px] max-w-[48px] aspect-square rounded-lg text-sm border border-dashed border-slate-300 text-slate-500">+</button>
         )}
       </div>
@@ -2798,7 +2806,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       )}
 
       {giorni.length === 0 && (
-        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare{isAdmin ? ", oppure importa un file CSV" : ""}.</Card>
+        <Card className="p-6 text-center text-slate-400 text-sm">{isAdmin ? 'Nessun giorno di allenamento creato ancora. Tocca "+" per iniziare, oppure importa un file CSV.' : "Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨"}</Card>
       )}
 
       {giornoAttivo && (
