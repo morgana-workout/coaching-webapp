@@ -2223,16 +2223,25 @@ function RichiediVideoEsercizio({ clientId }) {
   );
 }
 
-function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo = [] }) {
+function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo = [], isAdmin = false }) {
   const [infoEs, setInfoEs] = useState(null);
   const [esercizi, setEsercizi] = useState([]);
+  const [prep, setPrep] = useState([]); // mobilità e attivazione: solo note, niente carichi
+  const [prepNome, setPrepNome] = useState("");
+  const [prepNote, setPrepNote] = useState("");
+  const [prepTipo, setPrepTipo] = useState("mobilita");
+  const [prepAperti, setPrepAperti] = useState({});
+  const [prepEsec, setPrepEsec] = useState("");
   const [entries, setEntries] = useState([]);
   const [nuovoEsercizio, setNuovoEsercizio] = useState("");
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
-    const { data: es } = await supabase.from("training_exercises").select("*").eq("training_day_id", giorno.id).order("ordine");
-    setEsercizi(es || []);
+    const { data: tutti } = await supabase.from("training_exercises").select("*").eq("training_day_id", giorno.id).order("ordine");
+    const isPrep = (e) => e.tipo === "mobilita" || e.tipo === "attivazione";
+    const es = (tutti || []).filter((e) => !isPrep(e));
+    setPrep((tutti || []).filter(isPrep));
+    setEsercizi(es);
     if (es && es.length > 0) {
       const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", es.map((e) => e.id));
       setEntries(en || []);
@@ -2253,6 +2262,20 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
       client_id: clientId, training_day_id: giorno.id, nome: nuovoEsercizio, ordine: esercizi.length + 1,
     });
     setNuovoEsercizio("");
+    carica();
+  };
+
+  const aggiungiPrep = async () => {
+    if (!prepNome.trim()) return;
+    await supabase.from("training_exercises").insert({
+      client_id: clientId, training_day_id: giorno.id, nome: prepNome.trim(), note: prepNote.trim() || null, esecuzione: prepEsec.trim() || null, tipo: prepTipo, ordine: prep.length + 1,
+    });
+    setPrepNome(""); setPrepNote(""); setPrepEsec("");
+    carica();
+  };
+  const eliminaPrep = async (id) => {
+    if (!confirm("Eliminare questa riga?")) return;
+    await supabase.from("training_exercises").delete().eq("id", id);
     carica();
   };
 
@@ -2314,6 +2337,63 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
     <div className="space-y-3">
       <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
         className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+
+      {(prep.length > 0 || isAdmin) && (
+        <Card className="p-3 space-y-3 border-teal-100 bg-teal-50/40">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Mobilità e attivazione</p>
+            <p className="text-[11px] text-slate-400">Da fare prima di iniziare. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
+          </div>
+          {["mobilita", "attivazione"].map((t) => {
+            const righe = prep.filter((x) => x.tipo === t);
+            if (righe.length === 0) return null;
+            return (
+              <div key={t}>
+                <p className="text-xs font-semibold text-slate-600 mb-1">{t === "mobilita" ? "Mobilità" : "Attivazione"}</p>
+                {righe.map((es) => {
+                  const info = trovaEsercizioVideo(es.nome, libreriaVideo);
+                  return (
+                    <div key={es.id} className="flex items-start gap-2 py-1.5 border-t border-teal-100 first:border-0">
+                      <div className="flex-1 min-w-0">
+                        {isAdmin ? <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} /> : <p className="font-medium text-slate-800 text-sm">{es.nome}</p>}
+                        {isAdmin ? (
+                          <input defaultValue={es.note || ""} placeholder="Quanto / per quanto (es. 2 x 10 per lato)"
+                            onBlur={(e) => { if ((e.target.value || "") !== (es.note || "")) aggiornaEsercizioCampo(es.id, "note", e.target.value.trim() || null); }}
+                            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                        ) : es.note && <p className="text-slate-600 text-xs mt-0.5 whitespace-pre-wrap">{es.note}</p>}
+                        <div className="flex gap-3 items-center">
+                          {(es.esecuzione || isAdmin) && <button onClick={() => setPrepAperti({ ...prepAperti, [es.id]: !prepAperti[es.id] })} className="text-sky-600 text-[11px] font-medium mt-1">{prepAperti[es.id] ? "▲ Chiudi esecuzione" : "▼ Esecuzione"}</button>}
+                          {info && <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>}
+                        </div>
+                        {prepAperti[es.id] && (isAdmin ? (
+                          <textarea defaultValue={es.esecuzione || ""} rows={3} placeholder="Come si esegue (si apre alla cliente, senza video)"
+                            onBlur={(e) => { if ((e.target.value || "") !== (es.esecuzione || "")) aggiornaEsercizioCampo(es.id, "esecuzione", e.target.value.trim() || null); }}
+                            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                        ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-white/70 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
+                      </div>
+                      {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          {isAdmin && (
+            <div className="space-y-2 pt-1">
+              <div className="flex gap-2">
+                <button onClick={() => setPrepTipo("mobilita")} className={`flex-1 py-1.5 rounded-lg text-xs ${prepTipo === "mobilita" ? "bg-teal-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Mobilità</button>
+                <button onClick={() => setPrepTipo("attivazione")} className={`flex-1 py-1.5 rounded-lg text-xs ${prepTipo === "attivazione" ? "bg-teal-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Attivazione</button>
+              </div>
+              <input value={prepNome} onChange={(e) => setPrepNome(e.target.value)} placeholder="Nome (es. Cat cow)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <textarea value={prepEsec} onChange={(e) => setPrepEsec(e.target.value)} rows={2} placeholder="Come si esegue (facoltativo)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <div className="flex gap-2">
+                <input value={prepNote} onChange={(e) => setPrepNote(e.target.value)} placeholder="Quanto / per quanto (es. 60 secondi)" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+                <button onClick={aggiungiPrep} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {esercizi.length === 0 ? (
         <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
@@ -2470,7 +2550,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     const idx = {
       scheda: header.indexOf("scheda"), giorno: header.indexOf("giorno"), esercizio: header.indexOf("esercizio"),
       serie: header.indexOf("serie"), ripetizioni: header.indexOf("ripetizioni"), recupero: header.indexOf("recupero"),
-      tecnica: header.indexOf("tecnica"), note: header.indexOf("note"),
+      tecnica: header.indexOf("tecnica"), note: header.indexOf("note"), tipo: header.indexOf("tipo"), esecuzione: header.indexOf("esecuzione"),
     };
     if (idx.giorno === -1 || idx.esercizio === -1) {
       alert('Il file deve avere almeno le colonne "giorno" e "esercizio" nella prima riga.');
@@ -2480,7 +2560,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
 
     let giorniLocali = [...giorniIniziali];
     const cacheGiorni = {};
-    let giorniCreati = 0, eserciziCreati = 0, saltati = 0;
+    let giorniCreati = 0, eserciziCreati = 0, saltati = 0, prepCreati = 0;
 
     for (let r = 1; r < righe.length; r++) {
       const riga = righe[r];
@@ -2518,8 +2598,13 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       if (idx.tecnica !== -1 && riga[idx.tecnica]?.trim()) noteParti.push(riga[idx.tecnica].trim());
       if (idx.note !== -1 && riga[idx.note]?.trim()) noteParti.push(riga[idx.note].trim());
 
+      const tipoGrezzo = idx.tipo !== -1 ? (riga[idx.tipo] || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+      const tipoRiga = tipoGrezzo.startsWith("mobil") ? "mobilita" : tipoGrezzo.startsWith("attiv") ? "attivazione" : "forza";
+      if (tipoRiga !== "forza") prepCreati++;
       await supabase.from("training_exercises").insert({
-        client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio,
+      await supabase.from("training_exercises").insert({
+        client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: tipoRiga,
+        esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
         ordine: nomiEsistenti.length + 1,
         serie: idx.serie !== -1 && riga[idx.serie]?.trim() ? Number(riga[idx.serie].trim()) : null,
         ripetizioni: idx.ripetizioni !== -1 ? (riga[idx.ripetizioni] || "").trim() || null : null,
@@ -2529,7 +2614,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     }
     await carica();
     setImportando(false);
-    alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
+    alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file${prepCreati ? ` (di cui ${prepCreati} di mobilità/attivazione)` : ""}.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
   };
 
   const esportaLogCompleto = async (giorniDaEsportare) => {
@@ -2540,7 +2625,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     for (const g of giorniDaEsportare) {
       r.push(`## ${g.nome}`);
       const { data: esercizi } = await supabase.from("training_exercises").select("*").eq("training_day_id", g.id).order("ordine");
-      for (const es of esercizi || []) {
+      for (const es of (esercizi || []).filter((x) => x.tipo !== "mobilita" && x.tipo !== "attivazione")) {
         r.push(`### ${es.nome}${es.note ? " — " + es.note : ""}`);
         const { data: entries } = await supabase.from("training_entries").select("*").eq("exercise_id", es.id).order("data").order("numero_serie");
         const perData = {};
@@ -2607,7 +2692,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       {isAdmin && (
         <div className="space-y-2">
           <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-            {importando ? "Importo..." : "📥 Importa scheda da file CSV (aggiungi ai giorni esistenti)"}
+            {importando ? "Importo..." : "📥 Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)"}
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
           </label>
           <label className={`w-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
@@ -2622,7 +2707,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       )}
 
       {giornoAttivo && (
-        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} />
+        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} isAdmin={isAdmin} />
       )}
 
       <RichiediVideoEsercizio clientId={clientId} />
@@ -2652,7 +2737,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                       ))}
                     </div>
                     {giornoArchAttivo && gruppi[et].find((g) => g.id === giornoArchAttivo) && (
-                      <GiornoAllenamento key={giornoArchAttivo} clientId={clientId} giorno={gruppi[et].find((g) => g.id === giornoArchAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} />
+                      <GiornoAllenamento key={giornoArchAttivo} clientId={clientId} giorno={gruppi[et].find((g) => g.id === giornoArchAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} isAdmin={isAdmin} />
                     )}
                   </div>
                 )}
