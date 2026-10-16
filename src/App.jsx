@@ -2215,6 +2215,13 @@ function RichiediVideoEsercizio({ clientId }) {
   );
 }
 
+// Nella vista attiva l'etichetta della scheda (es. "Scheda 2 - " o "T1 - ") non si mostra: resta solo nell'archivio.
+function nomeGiornoPulito(nome) {
+  const parti = String(nome || "").split(" - ").map((x) => x.trim());
+  let i = 0;
+  while (i < parti.length - 1 && /^(scheda\s*\d+|t\.?\s?\d+(\.\d+)*)(\b.*)?$/i.test(parti[i])) i++;
+  return parti.slice(i).join(" - ") || String(nome || "");
+}
 function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo = [], isAdmin = false }) {
   const [infoEs, setInfoEs] = useState(null);
   const [esercizi, setEsercizi] = useState([]);
@@ -2331,7 +2338,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
         <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
           className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
       ) : (
-        <h3 className="text-lg font-semibold text-slate-800 px-1 -mx-1 w-full">{giorno.nome}</h3>
+        <h3 className="text-lg font-semibold text-slate-800 px-1 -mx-1 w-full">{giorno.scheda_archiviata ? giorno.nome : nomeGiornoPulito(giorno.nome)}</h3>
       )}
 
       {(prep.length > 0 || isAdmin) && (
@@ -4149,7 +4156,7 @@ function SchedaRiassuntiva({ client, onClose }) {
               const forza = dati.es.filter((x) => x.training_day_id === g.id && x.tipo !== "attivazione" && x.tipo !== "mobilita");
               return (
                 <div key={g.id} className="scheda-blocco border border-slate-200 rounded-lg p-2">
-                  <p className="font-semibold text-[12px] mb-1">{g.nome}</p>
+                  <p className="font-semibold text-[12px] mb-1">{nomeGiornoPulito(g.nome)}</p>
                   {att.length > 0 && (
                     <p className="text-[10.5px] text-teal-800 bg-teal-50 rounded px-1.5 py-1 mb-1 leading-snug">
                       <b>Attivazione:</b> {att.map((x) => `${x.nome}${x.note ? ` ${corto(x.note, 22)}` : ""}`).join(" · ")}
