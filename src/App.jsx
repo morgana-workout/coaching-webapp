@@ -1878,12 +1878,6 @@ function ClientNutrizione({ piano, storico }) {
           ))}
         </Card>
       )}
-      {piano.note && (
-        <Card className="p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Note di Morgana</p>
-          <p className="text-slate-700 text-sm leading-relaxed">{piano.note}</p>
-        </Card>
-      )}
       <StoricoNutrizione storico={storico} />
     </div>
   );
@@ -3319,7 +3313,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
           righe.forEach((r) => {
             if (!ini && iI >= 0) ini = dataIso(r[iI]);
             if (!fin && iF >= 0) fin = dataIso(r[iF]);
-            if (!nota && iNo >= 0 && (r[iNo] || "").trim()) nota = r[iNo].trim();
+            // le note/commenti del file non si importano: nell'app restano solo i dati inseriti da Morgana
             const nomePasto = iPa >= 0 ? (r[iPa] || "").trim() : "";
             const v = { kcal: num(r[iK]), proteine_g: iPr >= 0 ? num(r[iPr]) : null, carboidrati_g: iC >= 0 ? num(r[iC]) : null, grassi_g: iG >= 0 ? num(r[iG]) : null };
             if (nomePasto && !/^totale/i.test(nomePasto)) pasti.push({ nome: nomePasto, ...v });
@@ -4194,7 +4188,6 @@ function SchedaRiassuntiva({ client, onClose }) {
                 <tr className="font-semibold bg-slate-50"><td className={td}>Totale</td><td className={`${td} text-right tabular-nums`}>{principale.kcal}</td><td className={`${td} text-right tabular-nums`}>{principale.proteine_g}</td><td className={`${td} text-right tabular-nums`}>{principale.carboidrati_g}</td><td className={`${td} text-right tabular-nums`}>{principale.grassi_g}</td></tr>
               </tbody>
             </table>
-            {principale.note && <p className="text-[10.5px] text-slate-500 mt-1">{corto(principale.note, 160)}</p>}
             {altri.map((p) => (
               <p key={p.id} className="text-[10.5px] text-slate-600 mt-1">Poi dal {fmtC(p.data_inizio)}: <b>{p.kcal} kcal</b> · P {p.proteine_g} · C {p.carboidrati_g} · G {p.grassi_g}</p>
             ))}
