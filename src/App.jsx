@@ -2602,7 +2602,6 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       const tipoRiga = tipoGrezzo.startsWith("mobil") ? "mobilita" : tipoGrezzo.startsWith("attiv") ? "attivazione" : "forza";
       if (tipoRiga !== "forza") prepCreati++;
       await supabase.from("training_exercises").insert({
-      await supabase.from("training_exercises").insert({
         client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: tipoRiga,
         esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
         ordine: nomiEsistenti.length + 1,
