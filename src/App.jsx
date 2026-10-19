@@ -7789,6 +7789,7 @@ async function esportaCarichiCsv() {
 function esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare, mesi, metodiOrdinati }) {
   const righe = [
     ["Prospetto guadagni", `Esportato il ${formatDataLocale(new Date())}`],
+    ["Nota", "Esclusi i pagamenti in contanti"],
     [],
     ["Riepilogo", ""],
     ["Guadagno del mese (netto)", guadagnoMese.toFixed(2)],
@@ -8064,6 +8065,10 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
   const [acconto, setAcconto] = useState("");
   const [salvandoAcconto, setSalvandoAcconto] = useState(false);
   const [erroreAcconto, setErroreAcconto] = useState("");
+  const [modifica, setModifica] = useState(false);
+  const [f, setF] = useState({});
+  const [salvandoMod, setSalvandoMod] = useState(false);
+  const [erroreMod, setErroreMod] = useState("");
   const nomeCliente = pag.clients ? `${pag.clients.nome} ${pag.clients.cognome || ""}`.trim() : "—";
 
   const giaSaldato = Number(pag.importo_saldato) || 0;
@@ -8088,6 +8093,36 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
     onSalvato?.();
   };
 
+  const apriModifica = () => {
+    const spesa = pag.stato === "spesa";
+    setF({
+      data: pag.data_pagamento || "",
+      importo: pag.importo == null ? "" : String(spesa ? Math.abs(Number(pag.importo)) : Number(pag.importo)),
+      metodo: pag.metodo_pagamento || "", stato: pag.stato || "saldato", tipo: pag.tipo_piano || "", nota: pag.note || "",
+    });
+    setErroreMod("");
+    setModifica(true);
+  };
+  const salvaModifiche = async () => {
+    setErroreMod("");
+    const spesa = pag.stato === "spesa";
+    const imp = f.importo === "" ? null : Number(f.importo);
+    if (imp !== null && isNaN(imp)) { setErroreMod("L'importo non è valido."); return; }
+    if (!f.data) { setErroreMod("Manca la data."); return; }
+    const upd = spesa
+      ? { data_pagamento: f.data, importo: imp === null ? null : -Math.abs(imp), note: f.nota || null }
+      : { data_pagamento: f.data, importo: imp, metodo_pagamento: f.metodo || null, stato: f.stato, tipo_piano: f.tipo || pag.tipo_piano, note: f.nota || null };
+    setSalvandoMod(true);
+    const { error } = await supabase.from("payments").update(upd).eq("id", pag.id);
+    // Se cambia qualcosa che riguarda un pacchetto a cadenza fissa, la scadenza si riallinea allo storico
+    if (!error && !spesa && pag.client_id && (MESI_PER_TIPO_PAGAMENTO[pag.tipo_piano] || MESI_PER_TIPO_PAGAMENTO[upd.tipo_piano])) await ricalcolaEAggiornaScadenza(pag.client_id);
+    setSalvandoMod(false);
+    if (error) { setErroreMod("Non sono riuscita a salvare, riprova."); return; }
+    setPag({ ...pag, ...upd });
+    setModifica(false);
+    onSalvato?.();
+  };
+
   return (
     <div className="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 space-y-3">
@@ -8095,6 +8130,56 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
           <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Dettaglio pagamento</p>
           <button onClick={onClose} className="text-slate-300 hover:text-slate-500"><X size={18} /></button>
         </div>
+        {modifica ? (
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">Data</label>
+                <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} className="mt-1" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Importo (€)</label>
+                <input type="number" inputMode="decimal" step="any" value={f.importo} onChange={(e) => setF({ ...f, importo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+              </div>
+              {pag.stato !== "spesa" && (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-500">Metodo</label>
+                    <select value={f.metodo} onChange={(e) => setF({ ...f, metodo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                      <option value="">— da indicare</option>
+                      {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">Stato</label>
+                    <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                      <option value="saldato">Saldato</option>
+                      <option value="da_saldare">Da saldare</option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+            {pag.stato !== "spesa" && (
+              <div>
+                <label className="text-xs text-slate-500">Tipo</label>
+                <input list="tipi-pagamento" value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+                <datalist id="tipi-pagamento">
+                  {["Mensile", "Trimestrale", "Semestrale", "Occasionale", "A lezione", "Variabile", "Pacchetto lezioni Bulb", "Lezione singola Bulb", "Altro"].map((t) => <option key={t} value={t} />)}
+                </datalist>
+              </div>
+            )}
+            <div>
+              <label className="text-xs text-slate-500">{pag.stato === "spesa" ? "Descrizione" : "Nota"}</label>
+              <input value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+            {erroreMod && <p className="text-rose-500 text-xs">{erroreMod}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => setModifica(false)} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
+              <button onClick={salvaModifiche} disabled={salvandoMod} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium disabled:opacity-50">{salvandoMod ? "Salvo..." : "Salva modifiche"}</button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-1.5 text-sm">
           <div className="flex justify-between"><span className="text-slate-400">Cliente</span><span className="text-slate-700 font-medium">{nomeCliente}</span></div>
           <div className="flex justify-between"><span className="text-slate-400">Data</span><span className="text-slate-700">{pag.data_pagamento}</span></div>
@@ -8106,12 +8191,17 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
               <div className="flex justify-between"><span className="text-slate-400">Ancora da saldare</span><span className="text-amber-600 font-medium">{residuo.toFixed(2)}€</span></div>
             </>
           )}
-          <div className="flex justify-between"><span className="text-slate-400">Metodo</span><span className="text-slate-700">{pag.metodo_pagamento ? labelMetodo(pag.metodo_pagamento) : "—"}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Metodo</span>{pag.metodo_pagamento ? <span className="text-slate-700">{labelMetodo(pag.metodo_pagamento)}</span> : <span className="text-amber-600 font-medium">da indicare</span>}</div>
           <div className="flex justify-between"><span className="text-slate-400">Stato</span><span className="text-slate-700 capitalize">{pag.stato === "spesa" ? "Spesa" : pag.stato === "saldato" ? "Saldato" : "Da saldare"}</span></div>
           {pag.note && <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">Nota</span><span className="text-slate-700 text-right">{pag.note}</span></div>}
         </div>
+        )}
 
-        {pag.stato === "da_saldare" && pag.importo != null && (
+        {!modifica && (
+          <button onClick={apriModifica} className="w-full border border-slate-200 text-slate-600 rounded-xl py-2 text-sm font-medium">✏️ Modifica pagamento</button>
+        )}
+
+        {!modifica && pag.stato === "da_saldare" && pag.importo != null && (
           <div className="border-t border-slate-100 pt-3 space-y-2">
             <p className="text-xs font-medium text-slate-600">Registra un acconto ricevuto (es. contanti a rate)</p>
             <div className="flex gap-2">
@@ -8161,6 +8251,23 @@ function ImportoMancante({ p, onSalvato }) {
   );
 }
 
+function MetodoMancante({ p, onSalvato }) {
+  const [salvando, setSalvando] = useState(false);
+  const imposta = async (v) => {
+    if (!v) return;
+    setSalvando(true);
+    await supabase.from("payments").update({ metodo_pagamento: v }).eq("id", p.id);
+    setSalvando(false);
+    onSalvato();
+  };
+  return (
+    <select defaultValue="" disabled={salvando} onChange={(e) => imposta(e.target.value)} className="border border-amber-300 rounded-lg px-2 py-1 text-xs bg-white flex-shrink-0">
+      <option value="">Metodo…</option>
+      {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+    </select>
+  );
+}
+
 const categoriaPagamento = (p) => {
   if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) return "Coaching online";
   const t = `${p.tipo_piano || ""} ${p.note || ""}`.toLowerCase();
@@ -8186,7 +8293,10 @@ async function esportaRiepilogoCommercialista(meseChiave) {
   const XLSX = await caricaModuloExcel();
   const pagamenti = await leggiTutto(() => supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento").order("id"));
   const righe = righeContabili(pagamenti).filter((r) => (r.d || "").slice(0, 7) === meseChiave);
-  const incassi = righe.filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti"); // i contanti non vanno al commercialista
+  const nomeOrd = (r) => (r.p.clients ? `${r.p.clients.nome} ${r.p.clients.cognome || ""}`.trim() : "").toLowerCase();
+  // Incassi del mese ordinati per cliente e poi per data: i pagamenti della stessa persona restano vicini
+  const incassi = righe.filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti") // i contanti non vanno al commercialista
+    .sort((x, y) => nomeOrd(x).localeCompare(nomeOrd(y)) || (x.d || "").localeCompare(y.d || ""));
   const spese = righe.filter((r) => r.tipo === "spesa");
   const tot = (l) => Math.round(l.reduce((s, r) => s + r.imp, 0) * 100) / 100;
   const dt = (s) => (s ? new Date(`${s}T12:00:00`) : "");
@@ -8199,6 +8309,26 @@ async function esportaRiepilogoCommercialista(meseChiave) {
   const perCategoria = {};
   incassi.forEach((r) => { const k = categoriaPagamento(r.p); perCategoria[k] = (perCategoria[k] || 0) + r.imp; });
   const elettronici = tot(incassi.filter((r) => METODI_ELETTRONICI_STAT.includes(r.p.metodo_pagamento)));
+
+  // Storico per cliente: tutti i pagamenti (senza contanti) dall'inizio dell'anno fino al mese scelto,
+  // raggruppati per cliente, così si vedono i rinnovi uno sotto l'altro con il totale di ciascuna.
+  const storico = righeContabili(pagamenti).filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti"
+    && (r.d || "").slice(0, 4) === String(anno) && (r.d || "").slice(0, 7) <= meseChiave)
+    .sort((x, y) => nomeOrd(x).localeCompare(nomeOrd(y)) || (x.d || "").localeCompare(y.d || ""));
+  const gruppi = [];
+  storico.forEach((r) => {
+    const k = r.p.client_id || nomeOrd(r);
+    let g = gruppi[gruppi.length - 1];
+    if (!g || g.k !== k) { g = { k, nome: nomeC(r.p) || "(senza cliente)", righe: [] }; gruppi.push(g); }
+    g.righe.push(r);
+  });
+  const righeStorico = [["Cliente", "Data", "Descrizione", "Metodo", "Importo (€)", "N. pagamento", "Nel mese scelto"]];
+  gruppi.forEach((g) => {
+    g.righe.forEach((r, i) => righeStorico.push([g.nome, dt(r.d), r.p.tipo_piano || "", labelMetodo(r.p.metodo_pagamento), r.imp, i + 1, (r.d || "").slice(0, 7) === meseChiave ? "sì" : ""]));
+    righeStorico.push([`Totale ${g.nome}`, "", "", "", tot(g.righe), `${g.righe.length} pagament${g.righe.length === 1 ? "o" : "i"}`, ""]);
+    righeStorico.push(["", "", "", "", "", "", ""]);
+  });
+  if (gruppi.length === 0) righeStorico.push(["Nessun pagamento", "", "", "", "", "", ""]);
 
   const fogli = [
     ["Riepilogo", [
@@ -8217,6 +8347,7 @@ async function esportaRiepilogoCommercialista(meseChiave) {
       ...Object.entries(perCategoria).map(([k, v]) => [k, Math.round(v * 100) / 100]),
     ]],
     ["Incassi", [["Data", "Cliente", "Descrizione", "Metodo", "Importo (€)", "Note"], ...incassi.map((r) => [dt(r.d), nomeC(r.p), r.p.tipo_piano || "", labelMetodo(r.p.metodo_pagamento), r.imp, r.p.note || ""]), ["", "", "", "Totale", tot(incassi), ""]]],
+    ["Storico per cliente", righeStorico],
     ["Spese", [["Data", "Descrizione", "Importo (€)", "Note"], ...spese.map((r) => [dt(r.d), r.p.tipo_piano || "Spesa", r.imp, r.p.note || ""]), ["", "Totale", tot(spese), ""]]],
   ];
   const wb = XLSX.utils.book_new();
@@ -8227,7 +8358,7 @@ async function esportaRiepilogoCommercialista(meseChiave) {
     XLSX.utils.book_append_sheet(wb, ws, titolo);
   });
   XLSX.writeFile(wb, `riepilogo-commercialista-${meseChiave}.xlsx`, { cellDates: true });
-  return { incassi: incassi.length, spese: spese.length };
+  return { incassi: incassi.length, spese: spese.length, senzaMetodo: incassi.filter((r) => !r.p.metodo_pagamento).length };
 }
 
 function StatisticheCoach({ clients }) {
@@ -8287,7 +8418,7 @@ function StatisticheCoach({ clients }) {
 
   const esporta = async () => {
     setEsportando(true); setMsg("");
-    try { const r = await esportaRiepilogoCommercialista(mese); setMsg(`Scaricato: ${r.incassi} incassi e ${r.spese} spese.`); }
+    try { const r = await esportaRiepilogoCommercialista(mese); setMsg(`Scaricato: ${r.incassi} incassi e ${r.spese} spese.${r.senzaMetodo ? ` Attenzione: ${r.senzaMetodo} incassi non hanno il metodo indicato (li trovi in Guadagni, "Metodo di pagamento mancante").` : ""}`); }
     catch (e) { setMsg("Esportazione non riuscita: " + (e.message || "riprova")); }
     setEsportando(false);
   };
@@ -8328,7 +8459,7 @@ function StatisticheCoach({ clients }) {
 
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
-        <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, senza i pagamenti in contanti.</p>
+        <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, più un foglio con i pagamenti raggruppati per cliente (rinnovi vicini). Senza i pagamenti in contanti.</p>
         <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : `⬇ Scarica riepilogo ${labelMese(mese)}`}</button>
         {msg && <p className="text-xs text-slate-500">{msg}</p>}
       </Card>
@@ -8414,6 +8545,29 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
     perMetodo[k] = (perMetodo[k] || 0) + Number(p.importo);
   });
   const metodiOrdinati = Object.entries(perMetodo).sort((a, b) => b[1] - a[1]);
+
+  // Versione "senza contanti" per il file da esportare: stessi conti di sopra, ma ignorando
+  // i pagamenti (e gli acconti) pagati in contanti. Le spese restano, perché non hanno un metodo.
+  const nonContanti = (p) => p.metodo_pagamento !== "contanti";
+  const nettoRowsSC = [
+    ...incassi.filter(nonContanti).map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo) })),
+    ...spese.map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo) })),
+    ...daSaldare.filter((p) => nonContanti(p) && Number(p.importo_saldato) > 0).map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo_saldato) })),
+  ];
+  const sommaSC = (l) => l.reduce((x, r) => x + Number(r.importo), 0);
+  const totaleIncassatoSC = sommaSC(nettoRowsSC.filter((r) => r.importo > 0));
+  const totaleNettoSC = sommaSC(nettoRowsSC);
+  const guadagnoMeseSC = sommaSC(nettoRowsSC.filter((r) => (r.data_pagamento || "").slice(0, 7) === meseCorrente));
+  const mesiSC = mesi.map((m) => ({ ...m, totale: sommaSC(nettoRowsSC.filter((r) => (r.data_pagamento || "").slice(0, 7) === m.chiave)) }));
+  const metodiOrdinatiSC = metodiOrdinati.filter(([k]) => k !== "contanti");
+  const totaleDaSaldareSC = daSaldare.filter(nonContanti).reduce((x, p) => x + (Number(p.importo) - Number(p.importo_saldato || 0)), 0);
+
+  // Incassi (saldati o acconti) a cui manca il metodo di pagamento: vanno completati
+  const senzaMetodo = [
+    ...incassi.map((p) => ({ p, imp: Number(p.importo) })),
+    ...daSaldare.filter((p) => Number(p.importo_saldato) > 0).map((p) => ({ p, imp: Number(p.importo_saldato) })),
+  ].filter((r) => !r.p.metodo_pagamento && r.imp > 0);
+  const totaleSenzaMetodo = senzaMetodo.reduce((x, r) => x + r.imp, 0);
 
   // Rinnovi imminenti — clienti con pacchetto attivo/in scadenza ordinati per data_scadenza
   const billingByClient = {};
@@ -8571,6 +8725,27 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-amber-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
       </Card>
 
+      {senzaMetodo.length > 0 && (
+        <Card className="p-4 border border-amber-200 bg-amber-50/40">
+          <div className="flex items-baseline justify-between mb-1">
+            <p className="text-xs uppercase tracking-wide text-amber-700 font-medium">Metodo di pagamento mancante</p>
+            <span className="text-xs font-semibold text-amber-700">{totaleSenzaMetodo.toFixed(2)}€</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mb-2">{senzaMetodo.length} pagament{senzaMetodo.length === 1 ? "o" : "i"} senza metodo. Scegli il metodo qui e si salva subito: poi le statistiche e il file si aggiornano da soli.</p>
+          <div className="divide-y divide-amber-100">
+            {senzaMetodo.map(({ p, imp }) => (
+              <div key={p.id} className="flex items-center gap-2 py-2">
+                <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
+                  <p className="text-sm text-slate-700 font-medium truncate">{p.clients ? `${p.clients.nome} ${p.clients.cognome || ""}` : "—"}</p>
+                  <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano} · {imp.toFixed(2)}€</p>
+                </button>
+                <MetodoMancante p={p} onSalvato={carica} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Elettronici e contanti (incassi)</p>
         <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1.5 text-sm items-baseline">
@@ -8589,9 +8764,9 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
       </Card>
 
       <button
-        onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare: totaleDaSaldareConPrevisti, mesi, metodiOrdinati })}
+        onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese: guadagnoMeseSC, totaleNetto: totaleNettoSC, totaleIncassato: totaleIncassatoSC, totaleSpese, totaleDaSaldare: totaleDaSaldareSC + totalePrevisti, mesi: mesiSC, metodiOrdinati: metodiOrdinatiSC })}
         className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
-        ⬇ Scarica prospetto guadagni (CSV)
+        ⬇ Scarica prospetto guadagni (CSV, senza contanti)
       </button>
 
       <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} onClientiCambiati={onClientiCambiati} />
@@ -8667,7 +8842,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
             <div key={p.id} className="flex items-center gap-2 px-3 py-2.5">
               <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
                 <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
-                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : ""}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
+                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" ? <span className="text-amber-600"> · metodo mancante</span> : "")}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
                 {p.stato === "da_saldare" && Number(p.importo_saldato) > 0 && (
                   <p className="text-[11px] text-emerald-600">Acconto ricevuto: {Number(p.importo_saldato).toFixed(2)}€</p>
                 )}
