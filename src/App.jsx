@@ -3755,6 +3755,7 @@ function AccontoDaSaldare({ p, onSalvato }) {
 
 function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   const [ricevutaPer, setRicevutaPer] = useState(null);
+  const [modificaPer, setModificaPer] = useState(null);
   const [tipo, setTipo] = useState("Mensile");
   const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
   const [importo, setImporto] = useState("");
@@ -3873,7 +3874,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                   <span className="flex-1 min-w-0">
                     <span className="font-medium">{p.data_pagamento}</span> — {p.tipo_piano}
                     {p.importo != null && ` · ${Number(p.importo).toFixed(2)}€`}
-                    {p.metodo_pagamento && ` · ${labelMetodo(p.metodo_pagamento)}`}
+                    {p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" && p.importo != null ? <span className="text-amber-600"> · metodo mancante</span> : null)}
                     {p.note && <span className="text-slate-400"> — {p.note}</span>}
                   </span>
                   {p.stato && (
@@ -3881,6 +3882,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                       {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                     </button>
                   )}
+                  <button onClick={() => setModificaPer(p)} className="flex-shrink-0 text-slate-400 hover:text-slate-600 px-0.5 text-[13px] leading-none" title="Modifica pagamento">✏️</button>
                   {p.importo != null && p.stato !== "spesa" && (
                     <button onClick={() => setRicevutaPer(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-500 px-0.5"><FileText size={13} /></button>
                   )}
@@ -3900,6 +3902,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
         </div>
       )}
       {ricevutaPer && <RicevutaModal pagamento={{ ...ricevutaPer, clients: client }} onClose={() => setRicevutaPer(null)} />}
+      {modificaPer && <PagamentoDettaglio pagamento={{ ...modificaPer, clients: client }} onClose={() => setModificaPer(null)} onSelectCliente={() => {}} onSalvato={onRegistrato} />}
     </Card>
   );
 }
