@@ -131,7 +131,7 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
   const campo = (label, v, set) => (
     <div>
       <label className="text-xs text-slate-500 block mb-1">{label}</label>
-      <input type="number" inputMode="decimal" min="0" value={v} onChange={(e) => set(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <input type="number" inputMode="decimal" step="any" min="0" value={v} onChange={(e) => set(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
     </div>
   );
   return (
@@ -375,7 +375,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
               <label className="text-slate-400 text-xs">Quantità ({food.unit === "pz" ? (food.uname || "pezzi") : food.unit})</label>
               <div className="flex items-center gap-2 mt-1">
                 <button onClick={() => setAmt((v) => Math.max(0, round1(Number(v || 0) - (food.unit === "pz" ? 0.5 : food.per <= 20 ? 5 : 10))))} className="w-10 h-10 rounded-full border border-slate-200 text-slate-500 text-lg flex-shrink-0">−</button>
-                <input type="number" inputMode="decimal" min="0" value={amt} onChange={(e) => setAmt(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-center text-lg font-medium" />
+                <input type="number" inputMode="decimal" step="any" min="0" value={amt} onChange={(e) => setAmt(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-center text-lg font-medium" />
                 <button onClick={() => setAmt((v) => round1(Number(v || 0) + (food.unit === "pz" ? 0.5 : food.per <= 20 ? 5 : 10)))} className="w-10 h-10 rounded-full border border-slate-200 text-slate-500 text-lg flex-shrink-0">+</button>
               </div>
             </div>
@@ -445,9 +445,11 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato }) {
       quantita_abituale: mv(f.quantita_abituale),
     };
     setSalvando(true);
-    if (alimento?.id) await supabase.from("kcal_foods").update(riga).eq("id", alimento.id);
-    else await supabase.from("kcal_foods").insert(riga);
+    const { error } = alimento?.id
+      ? await supabase.from("kcal_foods").update(riga).eq("id", alimento.id)
+      : await supabase.from("kcal_foods").insert(riga);
     setSalvando(false);
+    if (error) { alert("Non sono riuscita a salvare l'alimento. Riprova tra un attimo 🫶🏻"); return; }
     onSalvato();
   };
 
@@ -476,18 +478,18 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato }) {
         </div>
         {f.unit === "pz" && <div><label className="text-slate-400 text-xs">Nome del pezzo</label><input value={f.uname} onChange={set("uname")} placeholder="Es. fetta, uovo, vasetto" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>}
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-slate-400 text-xs">Kcal</label><input type="number" inputMode="decimal" min="0" value={f.kcal} onChange={set("kcal")} required className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
-          {f.unit !== "pz" && <div><label className="text-slate-400 text-xs">Ogni quanti {f.unit}</label><input type="number" inputMode="decimal" min="0" value={f.per} onChange={set("per")} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>}
+          <div><label className="text-slate-400 text-xs">Kcal</label><input type="number" inputMode="decimal" step="any" min="0" value={f.kcal} onChange={set("kcal")} required className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
+          {f.unit !== "pz" && <div><label className="text-slate-400 text-xs">Ogni quanti {f.unit}</label><input type="number" inputMode="decimal" step="any" min="0" value={f.per} onChange={set("per")} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>}
         </div>
         <div>
           <label className="text-slate-400 text-xs">Macro in grammi (per la stessa quantità delle kcal)</label>
           <div className="grid grid-cols-3 gap-2 mt-1">
-            <input type="number" inputMode="decimal" min="0" value={f.proteine} onChange={set("proteine")} placeholder="Proteine" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-            <input type="number" inputMode="decimal" min="0" value={f.carboidrati} onChange={set("carboidrati")} placeholder="Carboidrati" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-            <input type="number" inputMode="decimal" min="0" value={f.grassi} onChange={set("grassi")} placeholder="Grassi" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <input type="number" inputMode="decimal" step="any" min="0" value={f.proteine} onChange={set("proteine")} placeholder="Proteine" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <input type="number" inputMode="decimal" step="any" min="0" value={f.carboidrati} onChange={set("carboidrati")} placeholder="Carboidrati" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <input type="number" inputMode="decimal" step="any" min="0" value={f.grassi} onChange={set("grassi")} placeholder="Grassi" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           </div>
         </div>
-        <div><label className="text-slate-400 text-xs">Quantità abituale (facoltativa)</label><input type="number" inputMode="decimal" min="0" value={f.quantita_abituale} onChange={set("quantita_abituale")} placeholder="Compare già pronta quando lo aggiungi" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
+        <div><label className="text-slate-400 text-xs">Quantità abituale (facoltativa)</label><input type="number" inputMode="decimal" step="any" min="0" value={f.quantita_abituale} onChange={set("quantita_abituale")} placeholder="Compare già pronta quando lo aggiungi" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
         <div className="flex gap-2 pt-1">
           <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-50">{salvando ? "Salvo..." : "Salva alimento"}</button>
           {alimento?.id && <button type="button" onClick={elimina} disabled={salvando} className="px-4 border border-rose-200 text-rose-600 text-sm font-medium rounded-xl">Elimina</button>}
