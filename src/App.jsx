@@ -6755,14 +6755,6 @@ function DaCompletareClienti({ clients, onSelect }) {
       if (!online) return { c, manca };
       if (!conGiorni.has(c.id)) manca.push({ k: "csv", t: "Scheda CSV (allenamento) da caricare" });
       if (c.nutrizione_attiva !== false && !conPiano.has(c.id)) manca.push({ k: "nutri", t: "Piano nutrizionale da inserire" });
-      const nomi = {};
-      d.es.filter((e) => e.client_id === c.id && attivi.has(e.training_day_id)).forEach((e) => {
-        const trovato = trovaEsercizioVideo(e.nome, d.lib);
-        if (c.video_attivi === false) return;
-        if (!trovato || (!(trovato.video_url || "").trim() && !trovato.senza_video)) nomi[(e.nome || "").trim().toLowerCase()] = (e.nome || "").trim();
-      });
-      const lista = Object.values(nomi);
-      if (lista.length > 0) manca.push({ k: "video", t: `Video mancanti (${lista.length}): ${lista.slice(0, 4).join(", ")}${lista.length > 4 ? ` +${lista.length - 4}` : ""}` });
       return { c, manca };
     })
     .filter((r) => r.manca.length > 0);
@@ -6780,6 +6772,85 @@ function DaCompletareClienti({ clients, onSelect }) {
         </button>
       ))}
       {aperta && <p className="text-[11px] text-slate-400 pt-1">Se una cliente segue la nutrizione con un altro professionista, disattiva "nutrizione" nella sua scheda e non comparirà più qui.</p>}
+    </Card>
+  );
+}
+
+// Varianti di un esercizio (attrezzo, presa, lateralità...): servono per capire se il video della libreria è proprio quello giusto
+const VARIANTI_ES = {
+  bilanciere: ["bilanciere"], manubri: ["manubri", "manubrio"], cavo: ["cavo", "cavi", "corda"],
+  macchina: ["macchina", "macchinario"], multipower: ["multipower"], kettlebell: ["kettlebell"],
+  elastico: ["elastico", "band"], "monopodalico/unilaterale": ["monopodal", "unilaterale", "singol", "una gamba", "b-stance", "d-stance"],
+  inclinata: ["inclinat"], "presa stretta": ["stretta"], "presa larga": ["larga"], "presa neutra": ["neutra"], sumo: ["sumo"], trx: ["trx"],
+};
+
+// Coach: per ogni cliente, quali esercizi del programma attuale (forza, mobilità e attivazione) non hanno ancora video e/o spiegazioni
+function EserciziMancantiClienti({ clients, onSelect }) {
+  const [d, setD] = useState(null);
+  const [aperta, setAperta] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const giorni = await leggiTutto(() => supabase.from("training_days").select("id, client_id, scheda_archiviata").order("id"));
+        const es = await leggiTutto(() => supabase.from("training_exercises").select("client_id, training_day_id, nome, tipo, esecuzione").order("id"));
+        const { data: lib } = await supabase.from("esercizi_video").select("nome, attrezzo, parole_chiave, video_url, senza_video, posizionamento, movimento, errori");
+        if (vivo) setD({ giorni, es, lib: lib || [] });
+      } catch (e) { if (vivo) setD({ giorni: [], es: [], lib: [] }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  if (!d) return null;
+  const pieno = (t) => (t || "").trim().length > 0;
+  const archiviati = new Set(d.giorni.filter((g) => g.scheda_archiviata).map((g) => g.id));
+  const righe = clients
+    .filter((c) => !c.archiviato && c.video_attivi !== false)
+    .map((c) => {
+      const visti = {};
+      d.es.filter((e) => e.client_id === c.id && !archiviati.has(e.training_day_id)).forEach((e) => {
+        const nome = (e.nome || "").trim();
+        if (!nome) return;
+        const k = nome.toLowerCase();
+        if (!visti[k]) visti[k] = { nome, tipo: e.tipo, haEsec: false };
+        if (pieno(e.esecuzione)) visti[k].haEsec = true;
+      });
+      const mancano = [], varianti = [];
+      Object.values(visti).forEach((v) => {
+        const etichetta = v.tipo === "mobilita" ? `${v.nome} (mobilità)` : v.tipo === "attivazione" ? `${v.nome} (attivazione)` : v.nome;
+        const info = trovaEsercizioVideo(v.nome, d.lib);
+        if (!info) { mancano.push({ t: etichetta, m: v.haEsec ? "non è nella libreria: manca il video" : "non è nella libreria: mancano video e spiegazioni" }); return; }
+        const senzaVideo = !pieno(info.video_url) && !info.senza_video;
+        const senzaSpieg = !(pieno(info.posizionamento) && pieno(info.movimento) && pieno(info.errori)) && !v.haEsec;
+        if (senzaVideo || senzaSpieg) {
+          mancano.push({ t: etichetta, m: senzaVideo && senzaSpieg ? "mancano video e spiegazioni" : senzaVideo ? "manca il video" : "mancano le spiegazioni" });
+          return;
+        }
+        const testoLib = `${info.nome} ${info.parole_chiave} ${info.attrezzo || ""}`.toLowerCase();
+        const nl = v.nome.toLowerCase();
+        const scoperte = Object.entries(VARIANTI_ES).filter(([, sin]) => sin.some((x) => nl.includes(x)) && !sin.some((x) => testoLib.includes(x))).map(([nome]) => nome);
+        if (scoperte.length) varianti.push({ t: etichetta, m: `variante (${scoperte.join(", ")}) con il video di «${info.nome}»` });
+      });
+      return { c, mancano, varianti };
+    })
+    .filter((r) => r.mancano.length > 0 || r.varianti.length > 0);
+  const totMancano = righe.reduce((s, r) => s + r.mancano.length, 0);
+  const totVarianti = righe.reduce((s, r) => s + r.varianti.length, 0);
+  return (
+    <Card className="p-4 space-y-1">
+      <button onClick={() => setAperta((v) => !v)} className="w-full flex items-center justify-between pb-1 text-left">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Video e spiegazioni da completare ({totMancano})</span>
+        <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
+      </button>
+      {!aperta && <p className="text-[11px] text-slate-400">{totMancano === 0 ? "Tutto coperto ✓" : `${totMancano} esercizi senza video o spiegazioni`}{totVarianti > 0 ? ` · ${totVarianti} varianti con video generico` : ""}. Include mobilità e attivazione.</p>}
+      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
+      {aperta && righe.map(({ c, mancano, varianti }) => (
+        <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+          {mancano.map((m) => <span key={m.t} className="block text-xs text-rose-600">• {m.t}: {m.m}</span>)}
+          {varianti.map((m) => <span key={m.t} className="block text-xs text-amber-600">• {m.t}: {m.m}</span>)}
+        </button>
+      ))}
+      {aperta && <p className="text-[11px] text-slate-400 pt-1">In rosso manca qualcosa. In arancione c'è un video generico: valuta se serve il video della variante. Le spiegazioni scritte nel programma contano come spiegazioni.</p>}
     </Card>
   );
 }
@@ -6956,6 +7027,8 @@ function OggiCoach({ clients, onSelect, vai }) {
           </button>
         ))}
       </Card>
+
+      <EserciziMancantiClienti clients={clients} onSelect={onSelect} />
     </div>
   );
 }
