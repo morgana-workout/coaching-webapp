@@ -6913,6 +6913,19 @@ function OggiCoach({ clients, onSelect, vai }) {
   });
   scadenze.sort((a, b) => a.ord.localeCompare(b.ord));
 
+  // Rinnovi del mese in corso e del mese successivo
+  const chiaveMese = (anno, mese0) => { const d = new Date(anno, mese0, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const [annoOggi, meseOggi] = [Number(oggi.slice(0, 4)), Number(oggi.slice(5, 7)) - 1];
+  const mesiRinnovi = [chiaveMese(annoOggi, meseOggi), chiaveMese(annoOggi, meseOggi + 1)].map((k) => ({
+    k,
+    titolo: new Date(`${k}-01T12:00:00`).toLocaleDateString("it-IT", { month: "long" }),
+    righe: clients
+      .filter((c) => !c.archiviato && c.data_scadenza && c.data_scadenza.startsWith(k) && c.stato_pacchetto !== "gratuito")
+      .sort((x, y) => x.data_scadenza.localeCompare(y.data_scadenza)),
+  }));
+  const giorniAlla = (d) => Math.round((new Date(`${d}T12:00:00`) - new Date(`${oggi}T12:00:00`)) / 86400000);
+  const testoGiorni = (n) => (n === 0 ? "oggi" : n === 1 ? "domani" : n > 1 ? `tra ${n} giorni` : n === -1 ? "scaduto ieri" : `scaduto da ${-n} giorni`);
+
   const daSeguire = [];
   clients.forEach((c) => {
     const motivi = [];
@@ -6985,6 +6998,28 @@ function OggiCoach({ clients, onSelect, vai }) {
           ))}
         </Card>
       )}
+
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Reminder rinnovi ✨</p>
+        {mesiRinnovi.map((m) => (
+          <div key={m.k} className="space-y-1">
+            <p className="text-sm font-semibold text-slate-700 capitalize">{m.titolo} <span className="text-slate-400 font-normal">({m.righe.length})</span></p>
+            {m.righe.length === 0 && <p className="text-slate-400 text-sm">Nessun rinnovo in scadenza.</p>}
+            {m.righe.map((c) => {
+              const n = giorniAlla(c.data_scadenza);
+              return (
+                <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-1.5 text-left border-b border-slate-100 last:border-0">
+                  <span>
+                    <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+                    <span className="block text-[11px] text-slate-400">{c.piano || "—"} · scade il {c.data_scadenza.split("-").reverse().slice(0, 2).join("/")}</span>
+                  </span>
+                  <span className={`text-xs ${n < 0 ? "text-rose-500" : n <= 7 ? "text-amber-600" : "text-slate-500"}`}>{testoGiorni(n)}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </Card>
 
       <Card className="p-4 space-y-1">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Clienti da seguire</p>
