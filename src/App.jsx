@@ -7818,11 +7818,12 @@ function caricaModuloExcelJS() {
 }
 
 // Scarica una foto dallo storage e la rimpicciolisce (così il file Excel resta leggero)
-async function miniaturaFoto(path, lato = 380) {
+async function miniaturaFoto(path, lato = 380, perBlob = null) {
   try {
     const { data } = await supabase.storage.from("progress-photos").createSignedUrl(path, 600);
     if (!data?.signedUrl) return null;
     const blob = await (await fetch(data.signedUrl)).blob();
+    if (perBlob) perBlob(blob);
     const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
     const k = Math.min(1, lato / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * k)); const h = Math.max(1, Math.round(bmp.height * k));
@@ -7833,7 +7834,7 @@ async function miniaturaFoto(path, lato = 380) {
 }
 
 // File unico con tutto lo storico di una cliente: anagrafica, check con foto, programmi (attuale e archiviati), log allenamenti, lezioni, pagamenti, note
-async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}) {
+async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}, opzioni = {}) {
   const ExcelJS = await caricaModuloExcelJS();
   const q = (t, ord = "id") => leggiTutto(() => supabase.from(t).select("*").eq("client_id", clientId).order(ord).order("id"));
   avanzamento("Raccolgo i dati...");
@@ -7889,7 +7890,7 @@ async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}) {
     for (let j = 0; j < campiFoto.length; j++) {
       const p = c[campiFoto[j][0]]; if (!p) continue;
       avanzamento(`Inserisco le foto ${fatte + 1} di ${totFoto}...`);
-      const m = await miniaturaFoto(p); fatte++;
+      const m = await miniaturaFoto(p, 380, opzioni.perFoto ? (b) => opzioni.perFoto(c, campiFoto[j][1], p, b) : null); fatte++;
       if (!m) { mancanti++; riga.getCell(col0 + j + 1).value = "(foto non scaricabile)"; continue; }
       const id = wb.addImage({ base64: m.base64, extension: "jpeg" });
       const larg = Math.round(m.w * 0.5); const alt = Math.round(m.h * 0.5);
@@ -7943,11 +7944,78 @@ async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}) {
 
   avanzamento("Preparo il file...");
   const buf = await wb.xlsx.writeBuffer();
+  if (opzioni.restituisciBuffer) return { buf, nomeCl, check: checks.length, foto: fatte - mancanti, fotoMancanti: mancanti, serie: voci.length, esercizi: esercizi.length };
   const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
   const a = document.createElement("a"); a.href = url;
   a.download = `storico-completo-${nomeCl.replace(/[^a-zA-Z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsx`;
   a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
   return { check: checks.length, foto: fatte - mancanti, fotoMancanti: mancanti, serie: voci.length, esercizi: esercizi.length };
+}
+
+function caricaModuloZip() {
+  return new Promise((ok, ko) => {
+    if (window.JSZip) return ok(window.JSZip);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    sc.onload = () => (window.JSZip ? ok(window.JSZip) : ko(new Error("modulo ZIP non disponibile")));
+    sc.onerror = () => ko(new Error("Impossibile caricare il modulo ZIP, controlla la connessione e riprova."));
+    document.head.appendChild(sc);
+  });
+}
+
+// Un unico file ZIP: dentro, una cartella per ogni cliente con lo storico completo (Excel) e le foto dei check in originale
+async function esportaCartelleClienti(clients, avanzamento = () => {}) {
+  const JSZip = await caricaModuloZip();
+  const zip = new JSZip();
+  const usati = {};
+  const pulisci = (t) => String(t || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const lista = [...clients].sort((a, b) => `${a.cognome || ""} ${a.nome}`.localeCompare(`${b.cognome || ""} ${b.nome}`, "it"));
+  let nFoto = 0; let nErrori = 0;
+  for (let i = 0; i < lista.length; i++) {
+    const c = lista[i];
+    let cartella = pulisci(`${c.nome} ${c.cognome || ""}`) || `Cliente ${c.id}`;
+    if (c.archiviato) cartella += " (archiviata)";
+    if (usati[cartella]) cartella += ` ${c.id}`; usati[cartella] = true;
+    const prefisso = `Cliente ${i + 1} di ${lista.length}: ${c.nome}`;
+    try {
+      const r = await esportaStoricoCompletoCliente(c.id, (t) => avanzamento(`${prefisso} — ${t}`), {
+        restituisciBuffer: true,
+        perFoto: (check, angolo, path, blob) => {
+          const ext = (path.split(".").pop() || "jpg").toLowerCase().slice(0, 4);
+          zip.file(`${cartella}/Foto check/${check.data_check}_${angolo}.${ext}`, blob);
+          nFoto++;
+        },
+      });
+      zip.file(`${cartella}/Storico completo.xlsx`, r.buf);
+      nErrori += r.fotoMancanti;
+    } catch (e) { nErrori++; zip.file(`${cartella}/ERRORE.txt`, `Non sono riuscita a esportare questa cliente: ${e?.message || e}`); }
+  }
+  avanzamento("Preparo il file ZIP (può servire un minuto)...");
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (m) => avanzamento(`Preparo il file ZIP... ${Math.round(m.percent)}%`));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = `cartelle-clienti-${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { clienti: lista.length, foto: nFoto, errori: nErrori };
+}
+
+function BottoneCartelleClienti({ clients, className = "" }) {
+  const [inCorso, setInCorso] = useState(false);
+  const [msg, setMsg] = useState("");
+  const vai = async () => {
+    setInCorso(true); setMsg("");
+    try {
+      const r = await esportaCartelleClienti(clients, setMsg);
+      setMsg(`Scaricato: ${r.clienti} cartelle e ${r.foto} foto.${r.errori ? ` Attenzione: ${r.errori} elementi non si sono potuti scaricare.` : ""}`);
+    } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
+    setInCorso(false);
+  };
+  return (
+    <div className={className}>
+      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : "⬇ Cartelle di tutte le clienti (ZIP con storico e foto)"}</button>
+      {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
+      {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
+    </div>
+  );
 }
 
 function BottoneEsportaExcel({ clientId = null, label, className = "" }) {
@@ -9664,6 +9732,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       <div className="pt-2 border-t border-slate-100 space-y-2">
         <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Esportazioni e backup</p>
         <div className="grid grid-cols-2 gap-2">
+          <BottoneCartelleClienti clients={clients} className="col-span-2" />
           <BottoneEsportaExcel label="⬇ Esporta tutto in Excel (carichi, progressi, check)" className="col-span-2" />
           <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
           <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
