@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
+import DiarioKcal from "./DiarioKcal";
+import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell,
+  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy,
 } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
 } from "recharts";
 
 /* ------------------------------------------------------------------ */
@@ -25,6 +28,23 @@ const APPROFONDIMENTI_LINKS = [
 const CALENDLY_URL = "https://calendly.com/morgana-workout/30min";
 
 const LUOGHI = ["Via San Secondo 39, Torino", "Via Fratelli Calandra 6, Torino"];
+
+// Scelta del luogo: le due sedi Bulb oppure un luogo scritto a mano (casa, parco, altra palestra...).
+function SelezionaLuogo({ value, onChange, vuoto, className = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" }) {
+  const [altro, setAltro] = useState(!!value && !LUOGHI.includes(value));
+  const isAltro = altro || (!!value && !LUOGHI.includes(value));
+  return (
+    <>
+      <select value={isAltro ? "__altro" : (value || "")} className={className}
+        onChange={(e) => { if (e.target.value === "__altro") { setAltro(true); onChange(LUOGHI.includes(value) ? "" : (value || "")); } else { setAltro(false); onChange(e.target.value); } }}>
+        {vuoto && <option value="">{vuoto}</option>}
+        {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+        <option value="__altro">Altro luogo (casa, parco, altra palestra…)</option>
+      </select>
+      {isAltro && <input value={LUOGHI.includes(value) ? "" : (value || "")} onChange={(e) => onChange(e.target.value)} placeholder="Scrivi il luogo (es. a casa, Parco del Valentino, Palestra X)" className={className + " mt-1.5"} />}
+    </>
+  );
+}
 
 function fasceOrarie() {
   const slots = [];
@@ -79,7 +99,6 @@ function PullToRefresh({ onRefresh, children, ownScroll = false, className = "" 
   const [aggiornando, setAggiornando] = useState(false);
   const startY = React.useRef(null);
   const scrollRef = React.useRef(null);
-
   const inCima = () => (ownScroll ? (scrollRef.current?.scrollTop ?? 0) <= 0 : window.scrollY <= 0);
 
   const onTouchStart = (e) => {
@@ -127,7 +146,7 @@ function Spinner() {
 const STATO_LABEL = {
   programmato: { t: "Programmato", c: "bg-sky-100 text-sky-700" },
   da_compilare: { t: "Da compilare", c: "bg-amber-100 text-amber-700" },
-  ricevuto: { t: "Ricevuto", c: "bg-violet-100 text-violet-700" },
+  ricevuto: { t: "In revisione", c: "bg-violet-100 text-violet-700" },
   revisionato: { t: "Revisionato", c: "bg-emerald-100 text-emerald-700" },
 };
 function StatoBadge({ stato }) {
@@ -139,6 +158,7 @@ function StatoBadge({ stato }) {
 /* LOGIN                                                               */
 /* ------------------------------------------------------------------ */
 function Login({ erroreLink }) {
+  const [vista, setVista] = useState("accedi"); // "accedi" | "registrati"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errore, setErrore] = useState("");
@@ -149,7 +169,7 @@ function Login({ erroreLink }) {
     setErrore("");
     setCaricando(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setErrore("Email o password non corrette.");
+    if (error) setErrore("Ops, email o password non corrette 🫶🏻 Riprova pure!");
     setCaricando(false);
   };
 
@@ -162,30 +182,149 @@ function Login({ erroreLink }) {
           </div>
         )}
         <div className="text-center mb-10">
-          <div className="w-14 h-14 rounded-2xl bg-slate-700 mx-auto mb-4 flex items-center justify-center">
-            <Dumbbell className="text-sky-300" size={26} />
-          </div>
+          <img src="/logo.png" alt="MorGainz" className="h-32 w-auto mx-auto mb-4 rounded-3xl bg-white p-3" />
           <h1 className="text-white text-2xl font-semibold tracking-tight">Coaching by Morgana</h1>
           <p className="text-slate-400 text-sm mt-1">Il tuo spazio di allenamento, sempre con te</p>
         </div>
-        <form onSubmit={entra} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
-          <input
-            type="email" placeholder="Email" value={email} required
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-          />
-          <input
-            type="password" placeholder="Password" value={password} required
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-          />
-          {errore && <p className="text-rose-400 text-xs">{errore}</p>}
-          <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
-            {caricando ? "Accesso in corso..." : "Accedi"}
-          </button>
-        </form>
+
+        {vista === "registrati" ? (
+          <Registrazione onTornaAlLogin={() => setVista("accedi")} />
+        ) : (
+          <>
+            <form onSubmit={entra} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
+              <input
+                type="email" placeholder="Email" value={email} required
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+              <input
+                type="password" placeholder="Password" value={password} required
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+              {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+              <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
+                {caricando ? "Accesso in corso..." : "Accedi"}
+              </button>
+            </form>
+            <button onClick={() => setVista("registrati")} className="w-full text-center text-slate-400 text-sm mt-5">
+              Sei nuova/o? <span className="text-sky-400 font-medium">Crea il tuo account</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+function Registrazione({ onTornaAlLogin }) {
+  const [nome, setNome] = useState("");
+  const [cognome, setCognome] = useState("");
+  const [dataNascita, setDataNascita] = useState("");
+  const [citta, setCitta] = useState("");
+  const [altezza, setAltezza] = useState("");
+  const [peso, setPeso] = useState("");
+  const [livelloAttivita, setLivelloAttivita] = useState("");
+  const [tipoLavoro, setTipoLavoro] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confermaPassword, setConfermaPassword] = useState("");
+  const [errore, setErrore] = useState("");
+  const [caricando, setCaricando] = useState(false);
+  const [inviata, setInviata] = useState(false);
+
+  const registrati = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    if (!nome.trim()) { setErrore("Come ti chiami? Scrivimi il tuo nome ✨"); return; }
+    if (!dataNascita) { setErrore("Mi serve la tua data di nascita 🫶🏻"); return; }
+    if (!citta.trim()) { setErrore("Dove vivi? Scrivimi la tua città ✨"); return; }
+    if (!altezza || !peso) { setErrore("Mi servono altezza e peso per partire 💪🏻"); return; }
+    if (!livelloAttivita) { setErrore("Dimmi quanti passi fai più o meno al giorno 🚶🏻‍♀️"); return; }
+    if (!tipoLavoro.trim()) { setErrore("Che lavoro fai? Scrivimelo qui ✨"); return; }
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (password !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
+    setCaricando(true);
+    // Creazione account + scheda cliente in un solo passaggio lato server (edge function con
+    // permessi da admin): niente email di conferma da aspettare, l'account è subito utilizzabile
+    // e la scheda compare da subito nella lista clienti del coach.
+    const { data: risultato, error: erroreFunzione } = await supabase.functions.invoke("self-signup", {
+      body: {
+        email: email.trim(), password,
+        nome: nome.trim(), cognome: cognome.trim(), data_nascita: dataNascita, citta: citta.trim(),
+        altezza_cm: Number(altezza), peso_kg: Number(peso), livello_attivita: livelloAttivita, tipo_lavoro: tipoLavoro.trim(),
+      },
+    });
+    if (erroreFunzione || risultato?.error) {
+      setCaricando(false);
+      setErrore(risultato?.error || "Errore nella registrazione, riprova.");
+      return;
+    }
+    // Account creato: accediamo subito con le credenziali appena scelte. Il resto dell'app se ne
+    // accorge da sola (onAuthStateChange) e passa a ClientApp con la scheda già pronta.
+    const { error: erroreLogin } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setCaricando(false);
+    if (erroreLogin) {
+      setErrore("Account creato ma l'accesso automatico non è riuscito: torna al login e accedi con la password che hai scelto.");
+      setInviata(true);
+    }
+  };
+
+  if (inviata) {
+    return (
+      <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3 text-center">
+        <p className="text-white text-sm font-medium">Account creato ✅</p>
+        <p className="text-slate-400 text-sm">Torna al login e accedi con l'email e la password che hai appena scelto.</p>
+        <button onClick={onTornaAlLogin} className="text-sky-400 text-sm font-medium pt-1">← Torna al login</button>
+      </div>
+    );
+  }
+
+  const campoClass = "w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400";
+
+  return (
+    <form onSubmit={registrati} className="bg-slate-800/60 border border-slate-700 rounded-2xl p-5 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <input type="text" placeholder="Nome" value={nome} required onChange={(e) => setNome(e.target.value)} className={campoClass} />
+        <input type="text" placeholder="Cognome" value={cognome} onChange={(e) => setCognome(e.target.value)} className={campoClass} />
+      </div>
+
+      <div>
+        <label className="text-slate-400 text-xs pl-1">Data di nascita</label>
+        <input type="date" value={dataNascita} required onChange={(e) => setDataNascita(e.target.value)} className={`${campoClass} mt-1`} style={{ colorScheme: "dark" }} />
+      </div>
+
+      <input type="text" placeholder="Città di domicilio" value={citta} required onChange={(e) => setCitta(e.target.value)} className={campoClass} />
+
+      <div className="grid grid-cols-2 gap-3">
+        <input type="number" step="0.1" placeholder="Altezza (cm)" value={altezza} required onChange={(e) => setAltezza(e.target.value)} className={campoClass} />
+        <input type="number" step="0.1" placeholder="Peso (kg)" value={peso} required onChange={(e) => setPeso(e.target.value)} className={campoClass} />
+      </div>
+
+      <div>
+        <label className="text-slate-400 text-xs pl-1">Quanti passi fai in media al giorno?</label>
+        <select value={livelloAttivita} required onChange={(e) => setLivelloAttivita(e.target.value)} className={`${campoClass} mt-1`}>
+          <option value="" disabled>Seleziona...</option>
+          {LIVELLI_ATTIVITA.map((l) => <option key={l.value} value={l.value}>{l.label} ({l.descrizione})</option>)}
+        </select>
+      </div>
+
+      <input type="text" placeholder="Tipo di lavoro (es. impiegata, insegnante...)" value={tipoLavoro} required onChange={(e) => setTipoLavoro(e.target.value)} className={campoClass} />
+
+      <div className="border-t border-slate-700 pt-3 space-y-3">
+        <input type="email" placeholder="Email" value={email} required onChange={(e) => setEmail(e.target.value)} className={campoClass} />
+        <input type="password" placeholder="Password (almeno 6 caratteri)" value={password} required onChange={(e) => setPassword(e.target.value)} className={campoClass} />
+        <input type="password" placeholder="Conferma password" value={confermaPassword} required onChange={(e) => setConfermaPassword(e.target.value)} className={campoClass} />
+      </div>
+
+      {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+      <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
+        {caricando ? "Creo l'account..." : "Crea account"}
+      </button>
+      <button type="button" onClick={onTornaAlLogin} className="w-full text-center text-slate-400 text-sm pt-1">
+        Hai già un account? <span className="text-sky-400 font-medium">Accedi</span>
+      </button>
+    </form>
   );
 }
 
@@ -209,10 +348,11 @@ const LIVELLI_ATTIVITA = [
 ];
 
 function ProfiloCliente({ client, onAggiornato }) {
-  const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari);
+  const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari || client.citta || client.peso_kg || client.tipo_lavoro);
   const [modifica, setModifica] = useState(!profiloGiaCompilato);
   const [form, setForm] = useState({
-    data_nascita: client.data_nascita || "", altezza_cm: client.altezza_cm || "",
+    data_nascita: client.data_nascita || "", altezza_cm: client.altezza_cm || "", peso_kg: client.peso_kg || "",
+    citta: client.citta || "", tipo_lavoro: client.tipo_lavoro || "",
     livello_attivita: client.livello_attivita || "", note_particolari: client.note_particolari || "",
   });
   const [salvando, setSalvando] = useState(false);
@@ -224,6 +364,9 @@ function ProfiloCliente({ client, onAggiornato }) {
       p_altezza_cm: form.altezza_cm ? Number(form.altezza_cm) : null,
       p_livello_attivita: form.livello_attivita || null,
       p_note_particolari: form.note_particolari || null,
+      p_citta: form.citta || null,
+      p_peso_kg: form.peso_kg ? Number(form.peso_kg) : null,
+      p_tipo_lavoro: form.tipo_lavoro || null,
     });
     setSalvando(false);
     setModifica(false);
@@ -232,6 +375,7 @@ function ProfiloCliente({ client, onAggiornato }) {
 
   if (!modifica) {
     const livello = LIVELLI_ATTIVITA.find((l) => l.value === client.livello_attivita);
+    const eta = calcolaEta(client.data_nascita);
     return (
       <Card className="p-4 space-y-2">
         <div className="flex items-center justify-between">
@@ -239,9 +383,12 @@ function ProfiloCliente({ client, onAggiornato }) {
           <button onClick={() => setModifica(true)} className="text-sky-600 text-xs font-medium">Modifica</button>
         </div>
         <div className="text-sm text-slate-700 space-y-1">
-          {client.data_nascita && <p>Data di nascita: {client.data_nascita.split("-").reverse().join("/")}</p>}
+          {client.data_nascita && <p>Data di nascita: {client.data_nascita.split("-").reverse().join("/")}{eta != null ? ` (${eta} anni)` : ""}</p>}
+          {client.citta && <p>Città di domicilio: {client.citta}</p>}
           {client.altezza_cm && <p>Altezza: {client.altezza_cm} cm</p>}
-          {livello && <p>Attività quotidiana: {livello.label}</p>}
+          {client.peso_kg && <p>Peso: {client.peso_kg} kg</p>}
+          {livello && <p>Passi al giorno: {livello.label} ({livello.descrizione})</p>}
+          {client.tipo_lavoro && <p>Tipo di lavoro: {client.tipo_lavoro}</p>}
           {client.note_particolari && <p className="text-slate-500">Segni particolari: {client.note_particolari}</p>}
         </div>
       </Card>
@@ -257,17 +404,34 @@ function ProfiloCliente({ client, onAggiornato }) {
           className="mt-1" />
       </div>
       <div>
-        <label className="text-xs text-slate-500">Altezza (cm)</label>
-        <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
+        <label className="text-xs text-slate-500">Città di domicilio</label>
+        <input type="text" value={form.citta} onChange={(e) => setForm({ ...form, citta: e.target.value })}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Altezza (cm)</label>
+          <input type="number" value={form.altezza_cm} onChange={(e) => setForm({ ...form, altezza_cm: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Peso (kg)</label>
+          <input type="number" step="0.1" value={form.peso_kg} onChange={(e) => setForm({ ...form, peso_kg: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+        </div>
+      </div>
       <div>
-        <label className="text-xs text-slate-500">Tipo di lavoro / attività quotidiana</label>
+        <label className="text-xs text-slate-500">Quanti passi fai in media al giorno?</label>
         <select value={form.livello_attivita} onChange={(e) => setForm({ ...form, livello_attivita: e.target.value })}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
           <option value="">Seleziona...</option>
           {LIVELLI_ATTIVITA.map((l) => <option key={l.value} value={l.value}>{l.label} ({l.descrizione})</option>)}
         </select>
+      </div>
+      <div>
+        <label className="text-xs text-slate-500">Tipo di lavoro</label>
+        <input type="text" value={form.tipo_lavoro} onChange={(e) => setForm({ ...form, tipo_lavoro: e.target.value })}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. impiegata, insegnante..." />
       </div>
       <div>
         <label className="text-xs text-slate-500">Segni particolari (infortuni, condizioni da segnalare...)</label>
@@ -298,7 +462,8 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
       stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
     }).select().single();
-    if (creato && !extra) await collegaLezionePacchetto(client.id, creato);
+    // il collegamento al pacchetto avviene solo quando Morgana approva la richiesta
+    if (creato?.id) inviaPush({ evento: "richiesta", event_id: creato.id });
     setInviando(false);
     onFatto();
   };
@@ -309,7 +474,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
       {extra && (
         <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 text-xs">
-          Questa lezione in presenza ha un costo aggiuntivo di 30€, da saldare direttamente con Morgana.
+          Questa lezione in presenza ha un costo aggiuntivo se non hai acquistato in precedenza un pacchetto lezioni.
         </div>
       )}
       <InputData value={data} onChange={(e) => setData(e.target.value)} />
@@ -326,9 +491,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       </div>
       <div>
         <label className="text-xs text-slate-500">Sede</label>
-        <select value={luogo} onChange={(e) => setLuogo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-        </select>
+        <SelezionaLuogo value={luogo} onChange={setLuogo} />
       </div>
       <textarea placeholder="Nota (facoltativa)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{inviando ? "Invio..." : "Invia richiesta"}</button>
@@ -336,11 +499,53 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   );
 }
 
-function ClientHome({ client, onAggiornato }) {
+function RiepilogoSettimana({ client }) {
+  const [r, setR] = useState(null);
+  const mostraLog = client.tipo_servizio !== "presenza" || client.log_visibile_cliente;
+  const mostraKcal = client.kcal_attivo !== false;
+  useEffect(() => {
+    if (!mostraLog && !mostraKcal) return;
+    const oggi = new Date();
+    const lun = new Date(oggi); lun.setDate(oggi.getDate() - ((oggi.getDay() + 6) % 7));
+    const da = formatDataLocale(lun);
+    (async () => {
+      const [t, k] = await Promise.all([
+        mostraLog ? supabase.from("training_entries").select("data").eq("client_id", client.id).gte("data", da).limit(500) : { data: [] },
+        mostraKcal ? supabase.from("kcal_voci").select("data").eq("client_id", client.id).gte("data", da).limit(2000) : { data: [] },
+      ]);
+      setR({ all: new Set((t.data || []).map((x) => x.data)).size, diario: new Set((k.data || []).map((x) => x.data)).size });
+    })();
+  }, [client.id, mostraLog, mostraKcal]);
+  if (!r || (!mostraLog && !mostraKcal)) return null;
+  const parti = [];
+  // Se un valore è 0 non si scrive niente: compare solo ciò che c'è davvero
+  if (mostraLog && r.all > 0) parti.push(`${r.all} allenament${r.all === 1 ? "o" : "i"}`);
+  if (mostraKcal && r.diario > 0) parti.push(`diario compilato ${r.diario} giorn${r.diario === 1 ? "o" : "i"}`);
+  const vuoto = (mostraLog ? r.all : 0) + (mostraKcal ? r.diario : 0) === 0;
+  return (
+    <Card className="p-4 flex items-center gap-3 border-emerald-100 bg-emerald-50/50">
+      <span className="text-2xl">{vuoto ? "🌱" : "🌟"}</span>
+      <div className="min-w-0">
+        <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">La tua settimana</p>
+        <p className="font-semibold text-slate-800 text-sm">{vuoto ? "Si riparte da qui: anche un solo passo conta 💪🏻" : `Questa settimana: ${parti.join(", ")} 💪🏻`}</p>
+      </div>
+    </Card>
+  );
+}
+
+function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima = null }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
+  const [schedaAperta, setSchedaAperta] = useState(false);
+  const richiestaRef = React.useRef(null);
+  useEffect(() => {
+    if ((prenotaAperto || inviata) && richiestaRef.current) {
+      setTimeout(() => richiestaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    }
+  }, [prenotaAperto, inviata]);
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
   const [prossimaLezione, setProssimaLezione] = useState(undefined);
+  const [infoPacchetto, setInfoPacchetto] = useState(null);
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const isSoloOnline = client.tipo_servizio === "online";
@@ -355,8 +560,16 @@ function ClientHome({ client, onAggiornato }) {
         .neq("stato", "annullata").neq("stato", "persa").gte("data", oggi).order("data").limit(1).maybeSingle()
         .then(({ data }) => setProssimaLezione(data || null));
     } else {
-      supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true)
-        .then(({ count }) => setLezioniSvolte(count ?? 0));
+      (async () => {
+        const { data: pk } = await supabase.from("pacchetti_lezioni").select("id, numero_lezioni").eq("client_id", client.id).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+        let q = supabase.from("lezioni_svolte").select("data, ora, fatta").eq("client_id", client.id).order("data");
+        if (pk?.id) q = q.eq("pacchetto_id", pk.id);
+        const { data: ls } = await q;
+        const righe = ls || [];
+        const oggiS = formatDataLocale(new Date());
+        setLezioniSvolte(righe.filter((r) => r.fatta).length);
+        setInfoPacchetto({ totale: pk?.numero_lezioni ?? null, prossima: righe.find((r) => !r.fatta && r.data >= oggiS) || null });
+      })();
     }
   }, [client.id, isBulb, pacchettoSingolo]);
 
@@ -367,6 +580,22 @@ function ClientHome({ client, onAggiornato }) {
         <p className="text-slate-500 text-sm mt-1">Costanza batte perfezione, sempre.</p>
       </div>
 
+      {!isBulb && lezioneProssima && (
+        <button onClick={() => onApri?.("lezioni")} className="w-full text-left">
+          <Card className="p-4 flex items-center gap-3 border-sky-200 bg-sky-50/50">
+            <span className="text-2xl">📅</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione{lezioneProssima.stato === "richiesta" ? " (da confermare)" : ""}</p>
+              <p className="font-semibold text-slate-800">{lezioneProssima.data.split("-").reverse().join("/")}{lezioneProssima.ora ? ` · ${lezioneProssima.ora.slice(0, 5)}` : ""}</p>
+              {lezioneProssima.luogo && <p className="text-slate-500 text-xs">{lezioneProssima.luogo}</p>}
+            </div>
+            <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+          </Card>
+        </button>
+      )}
+
+      <RiepilogoSettimana client={client} />
+
       {isOnline && (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-3">
@@ -375,13 +604,23 @@ function ClientHome({ client, onAggiornato }) {
           </div>
           <div className="flex items-end justify-between">
             <div>
-              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check || "—"}</p>
-              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check || "—"}</p>
+              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
+              {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
+                <p className="text-rose-500 text-sm font-medium mt-1">Scaduto: invia il tuo check</p>
+              )}
+              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
             </div>
             <Clock className="text-sky-500" size={32} />
           </div>
         </Card>
       )}
+
+      {isOnline && (
+        <button onClick={() => setSchedaAperta(true)} className="w-full bg-slate-800 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Dumbbell size={22} /><span className="font-medium text-sm">Il mio programma</span>
+        </button>
+      )}
+      {schedaAperta && <SchedaRiassuntiva client={client} onClose={() => setSchedaAperta(false)} />}
 
       {isBulb && pacchettoSingolo && (
         <Card className="p-5">
@@ -402,9 +641,31 @@ function ClientHome({ client, onAggiornato }) {
       {isBulb && !pacchettoSingolo && (
         <Card className="p-5">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
-          <p className="text-3xl font-semibold text-slate-800 mt-2">
-            {lezioniSvolte ?? 0}{lezioniIncluse ? ` / ${lezioniIncluse}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
-          </p>
+          {(() => {
+            const totale = infoPacchetto?.totale ?? lezioniIncluse;
+            const fatte = lezioniSvolte ?? 0;
+            const rimaste = totale ? Math.max(0, totale - fatte) : null;
+            const prossima = infoPacchetto?.prossima;
+            return (
+              <>
+                <p className="text-3xl font-semibold text-slate-800 mt-2">
+                  {fatte}{totale ? ` / ${totale}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
+                </p>
+                {totale > 0 && (
+                  <>
+                    <div className="h-2 bg-slate-100 rounded-full mt-3 overflow-hidden">
+                      <div className="h-full bg-sky-500 rounded-full" style={{ width: `${Math.min(100, Math.round((fatte / totale) * 100))}%` }} />
+                    </div>
+                    <p className="text-slate-500 text-sm mt-2">
+                      {rimaste > 0 ? `${rimaste} ${rimaste === 1 ? "lezione rimasta" : "lezioni rimaste"}` : "Pacchetto completato"}
+                      {prossima ? ` · prossima il ${prossima.data.split("-").reverse().slice(0, 2).join("/")}${prossima.ora ? ` alle ${prossima.ora.slice(0, 5)}` : ""}` : ""}
+                    </p>
+                    {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </Card>
       )}
 
@@ -415,49 +676,153 @@ function ClientHome({ client, onAggiornato }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        {isOnline && (client.scheda_pdf_path || client.link_scheda) && (
-          <button
-            onClick={async () => {
-              if (client.scheda_pdf_path) {
-                const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
-                if (data?.signedUrl) window.open(data.signedUrl, "_blank");
-              } else {
-                window.open(client.link_scheda, "_blank");
-              }
-            }}
-            className="bg-slate-800 text-white rounded-2xl p-4 flex flex-col items-start gap-2"
-          >
-            <Dumbbell size={20} /><span className="font-medium text-sm">Scheda</span>
-          </button>
-        )}
-        {isBulb && (
-          <button onClick={() => setPrenotaAperto(true)} className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
-            <Phone size={20} /><span className="font-medium text-sm">Prenota lezione</span>
-          </button>
-        )}
-        {isSoloOnline && (
-          <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl p-4 flex flex-col items-start gap-2">
-            <Phone size={20} /><span className="font-medium text-sm">Prenota call</span>
-          </a>
-        )}
-      </div>
+      {menu.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          {menu.map((m) => (
+            <button key={m.key} onClick={() => onApri(m.key)}
+              className="relative bg-white border border-slate-200 shadow-sm rounded-2xl min-h-[104px] p-4 flex flex-col items-start justify-between text-left active:bg-slate-50">
+              <span className="relative text-sky-500">
+                <m.icon size={28} />
+                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
+              </span>
+              <span className="font-medium text-slate-800 text-sm leading-tight">{m.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
-      {isSoloOnline && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full border border-dashed border-slate-300 text-slate-600 rounded-2xl p-3 text-sm font-medium">
-          Prenota lezione in presenza
+      {isBulb && (
+        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione</span>
         </button>
       )}
 
-      {prenotaAperto && !inviata && (
-        <PrenotaLezioneForm client={client} extra={isSoloOnline} onFatto={() => setInviata(true)} />
-      )}
-      {inviata && (
-        <p className="text-emerald-600 text-sm px-1">Richiesta inviata! Morgana ti confermerà orario e data.</p>
+      {isSoloOnline && (
+        <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Phone size={22} /><span className="font-medium text-sm">Prenota call</span>
+        </a>
       )}
 
+      {!isBulb && (
+        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
+          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione in presenza</span>
+        </button>
+      )}
+
+      <div ref={richiestaRef}>
+        {prenotaAperto && !inviata && (
+          <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
+        )}
+        {inviata && (
+          <p className="text-emerald-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
+        )}
+      </div>
+
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} />
+
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
+
+      <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
     </div>
+  );
+}
+
+const VAPID_PUBLIC_KEY = "BEW6pygpfBHvX2s_s7Kn1SeNLEs1Zhn15tW5reQaOcNK3d6yycsmG3jaUWubGTBNgtXv9kFEvYm-Flobv0H98tU";
+
+// Chiede al server di mandare una notifica sul telefono. Non blocca mai l'app se qualcosa va storto.
+function inviaPush(body) {
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (!session) return;
+    supabase.functions.invoke("invia-push", { body, headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => {});
+  }).catch(() => {});
+}
+let timerPushCarichi = null;
+function inviaPushCarichi() { // aspetta qualche secondo dall'ultimo carico salvato, poi controlla record e costanza
+  clearTimeout(timerPushCarichi);
+  timerPushCarichi = setTimeout(() => inviaPush({ evento: "carico" }), 8000);
+}
+
+function chiaveVapidInBytes(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+function AttivaNotifichePush({ ruolo, clientId = null }) {
+  const supportato = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const ios = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const [attive, setAttive] = useState(false);
+  const [lavoro, setLavoro] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const salva = async (sub) => {
+    const j = sub.toJSON();
+    await supabase.from("push_subscriptions").upsert({ client_id: clientId, ruolo, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+  };
+
+  useEffect(() => {
+    if (!supportato || Notification.permission !== "granted") return;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) { await salva(sub); setAttive(true); }
+      } catch (e) { /* resta il pulsante di attivazione */ }
+    })();
+  }, []);
+
+  const attiva = async () => {
+    setLavoro(true); setErrore("");
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") { setErrore("Le notifiche sono bloccate 🫶🏻 Puoi riattivarle dalle impostazioni del telefono, così non ti perdi nulla!"); setLavoro(false); return; }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chiaveVapidInBytes(VAPID_PUBLIC_KEY) });
+      await salva(sub);
+      setAttive(true);
+      reg.showNotification("Notifiche attivate ✨", { body: "Da ora ti avviso direttamente sul telefono 🫶🏻", icon: "/apple-touch-icon.png" });
+    } catch (e) {
+      setErrore("Ops, non sono riuscita ad attivarle 🫶🏻 " + (e.message || "riprova"));
+    }
+    setLavoro(false);
+  };
+
+  const disattiva = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) { await supabase.from("push_subscriptions").delete().eq("endpoint", sub.endpoint); await sub.unsubscribe(); }
+    } catch (e) { /* ignora */ }
+    setAttive(false);
+  };
+
+  if (!supportato) {
+    if (!ios) return null;
+    return (
+      <Card className="p-4 space-y-1">
+        <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
+        <p className="text-xs text-slate-500">Su iPhone: tocca il tasto Condividi di Safari, scegli "Aggiungi alla schermata Home", poi apri l'app dall'icona appena creata e torna qui per attivarle.</p>
+      </Card>
+    );
+  }
+  if (attive) {
+    return (
+      <div className="flex items-center justify-between px-1">
+        <p className="text-xs text-emerald-600">🔔 Notifiche attive su questo telefono</p>
+        <button onClick={disattiva} className="text-[11px] text-slate-400 underline">Disattiva</button>
+      </div>
+    );
+  }
+  return (
+    <Card className="p-4 space-y-2">
+      <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
+      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check e richieste di lezione." : "Ricevi un avviso per i messaggi di Morgana, i promemoria e i tuoi traguardi."}</p>
+      <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+    </Card>
   );
 }
 
@@ -518,6 +883,10 @@ function ClientCheckin({ client, onInviato }) {
   );
 
   const invia = async () => {
+    if (!files.frontale || !files.laterale || !files.posteriore || !files.extra) {
+      setErrore("Mi servono tutte e 4 le foto (frontale, laterale destra, laterale sinistra, posteriore) 📸 Poi ci siamo!");
+      return;
+    }
     setInviando(true);
     setErrore("");
     const dataCheck = new Date().toISOString().slice(0, 10);
@@ -539,13 +908,13 @@ function ClientCheckin({ client, onInviato }) {
       payload.foto_extra_path = await caricaFotoStorage(files.extra, client.id, dataCheck, "extra");
     } catch (e) {
       setInviando(false);
-      setErrore("Errore nel caricamento delle foto: " + e.message);
+      setErrore("Ops, le foto non si sono caricate 🫶🏻 Riprova. " + e.message);
       return;
     }
 
     const { data: inserito, error } = await supabase.from("checkins").insert(payload).select().single();
     setInviando(false);
-    if (error) { setErrore("Non sono riuscita a inviare il check: " + error.message); return; }
+    if (error) { setErrore("Ops, il check non è partito 🫶🏻 Riprova tra poco. " + error.message); return; }
 
     // Aggiorna in automatico il prossimo check a +4 settimane (tramite funzione sicura)
     supabase.rpc("aggiorna_prossimo_check", { check_date: dataCheck }).then(() => {});
@@ -558,6 +927,8 @@ function ClientCheckin({ client, onInviato }) {
       }).catch(() => {});
     });
 
+    inviaPush({ evento: "check", checkin_id: inserito.id });
+
     setInviato(true);
     onInviato?.();
   };
@@ -566,8 +937,8 @@ function ClientCheckin({ client, onInviato }) {
     return (
       <div className="px-5 pt-16 flex flex-col items-center text-center">
         <CheckCircle2 className="text-emerald-500 mb-4" size={48} />
-        <h2 className="text-lg font-semibold text-slate-800">Check inviato</h2>
-        <p className="text-slate-500 text-sm mt-2">Morgana riceverà i tuoi dati e li revisionerà a breve.</p>
+        <h2 className="text-lg font-semibold text-slate-800">Check inviato, grazie! 🫶🏻</h2>
+        <p className="text-slate-500 text-sm mt-2">Guardo i tuoi dati con calma e ti scrivo presto ✨💪🏻</p>
       </div>
     );
   }
@@ -575,6 +946,15 @@ function ClientCheckin({ client, onInviato }) {
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">Nuovo check</h1>
+      <a href="/guida-check-misure-foto.pdf" target="_blank" rel="noopener noreferrer" download
+        className="flex items-center gap-3 bg-sky-50 border border-sky-100 rounded-xl px-4 py-3">
+        <FileText size={20} className="text-sky-500 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-700">Guida misure e foto</p>
+          <p className="text-xs text-slate-500">Come prenderle correttamente prima di inviare il check</p>
+        </div>
+        <span className="text-sky-600 text-xs font-medium flex-shrink-0">Scarica</span>
+      </a>
       <Card className="p-4 space-y-4">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Misure</p>
         <div className="grid grid-cols-2 gap-3">
@@ -611,7 +991,7 @@ function ClientCheckin({ client, onInviato }) {
         {slider("Aderenza all'allenamento", "aderenza_allenamento")}
       </Card>
       <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi <span className="text-rose-400 normal-case font-normal">(obbligatorie)</span></p>
         <FotoInputs files={files} setFiles={setFiles} />
       </Card>
       <Card className="p-4 space-y-2">
@@ -731,7 +1111,7 @@ function HistoryTable({ checkins, sesso }) {
 
 /* Tabella 2 — valori calcolati, righe = indicatori, colonne = date (per confronto rapido) */
 function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
-  const ordinati = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const ordinati = [...checkins].sort((a, b) => (b.data_check || "").localeCompare(a.data_check || ""));
   if (ordinati.length === 0) return null;
 
   const righe = [
@@ -780,7 +1160,541 @@ function TabellaEstrapolati({ checkins, altezza, sesso, eta }) {
   );
 }
 
-function ClientProgress({ checkins, altezza, sesso, eta, titolo = "I tuoi progressi" }) {
+/* Analizza la serie storica dei check e produce un giudizio testuale in italiano
+   sull'andamento generale (peso, vita, circonferenze muscolari), utile a chi legge
+   il grafico senza saperlo interpretare da sola. */
+const SOGLIA_GAP_GIORNI = 45; // oltre questo scarto tra due check consecutivi, si considera un cambio di approccio/fase
+
+function giorniTra(d1, d2) {
+  const a = new Date(d1 + "T00:00:00");
+  const b = new Date(d2 + "T00:00:00");
+  return Math.round((b - a) / 86400000);
+}
+
+function formattaDurata(giorni) {
+  if (giorni >= 60) return `circa ${Math.round(giorni / 30)} mesi`;
+  if (giorni >= 14) return `circa ${Math.round(giorni / 7)} settimane`;
+  return `${giorni} giorni`;
+}
+
+// Trova l'indice del primo check dopo l'ultimo salto temporale importante in una lista ordinata
+// per data. Un check fatto mesi dopo il precedente quasi sempre segna un cambio di approccio
+// (fine di un cut, inizio di un reverse o di una massa) anche se non è stato segnato a mano come
+// nuovo obiettivo — quindi va isolato dal resto della storia invece di mediarci sopra.
+function indiceDopoUltimoSalto(lista, sogliaGiorni = SOGLIA_GAP_GIORNI) {
+  let idx = 0;
+  for (let i = 1; i < lista.length; i++) {
+    if (!lista[i - 1].data_check || !lista[i].data_check) continue;
+    const gap = giorniTra(lista[i - 1].data_check, lista[i].data_check);
+    if (gap >= sogliaGiorni) idx = i;
+  }
+  return idx;
+}
+
+// Confronto diretto fra due soli check (usato quando dopo un salto temporale c'è un solo check
+// recente): stessa forma { direzione, delta, oscillante } di trend(), così può riusare le stesse
+// frasi di generaNotaAndamento senza duplicare la logica di interpretazione.
+function deltaSemplice(v1, v2, soglia) {
+  if (v1 == null || v2 == null) return { direzione: null, delta: null, oscillante: false };
+  const delta = v2 - v1;
+  const direzione = Math.abs(delta) < soglia ? "stabile" : delta < 0 ? "calo" : "aumento";
+  return { direzione, delta, oscillante: false };
+}
+
+function mediaMuscolo(c) {
+  const vals = [c.braccio_dx_cm, c.coscia_dx_cm].filter((v) => v != null);
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+function analizzaAndamento(ordinati) {
+  const estrai = (key) => ordinati.map((c) => ({ data: c.data_check, v: c[key] })).filter((p) => p.v != null);
+  const peso = estrai("peso_kg");
+  const vita = estrai("sopra_ombelico_cm");
+  const muscolo = ordinati
+    .map((c) => {
+      const vals = [c.braccio_dx_cm, c.coscia_dx_cm].filter((v) => v != null);
+      return vals.length ? { data: c.data_check, v: vals.reduce((a, b) => a + b, 0) / vals.length } : null;
+    })
+    .filter(Boolean);
+
+  const puntiUtili = Math.max(peso.length, vita.length, muscolo.length);
+  if (puntiUtili < 2) return null;
+
+  const trend = (serie, soglia) => {
+    if (serie.length < 2) return { direzione: null, delta: null, oscillante: false };
+    const delta = serie[serie.length - 1].v - serie[0].v;
+    let cambiDirezione = 0;
+    for (let i = 2; i < serie.length; i++) {
+      const prevD = serie[i - 1].v - serie[i - 2].v;
+      const curD = serie[i].v - serie[i - 1].v;
+      if (prevD !== 0 && curD !== 0 && Math.sign(prevD) !== Math.sign(curD)) cambiDirezione++;
+    }
+    const direzione = Math.abs(delta) < soglia ? "stabile" : delta < 0 ? "calo" : "aumento";
+    return { direzione, delta, oscillante: cambiDirezione >= 2 && serie.length >= 4 };
+  };
+
+  return { peso, vita, muscolo, tPeso: trend(peso, 0.4), tVita: trend(vita, 0.5), tMuscolo: trend(muscolo, 0.5) };
+}
+
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+const LABEL_OBIETTIVO = { definizione: "Definizione", mantenimento: "Mantenimento", massa: "Massa", reverse: "Reverse" };
+function labelObiettivo(o) { return LABEL_OBIETTIVO[o] || o; }
+
+function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabel = "nelle ultime settimane") {
+  const frasi = [];
+  if (tPeso.oscillante) {
+    frasi.push(`Il peso ha avuto alti e bassi ${finestraLabel} — è normale, dipende da ritenzione idrica, ciclo, stress o digestione — ma guardando l'insieme dei dati:`);
+  }
+  const pesoTxt = tPeso.direzione === "calo" ? "il peso è sceso" : tPeso.direzione === "aumento" ? "il peso è salito" : tPeso.direzione === "stabile" ? "il peso è rimasto stabile" : null;
+  const vitaTxt = tVita.direzione === "calo" ? "la circonferenza vita si è ridotta" : tVita.direzione === "aumento" ? "la circonferenza vita è aumentata" : tVita.direzione === "stabile" ? "la circonferenza vita è rimasta stabile" : null;
+  const muscTxt = tMuscolo.direzione === "calo" ? "le circonferenze di braccio/coscia sono leggermente calate" : tMuscolo.direzione === "aumento" ? "le circonferenze di braccio/coscia sono aumentate" : tMuscolo.direzione === "stabile" ? "le circonferenze di braccio/coscia si sono mantenute" : null;
+
+  if (obiettivo === "reverse") {
+    // In reverse diet l'obiettivo è far risalire le calorie in modo controllato dopo una definizione
+    // (o una gara): un aumento graduale di peso/vita qui non è un problema, è il segnale che il
+    // metabolismo si sta riattivando — il messaggio va quindi capovolto rispetto a una definizione.
+    if (tPeso.direzione === "aumento" && (tVita.direzione === "aumento" || tVita.direzione === "stabile")) {
+      frasi.push(`${cap(pesoTxt)}${tVita.direzione === "aumento" ? " e " + vitaTxt : ""}: in una fase di reverse è proprio l'andamento atteso. Le calorie stanno risalendo e il corpo si sta riequilibrando dopo la definizione — non è "ripreso il grasso perso", è il metabolismo che si riattiva.`);
+    } else if (tPeso.direzione === "stabile") {
+      frasi.push("Il peso è rimasto stabile in questa fase di reverse: è normale, può volerci qualche settimana in più prima che si veda la risalita. L'importante è seguire l'aumento calorico programmato con la coach.");
+    } else if (tPeso.direzione === "calo") {
+      frasi.push("Il peso è ancora in calo nonostante la fase di reverse: capita nelle prime settimane, ma se continua parlane con la coach — potrebbe servire un aggiustamento delle calorie.");
+    } else {
+      frasi.push("Servono ancora un paio di check in questa fase di reverse per vedere un trend chiaro.");
+    }
+    if (tMuscolo.direzione === "aumento") frasi.push("Le circonferenze muscolari che crescono sono un ottimo segnale in questa fase.");
+    return frasi.join(" ");
+  }
+
+  if (tVita.direzione === "calo" && (tMuscolo.direzione === "stabile" || tMuscolo.direzione === "aumento")) {
+    frasi.push(`${cap(vitaTxt)}${muscTxt ? " mentre " + muscTxt : ""}: è il segno di una ricomposizione corporea in corso — il grasso cala e la massa muscolare tiene o cresce, anche se ${pesoTxt || "il peso da solo non racconta tutta la storia"}. La definizione che si vede nelle foto è proprio questo: meno grasso attorno al muscolo che c'è già.`);
+  } else if (tVita.direzione === "calo" && tMuscolo.direzione === "calo") {
+    frasi.push(`${cap(vitaTxt)}, insieme a un calo anche delle circonferenze muscolari: la definizione sta procedendo, ma vale la pena monitorare che il calo non coinvolga troppo la massa magra — parlane con la coach.`);
+  } else if (tVita.direzione === "stabile" && tMuscolo.direzione === "aumento") {
+    frasi.push("La vita è rimasta stabile mentre le circonferenze muscolari crescono: è il segno di una costruzione di massa muscolare senza accumulo significativo in zona addominale.");
+  } else if (tVita.direzione === "aumento" && tMuscolo.direzione === "aumento") {
+    frasi.push("Sia la vita che le circonferenze muscolari sono in aumento: coerente con una fase di crescita, in parte muscolo e in parte — fisiologicamente — un po' di massa grassa.");
+  } else if (tVita.direzione === "stabile" && tMuscolo.direzione === "stabile" && tPeso.direzione === "stabile") {
+    frasi.push("I valori sono rimasti stabili nel periodo: il corpo è in una fase di mantenimento, senza grandi cambiamenti in una direzione o nell'altra.");
+  } else {
+    const parti = [pesoTxt, vitaTxt, muscTxt].filter(Boolean);
+    if (parti.length) frasi.push(cap(parti.join(", ")) + ".");
+    else frasi.push("Servono ancora un paio di check per vedere un trend chiaro.");
+  }
+
+  if (obiettivo === "definizione") {
+    if (tVita.direzione === "calo") frasi.push("Il trend è coerente con l'obiettivo attuale di definizione.");
+    else if (tVita.direzione === "aumento") frasi.push("Rispetto all'obiettivo di definizione, la vita in aumento merita attenzione: parlane con la coach per eventuali aggiustamenti.");
+  } else if (obiettivo === "massa") {
+    if (tMuscolo.direzione === "aumento" || tPeso.direzione === "aumento") frasi.push("Il trend è coerente con l'obiettivo attuale di aumento massa.");
+  } else if (obiettivo === "mantenimento") {
+    if (tPeso.direzione === "stabile" && tVita.direzione === "stabile") frasi.push("In linea con l'obiettivo attuale di mantenimento.");
+  }
+
+  return frasi.join(" ");
+}
+
+function serieConVariazione(rows, key) {
+  let base = null;
+  return rows.map((r) => {
+    if (r[key] == null) return { ...r, [key + "Pct"]: null };
+    if (base == null) base = r[key];
+    const pct = base ? ((r[key] - base) / base) * 100 : 0;
+    return { ...r, [key + "Pct"]: Number(pct.toFixed(2)) };
+  });
+}
+
+function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
+  const [vediTutto, setVediTutto] = useState(false);
+
+  const tutti = [...checkins].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const analisiTutti = analizzaAndamento(tutti);
+  if (!analisiTutti) return null; // dati insufficienti anche su tutto lo storico: niente da mostrare
+
+  const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "—");
+  const chartDataDa = (lista) => {
+    const raw = lista.map((c) => ({
+      dataLabel: c.data_check ? c.data_check.slice(5).split("-").reverse().join("/") : "",
+      peso: c.peso_kg ?? null,
+      vita: c.sopra_ombelico_cm ?? null,
+      muscolo: mediaMuscolo(c),
+    }));
+    let cd = serieConVariazione(raw, "peso");
+    cd = serieConVariazione(cd, "vita");
+    cd = serieConVariazione(cd, "muscolo");
+    return cd;
+  };
+
+  // 1) Se sappiamo da quando è iniziata la fase attuale (cut, reverse, massa...), si parte da lì.
+  const usaFase = !!obiettivoDal && !vediTutto;
+  const daFase = obiettivoDal ? tutti.filter((c) => c.data_check && c.data_check >= obiettivoDal) : tutti;
+  const base = usaFase ? daFase : tutti;
+
+  // 2) Dentro quella finestra, si cerca comunque l'ultimo salto temporale importante fra due check
+  // consecutivi: un check fatto mesi dopo il precedente segnala quasi sempre un cambio di approccio
+  // (es. fine definizione → reverse, o inizio di una massa) anche se non è stato taggato a mano.
+  const idxSalto = vediTutto ? 0 : indiceDopoUltimoSalto(base);
+  const saltoRilevato = idxSalto > 0;
+  const giorniSalto = saltoRilevato ? giorniTra(base[idxSalto - 1].data_check, base[idxSalto].data_check) : 0;
+  const finestra = saltoRilevato ? base.slice(idxSalto) : base;
+
+  let analisi, nota, chartData, sottotitolo;
+
+  if (finestra.length === 1 && saltoRilevato) {
+    // Caso tipico: l'ultimo check e il precedente sono a mesi di distanza — non c'è un "trend" nel
+    // senso classico, ma un confronto diretto fra due momenti diversi, che va raccontato come tale.
+    const prev = base[idxSalto - 1], cur = base[idxSalto];
+    analisi = {
+      tPeso: deltaSemplice(prev.peso_kg, cur.peso_kg, 0.4),
+      tVita: deltaSemplice(prev.sopra_ombelico_cm, cur.sopra_ombelico_cm, 0.5),
+      tMuscolo: deltaSemplice(mediaMuscolo(prev), mediaMuscolo(cur), 0.5),
+    };
+    const notaBase = generaNotaAndamento(analisi, obiettivo, "rispetto al check precedente");
+    nota = `Tra il check del ${fmtData(prev.data_check)} e quello del ${fmtData(cur.data_check)} sono passati ${formattaDurata(giorniSalto)}: è più un cambio di fase che un trend continuo. ${notaBase}`;
+    chartData = chartDataDa([prev, cur]);
+    sottotitolo = `confronto dopo una pausa di ${formattaDurata(giorniSalto)}`;
+  } else {
+    const analisiFinestra = analizzaAndamento(finestra);
+    const puntiInsufficienti = finestra.length < 2 || !analisiFinestra;
+    analisi = puntiInsufficienti ? analisiTutti : analisiFinestra;
+    chartData = chartDataDa(puntiInsufficienti ? tutti : finestra);
+    if (puntiInsufficienti) {
+      nota = obiettivoDal
+        ? `Hai iniziato la fase di ${labelObiettivo(obiettivo).toLowerCase()} il ${fmtData(obiettivoDal)}: servono almeno due check in questa fase per iniziare a vedere un trend. Sotto, per intanto, lo storico completo.`
+        : "Servono ancora un paio di check per vedere un trend chiaro.";
+      sottotitolo = null;
+    } else {
+      const giorniFinestra = giorniTra(finestra[0].data_check, finestra[finestra.length - 1].data_check);
+      const finestraLabel = giorniFinestra > 150 ? "nel periodo analizzato" : giorniFinestra > 60 ? "negli ultimi mesi" : "nelle ultime settimane";
+      const notaBase = generaNotaAndamento(analisi, obiettivo, finestraLabel);
+      nota = saltoRilevato
+        ? `Sono passati ${formattaDurata(giorniSalto)} dal check del ${fmtData(base[idxSalto - 1].data_check)}: da lì in poi si vede un cambio di approccio, quindi il confronto è fatto solo sui check più recenti. ${notaBase}`
+        : notaBase;
+      sottotitolo = usaFase ? `fase ${labelObiettivo(obiettivo).toLowerCase()} dal ${fmtData(obiettivoDal)}` : saltoRilevato ? `dal ${fmtData(finestra[0].data_check)}` : null;
+    }
+  }
+
+  const mostraToggle = !!obiettivoDal || saltoRilevato || vediTutto;
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">
+          Andamento generale{sottotitolo && !vediTutto ? ` · ${sottotitolo}` : ""}
+        </p>
+        {mostraToggle && (
+          <button onClick={() => setVediTutto((v) => !v)} className="text-[11px] text-sky-600 font-medium flex-shrink-0">
+            {vediTutto ? "Solo fase recente" : "Storico completo"}
+          </button>
+        )}
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <XAxis dataKey="dataLabel" tick={{ fontSize: 11, fill: "#64748b" }} />
+          <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => `${v}%`} width={40} />
+          <Tooltip formatter={(v) => (v == null ? "—" : `${v}%`)} />
+          <Line type="monotone" dataKey="pesoPct" name="Peso" stroke="#0ea5e9" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+          <Line type="monotone" dataKey="vitaPct" name="Vita" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+          <Line type="monotone" dataKey="muscoloPct" name="Braccio/coscia" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+        </LineChart>
+      </ResponsiveContainer>
+      <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Peso</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Vita</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Braccio/coscia</span>
+      </div>
+      <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{sottotitolo && !vediTutto ? " in questa finestra" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
+    </Card>
+  );
+}
+
+function ProgressiCarichi({ clientId }) {
+  const [esercizi, setEsercizi] = useState(null);
+  const [aperto, setAperto] = useState(null);
+  const [traguardi, setTraguardi] = useState({ streak: 0 });
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        const mappa = {};
+        righe.forEach((r) => {
+          const kg = Number(r.kg);
+          const nome = r.training_exercises?.nome;
+          if (!nome || !r.data || !(kg > 0)) return;
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {} });
+          g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
+        });
+        const lista = Object.values(mappa).map((g) => {
+          const date = Object.keys(g.date).sort();
+          const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
+          const primo = g.date[date[0]]; const ultimo = g.date[date[date.length - 1]];
+          const precedenti = date.slice(0, -1).map((d) => g.date[d]);
+          const maxPrec = precedenti.length ? Math.max(...precedenti) : 0;
+          const record = date.length >= 2 && ultimo > maxPrec;
+          return { nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
+        }).sort((a, b) => a.nome.localeCompare(b.nome));
+        // Costanza: settimane consecutive (lunedì-domenica) con almeno un allenamento registrato
+        const lunedi = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
+        const settimane = new Set(righe.filter((r) => r.data).map((r) => lunedi(r.data)));
+        let cur = lunedi(formatDataLocale(new Date()));
+        if (!settimane.has(cur)) cur = addGiorni(cur, -7);
+        let streak = 0;
+        while (settimane.has(cur)) { streak += 1; cur = addGiorni(cur, -7); }
+        if (vivo) setTraguardi({ streak });
+        if (vivo) setEsercizi(lista);
+      } catch (e) { if (vivo) setEsercizi([]); }
+    })();
+    return () => { vivo = false; };
+  }, [clientId]);
+
+  if (!esercizi || esercizi.length === 0) return null;
+  const inAumento = esercizi.filter((e) => e.diff > 0).length;
+  const fmt = (n) => String(n).replace(".", ",");
+
+  return (
+    <div className="space-y-2">
+      {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
+        <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">I tuoi traguardi</p>
+          {traguardi.streak >= 2 && <p className="text-sm text-slate-700">🔥 <span className="font-semibold">{traguardi.streak} settimane di fila</span> con almeno un allenamento registrato. Che costanza, sono fiera di te! 💪🏻✨</p>}
+          {esercizi.filter((e) => e.recordRecente).map((e) => (
+            <p key={e.nome} className="text-sm text-slate-700">🏆 Nuovo record: <span className="font-semibold">{e.nome}</span> {fmt(e.maxPrec)} → {fmt(e.ultimo)} kg</p>
+          ))}
+        </Card>
+      )}
+      <div className="px-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Progressi carichi</p>
+        <p className="text-slate-400 text-xs mt-0.5">{inAumento} esercizi su {esercizi.length} con carico in aumento. Il valore è il kg più alto usato in ogni allenamento.</p>
+      </div>
+      {esercizi.map((e) => (
+        <Card key={e.nome} className="p-3">
+          <button onClick={() => setAperto(aperto === e.nome ? null : e.nome)} className="w-full text-left">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-medium text-slate-700 text-sm">{e.nome}{e.recordRecente ? " 🏆" : ""}</p>
+              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}>
+                {e.sessioni < 2 ? "1ª sessione" : `${e.diff > 0 ? "+" : ""}${fmt(e.diff)} kg`}
+              </span>
+            </div>
+            <p className="text-slate-500 text-xs mt-1">{fmt(e.primo)} kg → {fmt(e.ultimo)} kg · massimo {fmt(e.max)} kg · {e.sessioni} {e.sessioni === 1 ? "sessione" : "sessioni"}</p>
+          </button>
+          {aperto === e.nome && e.serie.length > 1 && (
+            <div style={{ width: "100%", height: 150 }} className="mt-2">
+              <ResponsiveContainer>
+                <LineChart data={e.serie}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="dataLabel" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} domain={["auto", "auto"]} width={32} />
+                  <Tooltip formatter={(v) => [`${v} kg`, "Carico"]} />
+                  <Line type="monotone" dataKey="kg" stroke="#4F8FD0" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// Foto con zoom a due dita (pizzico) e spostamento col dito; un tocco semplice la apre a schermo intero.
+function FotoZoom({ src, alt, v, onChange, onTap }) {
+  const ref = React.useRef(null);
+  const punti = React.useRef(new Map());
+  const st = React.useRef({ dist: 0, mosso: 0 });
+  const limita = (n, a, b) => Math.max(a, Math.min(b, n));
+  const giu = (e) => {
+    ref.current?.setPointerCapture?.(e.pointerId);
+    punti.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (punti.current.size === 1) st.current.mosso = 0;
+    st.current.dist = 0;
+  };
+  const muovi = (e) => {
+    const m = punti.current;
+    const prec = m.get(e.pointerId);
+    if (!prec) return;
+    const cur = { x: e.clientX, y: e.clientY };
+    m.set(e.pointerId, cur);
+    const box = ref.current.getBoundingClientRect();
+    if (m.size >= 2) {
+      const [p1, p2] = [...m.values()];
+      const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      if (st.current.dist > 0) onChange({ z: Math.round(limita(v.z * (dist / st.current.dist), 1, 4) * 100) / 100 });
+      st.current.dist = dist;
+      st.current.mosso += 10;
+    } else if (v.z > 1) {
+      const dx = cur.x - prec.x, dy = cur.y - prec.y;
+      st.current.mosso += Math.abs(dx) + Math.abs(dy);
+      onChange({ x: limita(v.x - (dx / (v.z - 1) / box.width) * 100, 0, 100), y: limita(v.y - (dy / (v.z - 1) / box.height) * 100, 0, 100) });
+    } else {
+      st.current.mosso += Math.abs(cur.x - prec.x) + Math.abs(cur.y - prec.y);
+    }
+  };
+  const su = (e) => {
+    const m = punti.current;
+    m.delete(e.pointerId);
+    st.current.dist = 0;
+    if (m.size === 0 && st.current.mosso < 8 && e.type === "pointerup") onTap?.();
+  };
+  return (
+    <div ref={ref} onPointerDown={giu} onPointerMove={muovi} onPointerUp={su} onPointerCancel={su}
+      style={{ touchAction: "none" }} className="relative w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center cursor-pointer select-none">
+      {src
+        ? <img src={src} alt={alt} draggable={false} className="absolute inset-0 w-full h-full object-cover pointer-events-none" style={{ transform: `scale(${v.z})`, transformOrigin: `${v.x}% ${v.y}%` }} />
+        : <span className="text-slate-300 text-xs">Caricamento...</span>}
+      {v.z > 1 && <span className="absolute bottom-1 right-1 bg-black/50 text-white text-[10px] rounded px-1.5 py-0.5">{String(Math.round(v.z * 10) / 10).replace(".", ",")}×</span>}
+    </div>
+  );
+}
+
+function ConfrontoFoto({ checkins, isAdmin = false }) {
+  const ANGOLI = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale dx"], ["foto_extra_path", "Laterale sx"], ["foto_posteriore_path", "Posteriore"]];
+  const [angolo, setAngolo] = useState("foto_frontale_path");
+  const [idA, setIdA] = useState("");
+  const [idB, setIdB] = useState("");
+  const [urls, setUrls] = useState({});
+  const VISTA0 = { z: 1, x: 50, y: 40 };
+  const [vista, setVista] = useState({ Prima: VISTA0, Dopo: VISTA0 });
+  const [insieme, setInsieme] = useState(false);
+  const cambia = (titolo, patch) => setVista((v) => (insieme ? { Prima: { ...v.Prima, ...patch }, Dopo: { ...v.Dopo, ...patch } } : { ...v, [titolo]: { ...v[titolo], ...patch } }));
+  const [grande, setGrande] = useState(null);
+  const [note, setNote] = useState({});
+  const [salvata, setSalvata] = useState("");
+  const [, forzaAggiorna] = useState(0);
+  const [salvati, setSalvati] = useState({});
+  const [salvaMsg, setSalvaMsg] = useState("");
+  const clienteFoto = checkins[0]?.client_id;
+  useEffect(() => {
+    if (!clienteFoto) return;
+    supabase.from("confronto_foto_coach").select("*").eq("client_id", clienteFoto).then(({ data }) => {
+      const m = {}; (data || []).forEach((r) => { m[r.angolo] = r; }); setSalvati(m);
+    });
+  }, [clienteFoto]);
+  useEffect(() => {
+    const r = salvati[angolo];
+    if (r) { setIdA(r.id_prima || ""); setIdB(r.id_dopo || ""); setVista({ Prima: { ...VISTA0, ...(r.vista?.Prima || {}) }, Dopo: { ...VISTA0, ...(r.vista?.Dopo || {}) } }); setInsieme(!!r.insieme); }
+    else { setIdA(""); setIdB(""); setVista({ Prima: VISTA0, Dopo: VISTA0 }); setInsieme(false); }
+  }, [angolo, salvati]);
+  const salvaImpostazione = async (idPrima, idDopo) => {
+    const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista, insieme, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("confronto_foto_coach").upsert(riga, { onConflict: "client_id,angolo" });
+    if (!error) { setSalvati((m) => ({ ...m, [angolo]: riga })); setSalvaMsg("Salvato: la cliente vede questo confronto ✓"); setTimeout(() => setSalvaMsg(""), 3000); }
+    else setSalvaMsg("Non sono riuscita a salvare");
+  };
+  const invertiLaterali = async (c) => {
+    const nuovo = { foto_laterale_path: c.foto_extra_path || null, foto_extra_path: c.foto_laterale_path || null };
+    const { error } = await supabase.from("checkins").update(nuovo).eq("id", c.id);
+    if (!error) { c.foto_laterale_path = nuovo.foto_laterale_path; c.foto_extra_path = nuovo.foto_extra_path; forzaAggiorna((n) => n + 1); }
+  };
+  useEffect(() => {
+    const m = {};
+    checkins.forEach((c) => { m[c.id] = c.nota_foto_coach || ""; });
+    setNote(m);
+  }, [checkins.length]);
+  const conFoto = [...checkins].filter((c) => c[angolo]).sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const a = conFoto.find((c) => c.id === idA) || conFoto[0];
+  const b = conFoto.find((c) => c.id === idB) || conFoto[conFoto.length - 1];
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const out = {};
+      for (const c of [a, b]) {
+        if (c && c[angolo] && !out[c.id]) {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(c[angolo], 3600);
+          out[c.id] = data?.signedUrl;
+        }
+      }
+      if (vivo) setUrls(out);
+    })();
+    return () => { vivo = false; };
+  }, [a?.id, b?.id, angolo, a?.[angolo], b?.[angolo]]);
+
+  if (checkins.filter((c) => ANGOLI.some(([k]) => c[k])).length < 2) return null;
+  const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const diffPeso = a && b && a.peso_kg != null && b.peso_kg != null ? Math.round((Number(b.peso_kg) - Number(a.peso_kg)) * 10) / 10 : null;
+  const salvaNota = async (c) => {
+    const testo = (note[c.id] || "").trim();
+    if (testo === (c.nota_foto_coach || "")) return;
+    const { error } = await supabase.from("checkins").update({ nota_foto_coach: testo || null }).eq("id", c.id);
+    if (!error) { c.nota_foto_coach = testo || null; setSalvata(c.id); setTimeout(() => setSalvata(""), 2000); }
+  };
+  const Cursore = ({ label, valore, set, min, max, step }) => (
+    <label className="flex items-center gap-2 text-xs text-slate-500">
+      <span className="w-11 flex-shrink-0">{label}</span>
+      <input type="range" min={min} max={max} step={step} value={valore} onChange={(e) => set(Number(e.target.value))} className="flex-1 accent-sky-500" />
+    </label>
+  );
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Confronto foto</p>
+      <Card className="p-4 space-y-3">
+        <div className="flex gap-1.5">
+          {ANGOLI.map(([k, l]) => (
+            <button key={k} onClick={() => { setAngolo(k); setIdA(""); setIdB(""); }} className={`flex-1 py-1.5 rounded-lg text-[11px] font-medium ${angolo === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
+          ))}
+        </div>
+        {conFoto.length < 2 ? (
+          <p className="text-slate-400 text-sm text-center py-4">Servono almeno due check con questa foto per fare il confronto.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              {[["Prima", a, setIdA], ["Dopo", b, setIdB]].map(([titolo, c, setId]) => (
+                <div key={titolo} className="space-y-1.5">
+                  {isAdmin ? (
+                    <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
+                      {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
+                    </select>
+                  ) : <p className="text-center text-xs font-medium text-slate-600">{titolo}: {fmtData(c?.data_check)}</p>}
+                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => { if (isAdmin) cambia(titolo, patch); }} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
+                  {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
+                  {isAdmin && c && (angolo === "foto_laterale_path" || angolo === "foto_extra_path") && (
+                    <button onClick={() => invertiLaterali(c)} className="w-full text-[11px] text-sky-600 border border-sky-100 bg-sky-50 rounded-lg py-1.5 font-medium">↔ Inverti laterale dx e sx di questo check</button>
+                  )}
+                  {isAdmin ? (
+                    <div>
+                      <textarea value={note[c?.id] || ""} onChange={(e) => setNote((n) => ({ ...n, [c.id]: e.target.value }))} onBlur={() => c && salvaNota(c)} rows={3}
+                        placeholder="Nota per la cliente su questo check..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                      {salvata === c?.id && <p className="text-emerald-600 text-[11px]">Nota salvata ✓</p>}
+                    </div>
+                  ) : (c?.nota_foto_coach && (
+                    <div className="bg-sky-50 border border-sky-100 rounded-lg px-2 py-1.5">
+                      <p className="text-[10px] uppercase tracking-wide text-sky-700 font-medium">Nota di Morgana</p>
+                      <p className="text-xs text-slate-700 whitespace-pre-wrap">{c.nota_foto_coach}</p>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            {isAdmin ? (
+              <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
+                <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
+                <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
+                <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Tocca una foto per aprirla a schermo intero.</p>
+                <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
+                {salvaMsg && <p className="text-emerald-600 text-[11px] text-center">{salvaMsg}</p>}
+                <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
+              </div>
+            ) : <p className="text-[11px] text-slate-400 text-center">Tocca una foto per aprirla a schermo intero.</p>}
+            {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
+          </>
+        )}
+      </Card>
+      {grande && createPortal(
+        <div onClick={() => setGrande(null)} className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-3">
+          <img src={grande} alt="" className="max-w-full max-h-full object-contain" />
+          <button className="absolute top-4 right-4 text-white text-2xl leading-none">×</button>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi", clientId, isAdmin = false }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
   const dati = [...checkins]
@@ -788,12 +1702,18 @@ function ClientProgress({ checkins, altezza, sesso, eta, titolo = "I tuoi progre
     .map((c) => ({ ...c, dataLabel: c.data_check?.slice(5).split("-").reverse().join("/") }));
 
   if (checkins.length === 0) {
-    return <div className="px-5 pt-16 text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</div>;
+    return (
+      <div className="px-5 pt-16 pb-24 space-y-6">
+        <p className="text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</p>
+        {clientId && <ProgressiCarichi clientId={clientId} />}
+      </div>
+    );
   }
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
+      <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} obiettivoDal={obiettivoDal} />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {opzioni.map((o) => (
           <button key={o.key} onClick={() => setMetrica(o.key)}
@@ -814,17 +1734,113 @@ function ClientProgress({ checkins, altezza, sesso, eta, titolo = "I tuoi progre
         </ResponsiveContainer>
       </Card>
 
+      <ConfrontoFoto checkins={checkins} isAdmin={isAdmin} />
+
       <HistoryTable checkins={checkins} sesso={sesso} />
 
       <div>
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Valori estrapolati</p>
         <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
       </div>
+
+      {clientId && <ProgressiCarichi clientId={clientId} />}
     </div>
   );
 }
 
-function ClientNutrizione({ piano }) {
+// Il ciclo alimentare in vigore oggi: l'ultimo già iniziato (e non scaduto); se tutti sono scaduti, l'ultimo iniziato.
+function pianoAttivo(lista) {
+  const oggi = formatDataLocale(new Date());
+  const k = (r) => r.data_inizio || r.data_aggiornamento || "";
+  const iniz = (lista || []).filter((r) => r.kcal != null && k(r) && k(r) <= oggi);
+  const validi = iniz.filter((r) => !r.data_fine || r.data_fine >= oggi);
+  const pool = validi.length ? validi : iniz;
+  return [...pool].sort((a, b) => k(b).localeCompare(k(a)) || (b.created_at || "").localeCompare(a.created_at || ""))[0] || null;
+}
+
+function formattaPeriodo(r) {
+  const ini = r.data_inizio ? r.data_inizio.split("-").reverse().join("/") : r.data_aggiornamento?.split("-").reverse().join("/");
+  const fine = r.data_fine ? r.data_fine.split("-").reverse().join("/") : null;
+  return fine ? `${ini} → ${fine}` : `dal ${ini}`;
+}
+
+function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
+  const [vista, setVista] = useState("aggiornamenti");
+  const conKcal = (storico || []).filter((r) => r.kcal != null && r.data_aggiornamento);
+  if (conKcal.length === 0) return null;
+
+  const perMese = (() => {
+    const map = {};
+    conKcal.forEach((r) => {
+      const mese = r.data_aggiornamento.slice(0, 7);
+      if (!map[mese]) map[mese] = { mese, somma: 0, conteggio: 0 };
+      map[mese].somma += Number(r.kcal);
+      map[mese].conteggio += 1;
+    });
+    return Object.values(map).sort((a, b) => b.mese.localeCompare(a.mese))
+      .map((m) => ({ ...m, media: Math.round(m.somma / m.conteggio) }));
+  })();
+
+  const datiGrafico = conKcal.map((r) => ({
+    data: r.data_aggiornamento.split("-").reverse().slice(0, 2).join("/"),
+    kcal: Number(r.kcal),
+  }));
+
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Storico kcal</p>
+        <div className="flex gap-1">
+          <button onClick={() => setVista("aggiornamenti")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${vista === "aggiornamenti" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Settimanale</button>
+          <button onClick={() => setVista("mensile")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${vista === "mensile" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Mensile</button>
+        </div>
+      </div>
+      {datiGrafico.length > 1 && (
+        <div style={{ width: "100%", height: 150 }}>
+          <ResponsiveContainer>
+            <LineChart data={datiGrafico}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="data" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 10 }} domain={["dataMin - 100", "dataMax + 100"]} width={40} />
+              <Tooltip />
+              <Line type="monotone" dataKey="kcal" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      {vista === "aggiornamenti" ? (
+        <ul className="space-y-1.5 max-h-64 overflow-y-auto">
+          {[...conKcal].reverse().map((r) => {
+            const Riga = isAdmin ? "button" : "div";
+            return (
+              <li key={r.id} className="flex items-center gap-1">
+                <Riga onClick={isAdmin ? () => onModifica?.(r) : undefined}
+                  className={`w-full flex justify-between items-center text-sm border-b border-slate-100 pb-1.5 ${isAdmin ? "text-left hover:bg-slate-50 rounded px-1 -mx-1" : ""}`}>
+                  <span className="text-slate-500">{formattaPeriodo(r)}</span>
+                  <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
+                  <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
+                </Riga>
+                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-red-500 px-1.5 flex-shrink-0">🗑</button>}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <ul className="space-y-1.5">
+          {perMese.map((m) => (
+            <li key={m.mese} className="flex justify-between items-center text-sm border-b border-slate-100 pb-1.5">
+              <span className="text-slate-500 capitalize">{new Date(m.mese + "-02").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</span>
+              <span className="text-slate-700 font-medium">{m.media} kcal medie</span>
+              <span className="text-slate-400 text-xs">{m.conteggio} aggiornament{m.conteggio === 1 ? "o" : "i"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function ClientNutrizione({ piano, storico }) {
   if (!piano) {
     return <div className="px-5 pt-16 text-center text-slate-400 text-sm">Morgana non ha ancora impostato i tuoi valori nutrizionali.</div>;
   }
@@ -837,7 +1853,7 @@ function ClientNutrizione({ piano }) {
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Nutrizione</h1>
-        <p className="text-slate-500 text-sm mt-1">Valori indicativi, aggiornati il {piano.data_aggiornamento}</p>
+        <p className="text-slate-500 text-sm mt-1">Valori indicativi, {formattaPeriodo(piano)}</p>
       </div>
       <div className="rounded-2xl border border-slate-700 shadow-sm p-5 bg-slate-800">
         <div className="flex items-center gap-2 text-slate-300 text-xs uppercase tracking-wide font-medium mb-1"><Apple size={14} /> Kcal indicative giornaliere</div>
@@ -852,81 +1868,374 @@ function ClientNutrizione({ piano }) {
           </div>
         ))}
       </Card>
-      {piano.note && (
-        <Card className="p-4">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Note di Morgana</p>
-          <p className="text-slate-700 text-sm leading-relaxed">{piano.note}</p>
+      {Array.isArray(piano.pasti) && piano.pasti.length > 0 && (
+        <Card className="p-4 space-y-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Suddivisione per pasti</p>
+          {piano.pasti.map((x, i) => (
+            <div key={i} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+              <div className="flex justify-between text-sm"><span className="font-medium text-slate-700">{x.nome}</span>{x.kcal != null && <span className="text-slate-500">{x.kcal} kcal</span>}</div>
+              <p className="text-xs text-slate-500 mt-0.5">Proteine {x.proteine_g ?? "—"} g · Carboidrati {x.carboidrati_g ?? "—"} g · Grassi {x.grassi_g ?? "—"} g</p>
+            </div>
+          ))}
         </Card>
       )}
+      <StoricoNutrizione storico={storico} />
     </div>
   );
 }
 
-function CellaAllenamento({ exerciseId, data, clientId, entry, onSaved }) {
+function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved }) {
   const [kg, setKg] = useState(entry?.kg ?? "");
-  const [serie, setSerie] = useState(entry?.serie ?? "");
   const [rip, setRip] = useState(entry?.ripetizioni ?? "");
-  const [nota, setNota] = useState(entry?.note ?? "");
   const [id, setId] = useState(entry?.id ?? null);
   const [salvando, setSalvando] = useState(false);
 
+  useEffect(() => {
+    setKg(entry?.kg ?? "");
+    setRip(entry?.ripetizioni ?? "");
+    setId(entry?.id ?? null);
+  }, [entry?.id]);
+
   const salva = async () => {
+    if (kg === "" && rip === "" && !id) return;
     setSalvando(true);
-    const payload = {
-      kg: kg === "" ? null : Number(kg),
-      serie: serie === "" ? null : Number(serie),
-      ripetizioni: rip || null,
-      note: nota || null,
-    };
+    if (kg === "" && rip === "" && id) {
+      // riga svuotata: la rimuoviamo invece di lasciare un record vuoto
+      await supabase.from("training_entries").delete().eq("id", id);
+      setId(null);
+      setSalvando(false);
+      onSaved();
+      return;
+    }
+    const payload = { kg: kg === "" ? null : Number(kg), ripetizioni: rip || null };
     if (id) {
       await supabase.from("training_entries").update(payload).eq("id", id);
     } else {
       const { data: inserito } = await supabase.from("training_entries")
-        .insert({ client_id: clientId, exercise_id: exerciseId, data, ...payload }).select().single();
+        .insert({ client_id: clientId, exercise_id: exerciseId, data, numero_serie: numeroSerie, ...payload })
+        .select().single();
       if (inserito) setId(inserito.id);
     }
     setSalvando(false);
+    if (kg !== "") inviaPushCarichi();
     onSaved();
   };
 
   return (
-    <div className="flex flex-col gap-1 w-24">
+    <div className="flex gap-1 items-center">
+      <span className="text-[9px] text-slate-300 w-2.5 flex-shrink-0">{numeroSerie}</span>
       <input type="number" step="0.5" value={kg} onChange={(e) => setKg(e.target.value)} onBlur={salva} disabled={salvando}
-        placeholder="kg" className="w-full text-center border border-slate-200 rounded-lg px-1 py-1.5 text-sm" />
-      <div className="flex gap-1">
-        <input type="number" value={serie} onChange={(e) => setSerie(e.target.value)} onBlur={salva} disabled={salvando}
-          placeholder="serie" className="w-1/2 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
-        <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={salva} disabled={salvando}
-          placeholder="rip" className="w-1/2 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
-      </div>
-      <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salva} disabled={salvando}
-        placeholder="note" className="w-full border border-slate-200 rounded px-1 py-1 text-xs" />
+        placeholder="kg" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
+      <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={salva} disabled={salvando}
+        placeholder="rip" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
+    </div>
+  );
+}
+
+function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, onSaved }) {
+  const nSerie = Math.max(1, Math.min(Number(serieRichieste) || 3, 10));
+  const primaRigaConNota = entries.find((e) => e.note) || entries.find((e) => e.numero_serie === 1) || entries[0];
+  const [nota, setNota] = useState(primaRigaConNota?.note ?? "");
+  const [salvandoNota, setSalvandoNota] = useState(false);
+
+  useEffect(() => { setNota(primaRigaConNota?.note ?? ""); }, [primaRigaConNota?.id, primaRigaConNota?.note]);
+
+  const salvaNota = async () => {
+    setSalvandoNota(true);
+    const primaRiga = entries.find((e) => e.numero_serie === 1) || entries[0];
+    if (primaRiga) {
+      await supabase.from("training_entries").update({ note: nota || null }).eq("id", primaRiga.id);
+    } else if (nota) {
+      await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: exerciseId, data, numero_serie: 1, note: nota });
+    }
+    setSalvandoNota(false);
+    onSaved();
+  };
+
+  return (
+    <div className="flex flex-col gap-1 w-28">
+      {Array.from({ length: nSerie }).map((_, i) => {
+        const numeroSerie = i + 1;
+        const entry = entries.find((e) => e.numero_serie === numeroSerie);
+        return (
+          <RigaSerieAllenamento key={numeroSerie} exerciseId={exerciseId} data={data} clientId={clientId}
+            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} />
+        );
+      })}
+      <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} disabled={salvandoNota}
+        placeholder="note" className="w-full border border-slate-200 rounded px-1 py-1 text-[11px] mt-0.5" />
     </div>
   );
 }
 
 function EsercizioNome({ id, nome, onSaved }) {
   const [val, setVal] = useState(nome);
+  const ref = React.useRef(null);
+
+  // Si auto-ridimensiona in altezza in base al contenuto, così un nome lungo (o una
+  // superserie con più esercizi) resta sempre leggibile per intero su più righe
+  // invece di essere tagliato dentro un riquadro a altezza fissa.
+  const ridimensiona = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => { ridimensiona(); }, [val]);
+
   const salva = async () => {
     if (val === nome || !val.trim()) { setVal(nome); return; }
     await supabase.from("training_exercises").update({ nome: val }).eq("id", id);
     onSaved();
   };
   return (
-    <input value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva}
-      className="w-full border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+    <textarea ref={ref} value={val} onChange={(e) => setVal(e.target.value)} onBlur={salva} rows={1}
+      style={{ width: "100%", minWidth: 0 }}
+      className="border-0 bg-transparent font-medium text-slate-800 text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 resize-none leading-snug overflow-hidden" />
   );
 }
 
-function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
+// Libreria esercizi con video (tabella esercizi_video): trova l'esercizio che corrisponde al nome scritto in scheda
+function trovaEsercizioVideo(nome, libreria) {
+  const n = (nome || "").toLowerCase();
+  let best = null, bestLen = 0;
+  (libreria || []).forEach((e) => {
+    (e.parole_chiave || "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean).forEach((k) => {
+      if (n.includes(k) && k.length > bestLen) { best = e; bestLen = k.length; }
+    });
+  });
+  return best;
+}
+
+function videoIdYoutube(url) {
+  const m = (url || "").match(/(?:shorts\/|youtu\.be\/|[?&]v=|embed\/)([A-Za-z0-9_-]{6,})/);
+  return m ? m[1] : null;
+}
+
+function EsercizioInfoModal({ es, onClose }) {
+  const video = (es.video_url || "").split("\n").map((r) => r.trim()).filter(Boolean).map((r, i, arr) => {
+    const k = r.indexOf("|");
+    return k > -1 ? { label: r.slice(0, k), url: r.slice(k + 1) } : { label: arr.length > 1 ? `Video ${i + 1}` : "Video", url: r };
+  });
+  const [attivo, setAttivo] = useState(0);
+  const corrente = video[attivo];
+  const id = corrente ? videoIdYoutube(corrente.url) : null;
+  const Blocco = ({ titolo, testo }) => testo ? (
+    <div className="bg-slate-50 rounded-xl px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">{titolo}</p>
+      <p className="text-sm text-slate-700 leading-relaxed">{testo}</p>
+    </div>
+  ) : null;
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-slate-900/60 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white w-full sm:max-w-md max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-semibold text-slate-800 leading-snug">{es.nome}</p>
+            <p className="text-xs text-slate-400">{es.gruppo}{es.attrezzo ? ` · ${es.attrezzo}` : ""}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 p-1 flex-shrink-0"><X size={20} /></button>
+        </div>
+        {video.length > 1 && (
+          <div className="flex gap-2">
+            {video.map((v, i) => (
+              <button key={i} onClick={() => setAttivo(i)} className={`px-3 py-1 rounded-full text-xs font-medium ${i === attivo ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{v.label}</button>
+            ))}
+          </div>
+        )}
+        {id ? (
+          <div className="mx-auto bg-black rounded-2xl overflow-hidden" style={{ aspectRatio: "9 / 16", maxHeight: "55vh" }}>
+            <iframe key={id} title={es.nome} src={`https://www.youtube-nocookie.com/embed/${id}?playsinline=1&rel=0`} className="w-full h-full" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowFullScreen />
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 text-center py-2">Il video di questo esercizio arriva presto ✨</p>
+        )}
+        {corrente && <a href={corrente.url} target="_blank" rel="noreferrer" className="block text-center text-sky-600 text-xs font-medium">Apri su YouTube</a>}
+        <Blocco titolo="Posizionamento" testo={es.posizionamento} />
+        <Blocco titolo="Movimento e ROM" testo={es.movimento} />
+        <Blocco titolo="Errori comuni" testo={es.errori} />
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function CampoEs({ edit, setEdit, label, k, righe = 1, hint }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">{label}</p>
+      {righe > 1
+        ? <textarea rows={righe} value={edit[k] || ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+        : <input value={edit[k] || ""} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />}
+      {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+// Coach: modifica la libreria esercizi con video + richieste delle clienti
+function LibreriaEserciziCoach() {
+  const [lista, setLista] = useState([]);
+  const [richieste, setRichieste] = useState([]);
+  const [cerca, setCerca] = useState("");
+  const [edit, setEdit] = useState(null);
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const carica = async () => {
+    const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
+    setLista(data || []);
+    const { data: r } = await supabase.from("esercizi_richieste").select("*, clients(nome,cognome)").order("created_at", { ascending: false });
+    setRichieste(r || []);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const nuovo = (nome = "") => setEdit({ nome, gruppo: "", attrezzo: "", posizionamento: "", movimento: "", errori: "", video_url: "", parole_chiave: nome.toLowerCase() });
+
+  const salva = async () => {
+    if (!edit.nome.trim()) { setErrore("Scrivi il nome dell'esercizio."); return; }
+    setSalvando(true); setErrore("");
+    const campi = {
+      nome: edit.nome.trim(), gruppo: edit.gruppo || null, attrezzo: edit.attrezzo || null,
+      posizionamento: edit.posizionamento || null, movimento: edit.movimento || null, errori: edit.errori || null,
+      video_url: edit.video_url || null, parole_chiave: edit.parole_chiave || edit.nome.toLowerCase(),
+      senza_video: !!edit.senza_video,
+    };
+    const { error } = edit.id
+      ? await supabase.from("esercizi_video").update(campi).eq("id", edit.id)
+      : await supabase.from("esercizi_video").insert({ ...campi, ordine: (lista.reduce((m, e) => Math.max(m, e.ordine || 0), 0)) + 1 });
+    setSalvando(false);
+    if (error) { setErrore("Non sono riuscita a salvare: " + error.message); return; }
+    setEdit(null); carica();
+  };
+
+  const elimina = async () => {
+    if (!confirm(`Eliminare "${edit.nome}" dalla libreria? Non si può annullare.`)) return;
+    await supabase.from("esercizi_video").delete().eq("id", edit.id);
+    setEdit(null); carica();
+  };
+
+  const segnaFatta = async (id) => { await supabase.from("esercizi_richieste").update({ stato: "fatta" }).eq("id", id); carica(); };
+  const eliminaRichiesta = async (id) => { await supabase.from("esercizi_richieste").delete().eq("id", id); carica(); };
+
+  const q = cerca.trim().toLowerCase();
+  const filtrati = lista.filter((e) => !q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""}`.toLowerCase().includes(q));
+  const nuove = richieste.filter((r) => r.stato === "nuova");
+
+  if (edit) {
+    return (
+      <div className="space-y-3">
+        <button onClick={() => { setEdit(null); setErrore(""); }} className="text-sm text-slate-500 flex items-center gap-1"><ArrowLeft size={16} /> Torna alla libreria</button>
+        <Card className="p-4 space-y-3">
+          <p className="font-semibold text-slate-800">{edit.id ? "Modifica esercizio" : "Nuovo esercizio"}</p>
+          <CampoEs edit={edit} setEdit={setEdit} label="Nome" k="nome" />
+          <div className="grid grid-cols-2 gap-2">
+            <CampoEs edit={edit} setEdit={setEdit} label="Gruppo muscolare" k="gruppo" />
+            <CampoEs edit={edit} setEdit={setEdit} label="Attrezzo" k="attrezzo" />
+          </div>
+          <CampoEs edit={edit} setEdit={setEdit} label="Link video YouTube" k="video_url" righe={3} hint="Un link per riga. Se ne metti più di uno puoi dare un nome: Frontale|https://youtube.com/shorts/..." />
+          <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={!!edit.senza_video} onChange={(e) => setEdit({ ...edit, senza_video: e.target.checked })} /> Questo esercizio non ha bisogno del video (non comparirà tra i video mancanti)</label>
+          <CampoEs edit={edit} setEdit={setEdit} label="Posizionamento" k="posizionamento" righe={4} />
+          <CampoEs edit={edit} setEdit={setEdit} label="Movimento e ROM" k="movimento" righe={4} />
+          <CampoEs edit={edit} setEdit={setEdit} label="Errori comuni" k="errori" righe={4} />
+          <CampoEs edit={edit} setEdit={setEdit} label="Parole chiave" k="parole_chiave" righe={2} hint="Separate da virgola. Servono a collegare l'esercizio al nome scritto nella scheda della cliente." />
+          {errore && <p className="text-rose-600 text-sm">{errore}</p>}
+          <div className="flex gap-2">
+            <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-3 text-sm font-medium disabled:opacity-50">{salvando ? "Salvo..." : "Salva"}</button>
+            {edit.id && <button onClick={elimina} className="px-4 rounded-xl border border-rose-200 text-rose-600 text-sm">Elimina</button>}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {nuove.length > 0 && (
+        <Card className="p-4 space-y-2 border-amber-200 bg-amber-50">
+          <p className="text-sm font-semibold text-amber-800">Video richiesti dalle clienti ({nuove.length})</p>
+          {nuove.map((r) => (
+            <div key={r.id} className="bg-white rounded-xl px-3 py-2 text-sm">
+              <p className="text-slate-800">{r.testo}</p>
+              <p className="text-[11px] text-slate-400">{r.clients ? `${r.clients.nome} ${r.clients.cognome || ""}` : ""} · {new Date(r.created_at).toLocaleDateString("it-IT")}</p>
+              <div className="flex gap-3 mt-1">
+                <button onClick={() => nuovo(r.testo)} className="text-xs text-sky-600 font-medium">Aggiungi alla libreria</button>
+                <button onClick={() => segnaFatta(r.id)} className="text-xs text-emerald-600 font-medium">Fatto</button>
+                <button onClick={() => eliminaRichiesta(r.id)} className="text-xs text-slate-400">Elimina</button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+      <div className="flex gap-2">
+        <input value={cerca} onChange={(e) => setCerca(e.target.value)} placeholder="Cerca esercizio..." className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
+        <button onClick={() => nuovo()} className="bg-slate-800 text-white rounded-xl px-4 text-sm font-medium flex items-center gap-1"><Plus size={16} /> Nuovo</button>
+      </div>
+      <p className="text-xs text-slate-400">{lista.length} esercizi · {lista.filter((e) => e.video_url).length} con video</p>
+      {filtrati.map((e) => (
+        <button key={e.id} onClick={() => setEdit({ ...e })} className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium text-slate-800">{e.nome}</p>
+            <p className="text-xs text-slate-400">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
+          </div>
+          <span className="flex flex-col items-end gap-1 flex-shrink-0">
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : e.senza_video ? "video non necessario" : "senza video"}</span>
+            {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">descrizioni da completare</span>}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Cliente (solo test): richiede il video di un esercizio nuovo
+const CLIENT_TEST_RICHIESTE = "85c9c307-b49f-4bc6-b50e-a89fb8e539a6";
+function RichiediVideoEsercizio({ clientId }) {
+  const [testo, setTesto] = useState("");
+  const [msg, setMsg] = useState("");
+  if (clientId !== CLIENT_TEST_RICHIESTE) return null;
+  const invia = async () => {
+    if (!testo.trim()) return;
+    const { error } = await supabase.from("esercizi_richieste").insert({ client_id: clientId, testo: testo.trim() });
+    if (error) { setMsg("Non sono riuscita a inviare, riprova."); return; }
+    setTesto(""); setMsg("Richiesta inviata ✨ Morgana ti preparerà il video!");
+  };
+  return (
+    <Card className="p-4 space-y-2">
+      <p className="text-sm font-semibold text-slate-800">Non trovi il video di un esercizio?</p>
+      <p className="text-xs text-slate-500">Scrivi il nome dell'esercizio e Morgana lo aggiungerà.</p>
+      <input value={testo} onChange={(e) => { setTesto(e.target.value); setMsg(""); }} placeholder="Es. Hip thrust al multipower" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+      <button onClick={invia} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Richiedi video</button>
+      {msg && <p className="text-xs text-emerald-600">{msg}</p>}
+    </Card>
+  );
+}
+
+// Nella vista attiva l'etichetta della scheda (es. "Scheda 2 - " o "T1 - ") non si mostra: resta solo nell'archivio.
+function nomeGiornoPulito(nome) {
+  const parti = String(nome || "").split(" - ").map((x) => x.trim());
+  let i = 0;
+  while (i < parti.length - 1 && /^(scheda\s*\d+|t\.?\s?\d+(\.\d+)*)(\b.*)?$/i.test(parti[i])) i++;
+  return parti.slice(i).join(" - ") || String(nome || "");
+}
+function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo = [], isAdmin = false }) {
+  const [infoEs, setInfoEs] = useState(null);
   const [esercizi, setEsercizi] = useState([]);
+  const [prep, setPrep] = useState([]); // mobilità e attivazione: solo note, niente carichi
+  const [prepNome, setPrepNome] = useState("");
+  const [prepNote, setPrepNote] = useState("");
+  const [prepTipo, setPrepTipo] = useState("mobilita");
+  const [prepAperti, setPrepAperti] = useState({});
+  const [prepEsec, setPrepEsec] = useState("");
   const [entries, setEntries] = useState([]);
   const [nuovoEsercizio, setNuovoEsercizio] = useState("");
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
-    const { data: es } = await supabase.from("training_exercises").select("*").eq("training_day_id", giorno.id).order("ordine");
-    setEsercizi(es || []);
+    const { data: tutti } = await supabase.from("training_exercises").select("*").eq("training_day_id", giorno.id).order("ordine");
+    const isPrep = (e) => e.tipo === "mobilita" || e.tipo === "attivazione";
+    const es = (tutti || []).filter((e) => !isPrep(e));
+    setPrep((tutti || []).filter((e) => e.tipo === "attivazione"));
+    setEsercizi(es);
     if (es && es.length > 0) {
       const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", es.map((e) => e.id));
       setEntries(en || []);
@@ -937,7 +2246,9 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
   };
   useEffect(() => { carica(); }, [giorno.id]);
 
-  const date = [...new Set(entries.map((e) => e.data))].sort();
+  // Più recenti per prime: così le nuove date compaiono subito dopo la colonna esercizio,
+  // ed è più comodo segnare i carichi appena inseriti senza scorrere fino in fondo.
+  const date = [...new Set(entries.map((e) => e.data))].sort().reverse();
 
   const aggiungiEsercizio = async () => {
     if (!nuovoEsercizio.trim()) return;
@@ -948,10 +2259,24 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
     carica();
   };
 
+  const aggiungiPrep = async () => {
+    if (!prepNome.trim()) return;
+    await supabase.from("training_exercises").insert({
+      client_id: clientId, training_day_id: giorno.id, nome: prepNome.trim(), note: prepNote.trim() || null, esecuzione: prepEsec.trim() || null, tipo: "attivazione", ordine: prep.length + 1,
+    });
+    setPrepNome(""); setPrepNote(""); setPrepEsec("");
+    carica();
+  };
+  const eliminaPrep = async (id) => {
+    if (!confirm("Eliminare questa riga?")) return;
+    await supabase.from("training_exercises").delete().eq("id", id);
+    carica();
+  };
+
   const aggiungiData = async () => {
     if (esercizi.length === 0) { alert("Aggiungi prima almeno un esercizio."); return; }
     const nuovaData = prompt("Data del nuovo allenamento (gg/mm/aaaa oppure lascia vuoto per oggi):");
-    let d = new Date().toISOString().slice(0, 10);
+    let d = formatDataLocale(new Date());
     if (nuovaData) {
       const parti = nuovaData.split("/");
       if (parti.length === 3) d = `${parti[2]}-${parti[1].padStart(2, "0")}-${parti[0].padStart(2, "0")}`;
@@ -983,25 +2308,99 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
     carica();
   };
 
+  const eliminaEsercizio = async (id) => {
+    if (!confirm("Eliminare questo esercizio e tutto il suo storico di carichi registrati?")) return;
+    await supabase.from("training_entries").delete().eq("exercise_id", id);
+    await supabase.from("training_exercises").delete().eq("id", id);
+    carica();
+  };
+
+  const muoviEsercizio = async (id, direzione) => {
+    const idx = esercizi.findIndex((e) => e.id === id);
+    const altroIdx = idx + direzione;
+    if (altroIdx < 0 || altroIdx >= esercizi.length) return;
+    const nuovo = [...esercizi];
+    [nuovo[idx], nuovo[altroIdx]] = [nuovo[altroIdx], nuovo[idx]];
+    setEsercizi(nuovo);
+    await Promise.all(nuovo.map((e, i) => supabase.from("training_exercises").update({ ordine: i + 1 }).eq("id", e.id)));
+  };
+
   if (caricando) return <p className="text-slate-400 text-sm px-1">Caricamento...</p>;
 
   return (
     <div className="space-y-3">
-      <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
-        className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+      {isAdmin ? (
+        <input defaultValue={giorno.nome} onBlur={rinominaGiorno}
+          className="text-lg font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1 w-full" />
+      ) : (
+        <h3 className="text-lg font-semibold text-slate-800 px-1 -mx-1 w-full">{giorno.scheda_archiviata ? giorno.nome : nomeGiornoPulito(giorno.nome)}</h3>
+      )}
+
+      {(prep.length > 0 || isAdmin) && (
+        <Card className="p-3 space-y-2 border-teal-100 bg-teal-50/40">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Attivazione</p>
+            <p className="text-[11px] text-slate-400">Da fare prima di questo allenamento. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
+          </div>
+          {prep.map((es) => {
+            const info = trovaEsercizioVideo(es.nome, libreriaVideo);
+            return (
+              <div key={es.id} className="flex items-start gap-2 py-1.5 border-t border-teal-100 first:border-0">
+                <div className="flex-1 min-w-0">
+                  {isAdmin ? <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} /> : <p className="font-medium text-slate-800 text-sm">{es.nome}</p>}
+                  {isAdmin ? (
+                    <input defaultValue={es.note || ""} placeholder="Quanto / per quanto (es. 2 x 10 per lato)"
+                      onBlur={(e) => { if ((e.target.value || "") !== (es.note || "")) aggiornaEsercizioCampo(es.id, "note", e.target.value.trim() || null); }}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                  ) : es.note && <p className="text-slate-600 text-xs mt-0.5 whitespace-pre-wrap">{es.note}</p>}
+                  <div className="flex gap-3 items-center">
+                    {(es.esecuzione || isAdmin) && <button onClick={() => setPrepAperti({ ...prepAperti, [es.id]: !prepAperti[es.id] })} className="text-sky-600 text-[11px] font-medium mt-1">{prepAperti[es.id] ? "▲ Chiudi esecuzione" : "▼ Esecuzione"}</button>}
+                    {info && <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>}
+                  </div>
+                  {prepAperti[es.id] && (isAdmin ? (
+                    <textarea defaultValue={es.esecuzione || ""} rows={3} placeholder="Come si esegue (si apre alla cliente, senza video)"
+                      onBlur={(e) => { if ((e.target.value || "") !== (es.esecuzione || "")) aggiornaEsercizioCampo(es.id, "esecuzione", e.target.value.trim() || null); }}
+                      className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                  ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-white/70 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
+                </div>
+                {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+              </div>
+            );
+          })}
+          {isAdmin && (
+            <div className="space-y-2 pt-1">
+              <input value={prepNome} onChange={(e) => setPrepNome(e.target.value)} placeholder="Nome attivazione (es. Clamshell)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <textarea value={prepEsec} onChange={(e) => setPrepEsec(e.target.value)} rows={2} placeholder="Come si esegue (facoltativo)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <div className="flex gap-2">
+                <input value={prepNote} onChange={(e) => setPrepNote(e.target.value)} placeholder="Quanto / per quanto (es. 3 x 10 per lato)" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+                <button onClick={aggiungiPrep} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {esercizi.length > 0 && (
+        <button onClick={aggiungiData} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5">+ Nuova data di allenamento</button>
+      )}
 
       {esercizi.length === 0 ? (
-        <Card className="p-6 text-center text-slate-400 text-sm">Nessun esercizio ancora. Aggiungine uno qui sotto.</Card>
+        <Card className="p-6 text-center text-slate-400 text-sm">{isAdmin ? "Nessun esercizio ancora. Aggiungine uno qui sotto." : "Gli esercizi di questo giorno li aggiunge Morgana ✨"}</Card>
       ) : (
         <Card className="overflow-x-auto">
-          <table className="text-sm">
+          {/* Colonna esercizio senza "sticky": su alcuni browser mobile, sticky su una cella
+              di tabella rompe il calcolo della larghezza della colonna e il testo finisce
+              per andare a capo una lettera per riga. Larghezze in pixel via style inline,
+              indipendenti dal motore di layout della tabella, per essere sicuri che vengano
+              rispettate su tutti i browser. */}
+          <table className="text-sm" style={{ tableLayout: "fixed" }}>
             <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
               <tr>
-                <th className="text-left px-3 py-2 sticky left-0 bg-slate-50 min-w-[190px]">Esercizio</th>
+                <th className="text-left px-3 py-2" style={{ width: 220, minWidth: 220, maxWidth: 220 }}>Esercizio</th>
                 {date.map((d) => (
-                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap">
+                  <th key={d} className="text-center px-2 py-2 whitespace-nowrap" style={{ width: 128, minWidth: 128, maxWidth: 128 }}>
                     <input type="date" defaultValue={d} onBlur={(e) => rinominaData(d, e.target.value)}
-                      className="bg-transparent border-0 text-xs text-slate-500 uppercase text-center w-28 focus:outline-none focus:bg-white rounded" />
+                      className="bg-transparent border-0 text-xs text-slate-500 uppercase text-center w-full focus:outline-none focus:bg-white rounded" />
                   </th>
                 ))}
               </tr>
@@ -1009,14 +2408,30 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
             <tbody>
               {esercizi.map((es) => (
                 <tr key={es.id} className="border-t border-slate-100 align-top">
-                  <td className="px-3 py-2 sticky left-0 bg-white min-w-[140px]">
-                    <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} />
+                  <td className="px-3 py-2" style={{ width: 220, minWidth: 220, maxWidth: 220 }}>
+                    <div className="flex items-center gap-1">
+                      {isAdmin ? <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} /> : <p className="font-medium text-slate-800 text-sm flex-1 min-w-0 break-words whitespace-normal">{es.nome}</p>}
+                      {isAdmin && <>
+                      <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
+                      <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
+                      <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
+                      </>}
+                    </div>
+                    {(es.serie || es.ripetizioni) && (
+                      <p className="text-slate-600 text-[11px] font-medium mt-0.5">
+                        {es.serie ? `${es.serie} serie` : ""}{es.serie && es.ripetizioni ? " x " : ""}{es.ripetizioni || ""}
+                      </p>
+                    )}
+                    {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
+                    {(() => { const info = trovaEsercizioVideo(es.nome, libreriaVideo); return info ? (
+                      <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>
+                    ) : null; })()}
                   </td>
                   {date.map((d) => {
-                    const entry = entries.find((en) => en.exercise_id === es.id && en.data === d);
+                    const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
                     return (
                       <td key={d} className="px-2 py-2 text-center">
-                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entry={entry} onSaved={carica} />
+                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={es.serie} onSaved={carica} />
                       </td>
                     );
                   })}
@@ -1027,36 +2442,314 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato }) {
         </Card>
       )}
 
+      {isAdmin && (
       <div className="flex gap-2">
         <input value={nuovoEsercizio} onChange={(e) => setNuovoEsercizio(e.target.value)} placeholder="Nuovo esercizio (es. Squat)"
           className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         <button onClick={aggiungiEsercizio} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
       </div>
-      <button onClick={aggiungiData} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">+ Nuova data di allenamento</button>
+      )}
+      {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
     </div>
   );
 }
 
-function DiarioAllenamento({ clientId }) {
+function parseCSV(testo, sep = ",") {
+  const righe = [];
+  let riga = [], campo = "", dentroVirgolette = false;
+  for (let i = 0; i < testo.length; i++) {
+    const c = testo[i];
+    if (dentroVirgolette) {
+      if (c === '"') {
+        if (testo[i + 1] === '"') { campo += '"'; i++; }
+        else dentroVirgolette = false;
+      } else campo += c;
+    } else if (c === '"') dentroVirgolette = true;
+    else if (c === sep) { riga.push(campo); campo = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && testo[i + 1] === "\n") i++;
+      riga.push(campo); campo = "";
+      if (riga.some((v) => v.trim() !== "")) righe.push(riga);
+      riga = [];
+    } else campo += c;
+  }
+  if (campo !== "" || riga.length > 0) { riga.push(campo); righe.push(riga); }
+  return righe;
+}
+
+function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
+  const [righe, setRighe] = useState(null);
+  const [aperto, setAperto] = useState(false);
+  const [aperti, setAperti] = useState({});
+  const [infoEs, setInfoEs] = useState(null);
+  const [tipo, setTipo] = useState("mobilita");
+  const [nome, setNome] = useState("");
+  const [note, setNote] = useState("");
+  const [esec, setEsec] = useState("");
+  const carica = async () => {
+    const { data } = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
+    setRighe(data || []);
+  };
+  useEffect(() => { carica(); }, [clientId]);
+  if (righe === null || (righe.length === 0 && !isAdmin)) return null;
+  const aggiorna = async (id, campo, valore) => { await supabase.from("training_exercises").update({ [campo]: valore }).eq("id", id); carica(); };
+  const elimina = async (id) => { if (!confirm("Eliminare questa riga?")) return; await supabase.from("training_exercises").delete().eq("id", id); carica(); };
+  const aggiungi = async () => {
+    if (!nome.trim()) return;
+    await supabase.from("training_exercises").insert({ client_id: clientId, training_day_id: null, nome: nome.trim(), note: note.trim() || null, esecuzione: esec.trim() || null, tipo, ordine: righe.length + 1 });
+    setNome(""); setNote(""); setEsec("");
+    carica();
+  };
+  return (
+    <div className="sticky top-0 z-20 -mx-5 px-5 py-2 bg-white/95 backdrop-blur border-b border-teal-100">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+        <span className="text-sm font-semibold text-teal-700">🧘🏻 Mobilità <span className="text-slate-400 font-normal">({righe.length})</span></span>
+        <span className="text-slate-400 text-xs">{aperto ? "▲ Chiudi" : "▼ Apri"}</span>
+      </button>
+      {aperto && (
+        <div className="mt-2 space-y-3 max-h-[60vh] overflow-y-auto pb-1">
+          <p className="text-[11px] text-slate-400">Da fare prima di ogni allenamento. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
+          {["mobilita"].map((t) => {
+            const gruppo = righe.filter((x) => x.tipo === t);
+            if (gruppo.length === 0) return null;
+            return (
+              <div key={t}>
+                {gruppo.map((es) => {
+                  const info = trovaEsercizioVideo(es.nome, libreriaVideo);
+                  return (
+                    <div key={es.id} className="flex items-start gap-2 py-1.5 border-t border-teal-100 first:border-0">
+                      <div className="flex-1 min-w-0">
+                        {isAdmin ? <EsercizioNome id={es.id} nome={es.nome} onSaved={carica} /> : <p className="font-medium text-slate-800 text-sm">{es.nome}</p>}
+                        {isAdmin ? (
+                          <input defaultValue={es.note || ""} placeholder="Quanto / per quanto (es. 2 x 10 per lato)"
+                            onBlur={(e) => { if ((e.target.value || "") !== (es.note || "")) aggiorna(es.id, "note", e.target.value.trim() || null); }}
+                            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                        ) : es.note && <p className="text-slate-600 text-xs mt-0.5 whitespace-pre-wrap">{es.note}</p>}
+                        <div className="flex gap-3 items-center">
+                          {(es.esecuzione || isAdmin) && <button onClick={() => setAperti({ ...aperti, [es.id]: !aperti[es.id] })} className="text-sky-600 text-[11px] font-medium mt-1">{aperti[es.id] ? "▲ Chiudi esecuzione" : "▼ Esecuzione"}</button>}
+                          {info && <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>}
+                        </div>
+                        {aperti[es.id] && (isAdmin ? (
+                          <textarea defaultValue={es.esecuzione || ""} rows={3} placeholder="Come si esegue (si apre alla cliente, senza video)"
+                            onBlur={(e) => { if ((e.target.value || "") !== (es.esecuzione || "")) aggiorna(es.id, "esecuzione", e.target.value.trim() || null); }}
+                            className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
+                        ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-teal-50/60 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
+                      </div>
+                      {isAdmin && <button onClick={() => elimina(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          {isAdmin && (
+            <div className="space-y-2 pt-1">
+              <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome (es. Cat cow)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <textarea value={esec} onChange={(e) => setEsec(e.target.value)} rows={2} placeholder="Come si esegue (facoltativo)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+              <div className="flex gap-2">
+                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Quanto / per quanto (es. 60 secondi)" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+                <button onClick={aggiungi} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">+ Riga</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
+    </div>
+  );
+}
+
+function DiarioAllenamento({ clientId, isAdmin }) {
   const [giorni, setGiorni] = useState([]);
   const [giornoAttivo, setGiornoAttivo] = useState(null);
   const [caricando, setCaricando] = useState(true);
+  const [importando, setImportando] = useState(false);
+  const [archiviati, setArchiviati] = useState([]);
+  const [schedaAperta, setSchedaAperta] = useState(null);
+  const [giornoArchAttivo, setGiornoArchAttivo] = useState(null);
 
   const carica = async () => {
     const { data } = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
-    setGiorni(data || []);
-    if (data && data.length > 0 && !giornoAttivo) setGiornoAttivo(data[0].id);
+    const tutti = data || [];
+    const attivi = tutti.filter((g) => !g.scheda_archiviata);
+    setGiorni(attivi);
+    setArchiviati(tutti.filter((g) => g.scheda_archiviata));
+    if (attivi.length > 0 && !giornoAttivo) setGiornoAttivo(attivi[0].id);
     setCaricando(false);
   };
   useEffect(() => { carica(); }, [clientId]);
 
+  // Libreria video: la vedono il coach e le clienti online o ibride
+  const [libreriaVideo, setLibreriaVideo] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!isAdmin) {
+          const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
+          if (!c || c.video_attivi === false || (c.tipo_servizio !== "online" && c.tipo_servizio !== "ibrido")) return;
+        }
+        const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
+        setLibreriaVideo(data || []);
+      } catch (e) { /* senza libreria l'app funziona come prima */ }
+    })();
+  }, [clientId, isAdmin]);
+
+  const eliminaGiorno = async (giornoId) => {
+    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
+    const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giornoId);
+    const idsEsercizi = (es || []).map((e) => e.id);
+    if (idsEsercizi.length) await supabase.from("training_entries").delete().in("exercise_id", idsEsercizi);
+    await supabase.from("training_exercises").delete().eq("training_day_id", giornoId);
+    await supabase.from("training_days").delete().eq("id", giornoId);
+    if (giornoAttivo === giornoId) setGiornoAttivo(null);
+    await carica();
+  };
+
   const creaGiorno = async () => {
-    if (giorni.length >= 6) return;
+    if (giorni.length >= 30) return;
     const { data } = await supabase.from("training_days").insert({
       client_id: clientId, nome: `Giorno ${giorni.length + 1}`, ordine: giorni.length + 1,
     }).select().single();
     await carica();
     if (data) setGiornoAttivo(data.id);
+  };
+
+  const importaSchedaDaCSV = async (file, giorniIniziali = giorni) => {
+    setImportando(true);
+    const testo = await file.text();
+    const righe = parseCSV(testo);
+    if (righe.length < 2) { alert("File vuoto o non leggibile."); setImportando(false); return; }
+
+    const header = righe[0].map((h) => h.trim().toLowerCase());
+    const idx = {
+      scheda: header.indexOf("scheda"), giorno: header.indexOf("giorno"), esercizio: header.indexOf("esercizio"),
+      serie: header.indexOf("serie"), ripetizioni: header.indexOf("ripetizioni"), recupero: header.indexOf("recupero"),
+      tecnica: header.indexOf("tecnica"), note: header.indexOf("note"), tipo: header.indexOf("tipo"), esecuzione: header.indexOf("esecuzione"),
+    };
+    if ((idx.giorno === -1 && idx.tipo === -1) || idx.esercizio === -1) {
+      alert('Il file deve avere almeno le colonne "giorno" e "esercizio" (oppure "tipo" e "esercizio" per mobilità e attivazione) nella prima riga.');
+      setImportando(false);
+      return;
+    }
+
+    let giorniLocali = [...giorniIniziali];
+    const cacheGiorni = {};
+    let giorniCreati = 0, eserciziCreati = 0, saltati = 0, prepCreati = 0;
+    const { data: prepEsistenti } = await supabase.from("training_exercises").select("id, nome, tipo").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita");
+    const prepLista = [...(prepEsistenti || [])];
+
+    for (let r = 1; r < righe.length; r++) {
+      const riga = righe[r];
+      if (riga.every((v) => !v || !v.trim())) continue;
+      const schedaVal = idx.scheda !== -1 ? (riga[idx.scheda] || "").trim() : "";
+      const giornoVal = idx.giorno !== -1 ? (riga[idx.giorno] || "").trim() : "";
+      const nomeEsercizio = (riga[idx.esercizio] || "").trim();
+      const tipoGrezzo = idx.tipo !== -1 ? (riga[idx.tipo] || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+      const tipoRiga = tipoGrezzo.startsWith("mobil") ? "mobilita" : tipoGrezzo.startsWith("attiv") ? "attivazione" : "forza";
+      if (!nomeEsercizio) continue;
+      if (tipoRiga === "mobilita") {
+        // Mobilità: uguale per tutti i giorni, quindi legata alla cliente e non a un giorno
+        const campi = {
+          note: idx.note !== -1 ? (riga[idx.note] || "").trim() || null : null,
+          esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
+        };
+        const gia = prepLista.find((x) => x.tipo === tipoRiga && x.nome.trim().toLowerCase() === nomeEsercizio.toLowerCase());
+        if (gia) await supabase.from("training_exercises").update(campi).eq("id", gia.id);
+        else {
+          const { data: nuova } = await supabase.from("training_exercises").insert({ client_id: clientId, training_day_id: null, nome: nomeEsercizio, tipo: tipoRiga, ordine: prepLista.length + 1, ...campi }).select("id, nome, tipo").single();
+          if (nuova) prepLista.push(nuova);
+        }
+        prepCreati++;
+        continue;
+      }
+      if (!giornoVal) continue;
+      if (tipoRiga === "attivazione") prepCreati++;
+
+      const nomeGiornoCompleto = schedaVal ? `${schedaVal} - ${giornoVal}` : giornoVal;
+      let giornoId = cacheGiorni[nomeGiornoCompleto];
+      if (!giornoId) {
+        const esistente = giorniLocali.find((g) => g.nome === nomeGiornoCompleto);
+        if (esistente) {
+          giornoId = esistente.id;
+        } else if (giorniLocali.length >= 30) {
+          saltati++;
+          continue;
+        } else {
+          const { data: nuovo } = await supabase.from("training_days").insert({ client_id: clientId, nome: nomeGiornoCompleto, ordine: giorniLocali.length + 1 }).select().single();
+          if (!nuovo) continue;
+          giorniLocali.push(nuovo);
+          giornoId = nuovo.id;
+          giorniCreati++;
+        }
+        cacheGiorni[nomeGiornoCompleto] = giornoId;
+      }
+
+      const { data: eserciziEsistenti } = await supabase.from("training_exercises").select("nome").eq("training_day_id", giornoId);
+      const nomiEsistenti = (eserciziEsistenti || []).map((e) => e.nome);
+      if (nomiEsistenti.includes(nomeEsercizio)) continue;
+
+      const noteParti = [];
+      if (idx.recupero !== -1 && riga[idx.recupero]?.trim()) noteParti.push(`Recupero: ${riga[idx.recupero].trim()}`);
+      if (idx.tecnica !== -1 && riga[idx.tecnica]?.trim()) noteParti.push(riga[idx.tecnica].trim());
+      if (idx.note !== -1 && riga[idx.note]?.trim()) noteParti.push(riga[idx.note].trim());
+
+      await supabase.from("training_exercises").insert({
+        client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: tipoRiga,
+        esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
+        ordine: nomiEsistenti.length + 1,
+        serie: idx.serie !== -1 && riga[idx.serie]?.trim() ? Number(riga[idx.serie].trim()) : null,
+        ripetizioni: idx.ripetizioni !== -1 ? (riga[idx.ripetizioni] || "").trim() || null : null,
+        note: noteParti.join(" — ") || null,
+      });
+      eserciziCreati++;
+    }
+    await carica();
+    setImportando(false);
+    alert(`Importati ${giorniCreati} giorno/i nuovo/i e ${eserciziCreati} esercizio/i dal file${prepCreati ? `, di cui ${prepCreati} di mobilità/attivazione` : ""}.${saltati ? ` ${saltati} riga/e saltata/e (limite massimo di giorni raggiunto).` : ""}`);
+  };
+
+  const esportaLogCompleto = async (giorniDaEsportare) => {
+    const r = [];
+    r.push("# Diario allenamento completo");
+    r.push(`Esportato il ${new Date().toLocaleDateString("it-IT")}`);
+    r.push("");
+    for (const g of giorniDaEsportare) {
+      r.push(`## ${g.nome}`);
+      const { data: esercizi } = await supabase.from("training_exercises").select("*").eq("training_day_id", g.id).order("ordine");
+      for (const es of (esercizi || []).filter((x) => x.tipo !== "mobilita" && x.tipo !== "attivazione")) {
+        r.push(`### ${es.nome}${es.note ? " — " + es.note : ""}`);
+        const { data: entries } = await supabase.from("training_entries").select("*").eq("exercise_id", es.id).order("data").order("numero_serie");
+        const perData = {};
+        (entries || []).forEach((en) => { (perData[en.data] = perData[en.data] || []).push(en); });
+        const dateOrdinate = Object.keys(perData).sort();
+        dateOrdinate.forEach((d) => {
+          const righeSet = perData[d];
+          const note = righeSet.map((en) => en.note).find(Boolean);
+          const serieTxt = righeSet
+            .filter((en) => en.kg != null || en.ripetizioni)
+            .map((en) => `serie ${en.numero_serie}: ${en.kg ?? "-"}kg${en.ripetizioni ? " x " + en.ripetizioni : ""}`)
+            .join(", ");
+          r.push(`- ${d}: ${serieTxt || "(nessun carico registrato)"}${note ? " — " + note : ""}`);
+        });
+        if (!dateOrdinate.length) r.push("- (nessun carico registrato)");
+      }
+      r.push("");
+    }
+    scaricaFile(`diario-allenamento-${new Date().toISOString().slice(0, 10)}.md`, r.join("\n"), "text/markdown");
+  };
+
+  const sostituisciConNuovaScheda = async (file) => {
+    if (giorni.length > 0 && !confirm("Il diario attuale (" + giorni.length + " giorno/i) verrà chiuso e archiviato come scheda T.N, con tutti i carichi registrati. Poi importo la nuova scheda dal CSV. Vuoi procedere?")) return;
+    setImportando(true);
+    if (giorni.length > 0) {
+      const numeri = archiviati.map((g) => parseInt((g.scheda_archiviata || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+      const etichetta = "T." + ((numeri.length ? Math.max(...numeri) : 0) + 1);
+      await supabase.from("training_days").update({ scheda_archiviata: etichetta }).in("id", giorni.map((g) => g.id));
+      setGiorni([]);
+      setGiornoAttivo(null);
+    }
+    setImportando(false);
+    await importaSchedaDaCSV(file, []);
   };
 
   if (caricando) return <Spinner />;
@@ -1068,25 +2761,88 @@ function DiarioAllenamento({ clientId }) {
         <p className="text-slate-500 text-sm mt-1">Un giorno per ogni allenamento della settimana, con lo storico dei carichi.</p>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {giorni.map((g) => (
-          <button key={g.id} onClick={() => setGiornoAttivo(g.id)}
-            className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${giornoAttivo === g.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
-            {g.nome}
-          </button>
-        ))}
-        {giorni.length < 6 && (
-          <button onClick={creaGiorno} className="px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 border border-dashed border-slate-300 text-slate-500">+ Giorno</button>
+      <BloccoPreparazione clientId={clientId} isAdmin={isAdmin} libreriaVideo={libreriaVideo} />
+
+      <div className="flex gap-1.5">
+        {giorni.map((g, i) => {
+          const seg = String(g.nome || "").split(" - ").pop().trim();
+          const etichetta = seg.length <= 3 ? seg : String(i + 1);
+          return (
+            <div key={g.id} className="relative flex-1 basis-0 min-w-[26px] max-w-[48px]">
+              <button onClick={() => setGiornoAttivo(g.id)} title={g.nome}
+                className={`w-full aspect-square rounded-lg text-sm font-semibold ${giornoAttivo === g.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {etichetta}
+              </button>
+              {isAdmin && (
+                <button onClick={() => eliminaGiorno(g.id)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-rose-500 flex items-center justify-center">
+                  <X size={9} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {isAdmin && giorni.length < 30 && (
+          <button onClick={creaGiorno} title="Nuovo giorno" className="flex-1 basis-0 min-w-[26px] max-w-[48px] aspect-square rounded-lg text-sm border border-dashed border-slate-300 text-slate-500">+</button>
         )}
       </div>
 
+      {isAdmin && (
+        <div className="space-y-2">
+          <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+            {importando ? "Importo..." : "📥 Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)"}
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+          <label className={`w-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+            🔄 Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) sostituisciConNuovaScheda(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+        </div>
+      )}
+
       {giorni.length === 0 && (
-        <Card className="p-6 text-center text-slate-400 text-sm">Nessun giorno di allenamento creato ancora. Tocca "+ Giorno" per iniziare.</Card>
+        <Card className="p-6 text-center text-slate-400 text-sm">{isAdmin ? 'Nessun giorno di allenamento creato ancora. Tocca "+" per iniziare, oppure importa un file CSV.' : "Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨"}</Card>
       )}
 
       {giornoAttivo && (
-        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} />
+        <GiornoAllenamento key={giornoAttivo} clientId={clientId} giorno={giorni.find((g) => g.id === giornoAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} isAdmin={isAdmin} />
       )}
+
+      <RichiediVideoEsercizio clientId={clientId} />
+
+      {archiviati.length > 0 && (() => {
+        const gruppi = {};
+        archiviati.forEach((g) => { (gruppi[g.scheda_archiviata] = gruppi[g.scheda_archiviata] || []).push(g); });
+        const num = (s) => parseInt((s || "").replace(/\D/g, ""), 10) || 0;
+        const etichette = Object.keys(gruppi).sort((a, b) => num(a) - num(b));
+        return (
+          <div className="space-y-2 pt-2">
+            <p className="text-xs uppercase tracking-wide text-slate-400 font-medium">Schede archiviate</p>
+            {etichette.map((et) => (
+              <Card key={et} className="p-3">
+                <button onClick={() => { setSchedaAperta(schedaAperta === et ? null : et); setGiornoArchAttivo(null); }} className="w-full flex justify-between items-center text-sm text-slate-700">
+                  <span className="font-medium">{et} <span className="text-slate-400 font-normal">· {gruppi[et].length} giorno/i · chiusa</span></span>
+                  <ChevronRight size={16} className={schedaAperta === et ? "rotate-90" : ""} />
+                </button>
+                {schedaAperta === et && (
+                  <div className="mt-3 space-y-3">
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {gruppi[et].map((g) => (
+                        <button key={g.id} onClick={() => setGiornoArchAttivo(g.id)}
+                          className={"px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 " + (giornoArchAttivo === g.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600")}>
+                          {g.nome}
+                        </button>
+                      ))}
+                    </div>
+                    {giornoArchAttivo && gruppi[et].find((g) => g.id === giornoArchAttivo) && (
+                      <GiornoAllenamento key={giornoArchAttivo} clientId={clientId} giorno={gruppi[et].find((g) => g.id === giornoArchAttivo)} onGiornoRinominato={carica} libreriaVideo={libreriaVideo} isAdmin={isAdmin} />
+                    )}
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1099,12 +2855,15 @@ function NotificheCliente({ client }) {
     const { data } = await supabase.from("notifiche").select("*").eq("client_id", client.id).order("created_at", { ascending: false });
     setNotifiche(data || []);
     setCaricando(false);
+    const daLeggere = (data || []).filter((n) => n.tipo === "nota" && n.stato === "inviata");
+    if (daLeggere.length) await supabase.from("notifiche").update({ stato: "letta" }).in("id", daLeggere.map((n) => n.id));
   };
   useEffect(() => { carica(); }, [client.id]);
 
   const accetta = async (n) => {
     if (n.calendar_event_id) {
       await supabase.from("calendar_events").update({ data: n.proposta_data, ora: n.proposta_ora, luogo: n.proposta_luogo, stato: "confermato" }).eq("id", n.calendar_event_id);
+      await sincronizzaLezionePacchetto(n.calendar_event_id);
     }
     await supabase.from("notifiche").update({ stato: "accettata" }).eq("id", n.id);
     carica();
@@ -1120,7 +2879,7 @@ function NotificheCliente({ client }) {
     <div className="px-5 pt-6 pb-24 space-y-3">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Notifiche</h1>
-        <p className="text-slate-500 text-sm mt-1">Proposte di orario e note da Morgana.</p>
+        <p className="text-slate-500 text-sm mt-1">Proposte di orario, note e promemoria di Morgana. Restano sempre qui, anche dopo averle lette.</p>
       </div>
       {notifiche.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Nessuna notifica.</Card>}
       {notifiche.map((n) => (
@@ -1141,11 +2900,11 @@ function NotificheCliente({ client }) {
             </>
           ) : (
             <>
-              <p className="font-medium text-slate-700 text-sm">Nota da Morgana</p>
+              <p className="font-medium text-slate-700 text-sm">{n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota da Morgana"}</p>
               <p className="text-slate-600 text-sm">{n.messaggio}</p>
             </>
           )}
-          <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}</p>
+          <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}{n.tipo === "nota" ? (n.stato === "inviata" ? " · Nuova" : " · ✓ Letta") : ""}</p>
         </Card>
       ))}
     </div>
@@ -1177,6 +2936,7 @@ function LeMieLezioni({ client }) {
       if (!conferma) return;
     }
     await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa" }).eq("id", e.id);
+    if (inTempo) await scollegaLezionePacchetto(e.id);
     carica();
   };
 
@@ -1204,7 +2964,7 @@ function LeMieLezioni({ client }) {
             <Card key={e.id} className="p-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-700 text-sm">{e.data.split("-").reverse().join("/")} · {e.ora?.slice(0, 5)}</p>
-                <p className="text-slate-500 text-xs truncate">{e.luogo}</p>
+                <p className="text-slate-500 text-xs ">{e.luogo}</p>
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
               <button onClick={() => annulla(e)} className="text-rose-500 text-xs font-medium flex-shrink-0">Annulla</button>
@@ -1221,7 +2981,7 @@ function LeMieLezioni({ client }) {
             <Card key={e.id} className="p-3 flex items-center gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-slate-700 text-sm">{e.data.split("-").reverse().join("/")} · {e.ora?.slice(0, 5)}</p>
-                <p className="text-slate-500 text-xs truncate">{e.luogo}</p>
+                <p className="text-slate-500 text-xs ">{e.luogo}</p>
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
             </Card>
@@ -1250,34 +3010,74 @@ function ClientApprofondimenti() {
           </a>
         ))}
       </div>
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-400 font-medium px-1 mb-2">Account</p>
+        <CambiaPasswordPropria />
+      </div>
     </div>
   );
 }
 
-function ClientApp({ session }) {
+function ClientApp({ session, anteprima = null }) {
   const [tab, setTab] = useState("home");
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
   const [piano, setPiano] = useState(null);
+  const [pianoStorico, setPianoStorico] = useState([]);
   const [caricando, setCaricando] = useState(true);
   const [nonLette, setNonLette] = useState(0);
+  const [chatNonLetti, setChatNonLetti] = useState(0);
+  const [lezioneProssima, setLezioneProssima] = useState(null);
 
   const carica = async () => {
     setCaricando(true);
-    const { data: c } = await supabase.from("clients").select("*").eq("user_id", session.user.id).single();
+    try {
+      if (!anteprima) await conTimeout(supabase.rpc("sincronizza_stati_check"));
+    } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
+    let { data: c } = anteprima ? await supabase.from("clients").select("*").eq("id", anteprima.id).maybeSingle() : await supabase.from("clients").select("*").eq("user_id", session.user.id).maybeSingle();
+    if (!c && !anteprima) {
+      // Primo accesso dopo un'auto-registrazione: la scheda cliente non esiste ancora,
+      // la creiamo ora usando nome/cognome inseriti in fase di registrazione (salvati sull'utente
+      // di autenticazione), così Morgana la trova già pronta da compilare con pacchetto e dati.
+      const meta = session.user.user_metadata || {};
+      const codiceGenerato = `c${Math.random().toString(36).slice(2, 8)}`;
+      const { data: creato } = await supabase.from("clients").insert({
+        user_id: session.user.id,
+        codice: codiceGenerato,
+        nome: meta.nome || "Nuova cliente",
+        cognome: meta.cognome || "",
+        email: session.user.email || null,
+        tipo_servizio: "online",
+        data_nascita: meta.data_nascita || null,
+        eta: calcolaEta(meta.data_nascita) ?? null,
+        citta: meta.citta || null,
+        altezza_cm: meta.altezza_cm ?? null,
+        peso_kg: meta.peso_kg ?? null,
+        livello_attivita: meta.livello_attivita || null,
+        tipo_lavoro: meta.tipo_lavoro || null,
+        registrato_da_solo: true,
+      }).select().single();
+      c = creato || null;
+    }
     setClient(c);
     if (c) {
       const { data: ck } = await supabase.from("checkins").select("*").eq("client_id", c.id).order("data_check", { ascending: true });
       setCheckins(ck || []);
       const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
-      setPiano(nu);
+      const { data: nuStorico } = await supabase.from("nutrition_plans").select("*").eq("client_id", c.id).order("data_aggiornamento", { ascending: true });
+      { const iniziati = (nuStorico || []).filter((r) => { const d = r.data_inizio || r.data_aggiornamento; return !d || d <= formatDataLocale(new Date()); }); setPianoStorico(iniziati); setPiano(pianoAttivo(iniziati)); }
+      try { if (!anteprima) await generaPromemoriCliente(c); } catch (e) { /* non blocca mai il caricamento */ }
       const { count } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("stato", "inviata");
       setNonLette(count || 0);
+      const { count: chatCount } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", c.id).eq("mittente", "coach").eq("letto", false);
+      setChatNonLetti(chatCount || 0);
+      const { data: lzP } = await supabase.from("calendar_events").select("id, data, ora, luogo, stato").eq("client_id", c.id).eq("tipo", "lezione").in("stato", ["confermato", "richiesta"]).gte("data", formatDataLocale(new Date())).order("data").order("ora").limit(1);
+      setLezioneProssima(lzP?.[0] || null);
     }
     setCaricando(false);
   };
 
-  useEffect(() => { carica(); }, [session.user.id]);
+  useEffect(() => { carica(); }, [session?.user?.id, anteprima?.id]);
 
   if (caricando) return <Spinner />;
   if (!client) return <div className="px-6 pt-16 text-center text-slate-500 text-sm">Il tuo account non è ancora collegato a una scheda cliente. Contatta Morgana.</div>;
@@ -1286,42 +3086,43 @@ function ClientApp({ session }) {
   const isOnlineNav = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const nav = [
     { key: "home", label: "Home", icon: Home },
-    ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
-    ...(isBulbNav && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni", icon: Phone }] : []),
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
-    ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log", icon: Dumbbell }] : []),
+    ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Macros", icon: Apple }] : []),
+    ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
+    ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
+    ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
-    { key: "nutrizione", label: "Nutrizione", icon: Apple },
+    ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
+    { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
-  ];
+    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
+  ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
 
   return (
     <div className="h-[100dvh] flex flex-col bg-slate-50 max-w-md mx-auto">
       <div className="flex items-center justify-between px-5 pt-5 flex-shrink-0">
-        <span className="text-slate-400 text-xs font-medium tracking-wide">COACHING BY MORGANA</span>
-        <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
+        {tab !== "home" ? (
+          <button onClick={() => setTab("home")} className="flex items-center gap-1 text-sky-600 text-sm font-medium py-1 pr-3">
+            <ArrowLeft size={18} /> Home
+          </button>
+        ) : (
+          <img src="/logo.png" alt="MorGainz" className="h-11 w-auto" />
+        )}
+        {!anteprima && <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>}
       </div>
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
-        {tab === "home" && <ClientHome client={client} onAggiornato={carica} />}
+        {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} lezioneProssima={lezioneProssima} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
+        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} /></div>}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
-        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} />}
-        {tab === "nutrizione" && <ClientNutrizione piano={piano} />}
+        {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
+        {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
+        {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
+        {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
-      <div className="flex-shrink-0 bg-white border-t border-slate-200 flex justify-around overflow-x-auto py-3" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-        {nav.map((n) => (
-          <button key={n.key} onClick={() => setTab(n.key)} className={`relative flex flex-col items-center gap-1.5 px-4 py-2 text-xs min-w-[60px] flex-shrink-0 ${tab === n.key ? "text-sky-500" : "text-slate-400"}`}>
-            <span className="relative">
-              <n.icon size={24} />
-              {!!n.badge && <span className="absolute -top-1 -right-1.5 bg-rose-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">{n.badge}</span>}
-            </span>
-            {n.label}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -1352,7 +3153,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
     setSalvando(true);
     setErrore("");
     const payload = { data_check: f.data_check || null, note_cliente: f.note_cliente || null, stato: f.stato, fase_mestruale: f.fase_mestruale || null };
-    if (!checkin) payload.client_id = clientId;
+    if (!checkin) { payload.client_id = clientId; payload.stato = "revisionato"; }
     for (const k of ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"]) {
       payload[k] = f[k] === "" ? null : Number(f[k]);
     }
@@ -1370,6 +3171,16 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
       await supabase.from("checkins").update(payload).eq("id", checkin.id);
     } else {
       await supabase.from("checkins").insert(payload);
+      // Il check lo inserisce la coach stessa: niente da rivedere e il promemoria non serve più.
+      try {
+        await supabase.from("notifiche").update({ coach_vista: true }).eq("client_id", clientId).like("proposta_luogo", "promemoria_check%");
+        await conTimeout(supabase.rpc("sincronizza_stati_check"));
+      } catch (e) { /* non blocca mai il salvataggio */ }
+      // Anche se il check lo inserisce la coach, lo stato/il prossimo check si aggiornano
+      // esattamente come se lo avesse inviato la cliente stessa.
+      try {
+        await conTimeout(supabase.rpc("aggiorna_prossimo_check", { check_date: f.data_check, p_client_id: clientId }));
+      } catch (e) { /* non blocca mai il salvataggio anche in caso di errore */ }
     }
     setSalvando(false);
     onSalvato();
@@ -1377,6 +3188,10 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">{checkin ? "Modifica check" : "Aggiungi check"}</p>
+      <a href="/guida-check-misure-foto.pdf" target="_blank" rel="noopener noreferrer" download
+        className="flex items-center gap-2 text-sky-600 text-xs font-medium">
+        <FileText size={14} /> Guida misure e foto (PDF)
+      </a>
       <div><label className="text-xs text-slate-500">Data</label>
         <InputData value={f.data_check} onChange={(e) => setF({ ...f, data_check: e.target.value })} className="mt-1" />
       </div>
@@ -1406,7 +3221,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
       )}
       <textarea placeholder="Note" value={f.note_cliente} onChange={(e) => setF({ ...f, note_cliente: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div>
-        <label className="text-xs text-slate-500 block mb-1">Foto progressi (facoltative)</label>
+        <label className="text-xs text-slate-500 block mb-1">Foto progressi</label>
         <FotoInputs files={files} setFiles={setFiles} />
       </div>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
@@ -1446,12 +3261,220 @@ function NuovaNotaForm({ clientId, onSalvato, onAnnulla }) {
   );
 }
 
-function NutrizioneForm({ clientId, ultimo, onSalvato }) {
+// Importazione da CSV per la nutrizione di una singola cliente: cicli alimentari oppure alimenti (riconosciuti dall'intestazione).
+function ImportaNutrizioneCSV({ clientId, onFatto }) {
+  const [msg, setMsg] = useState("");
+  const [lavoro, setLavoro] = useState(false);
+  const num = (v) => { const t = String(v ?? "").trim().replace(",", "."); if (t === "") return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+  const dataIso = (v) => { const t = String(v ?? "").trim(); if (!t) return null; if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t; const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(t); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null; };
+  const importa = async (file) => {
+    setLavoro(true); setMsg("");
+    try {
+      let testo = (await file.text()).replace(/^\uFEFF/, "");
+      const prima = testo.split(/\r?\n/)[0] || "";
+      const sep = (prima.match(/;/g) || []).length > (prima.match(/,/g) || []).length ? ";" : ",";
+      const righe = parseCSV(testo, sep);
+      if (righe.length < 2) { setMsg("Il file è vuoto o ha solo l’intestazione."); setLavoro(false); return; }
+      const norm = (x) => x.trim().toLowerCase().replace(/\s+/g, "_").replace(/[()]/g, "");
+      const head = righe[0].map(norm);
+      const col = (...nomi) => head.findIndex((h) => nomi.includes(h));
+      const dati = righe.slice(1);
+      if (col("nome", "alimento") >= 0 && col("kcal") >= 0) {
+        const iN = col("nome", "alimento"), iM = col("marca"), iU = col("unita", "unit"), iP = col("nome_pezzo", "pezzo", "uname"), iPer = col("per", "ogni_quanti"), iK = col("kcal"), iPr = col("proteine", "proteine_g"), iC = col("carboidrati", "carboidrati_g"), iG = col("grassi", "grassi_g"), iQ = col("quantita_abituale", "quantita");
+        const { data: esist } = await supabase.from("kcal_foods").select("nome, marca").eq("client_id", clientId);
+        const chiavi = new Set((esist || []).map((x) => `${x.nome}|${x.marca || ""}`.toLowerCase()));
+        const nuovi = []; let saltati = 0;
+        for (const r of dati) {
+          const nome = (r[iN] || "").trim(); const kcal = num(r[iK]);
+          if (!nome || kcal === null) { saltati++; continue; }
+          const marca = iM >= 0 ? (r[iM] || "").trim() || null : null;
+          const k = `${nome}|${marca || ""}`.toLowerCase();
+          if (chiavi.has(k)) { saltati++; continue; }
+          chiavi.add(k);
+          let unit = iU >= 0 ? (r[iU] || "g").trim().toLowerCase() : "g";
+          if (!["g", "ml", "pz"].includes(unit)) unit = unit.startsWith("pe") || unit === "pezzo" ? "pz" : "g";
+          nuovi.push({ client_id: clientId, nome, marca, unit, uname: unit === "pz" ? ((iP >= 0 && (r[iP] || "").trim()) || "pezzo") : null, per: unit === "pz" ? 1 : (num(iPer >= 0 ? r[iPer] : null) || 100), kcal, proteine: iPr >= 0 ? num(r[iPr]) : null, carboidrati: iC >= 0 ? num(r[iC]) : null, grassi: iG >= 0 ? num(r[iG]) : null, quantita_abituale: iQ >= 0 ? num(r[iQ]) : null });
+        }
+        if (nuovi.length === 0) { setMsg(`Nessun alimento nuovo da importare (${saltati} righe saltate: vuote o già presenti).`); setLavoro(false); return; }
+        if (!confirm(`Importo ${nuovi.length} alimenti nella lista di questa cliente? (${saltati} righe saltate)`)) { setLavoro(false); return; }
+        const { error } = await supabase.from("kcal_foods").insert(nuovi);
+        setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} alimenti ✓${saltati ? ` (${saltati} saltati)` : ""}`);
+        if (!error) onFatto?.();
+      } else if (col("kcal") >= 0) {
+        const iS = col("settimana", "ciclo"), iI = col("inizio", "data_inizio"), iF = col("fine", "data_fine"), iPa = col("pasto"), iK = col("kcal"), iPr = col("proteine", "proteine_g"), iC = col("carboidrati", "carboidrati_g"), iG = col("grassi", "grassi_g"), iNo = col("note", "nota");
+        const prossimoLunedi = (d) => { const x = new Date(d + "T00:00:00"); x.setDate(x.getDate() + (((8 - x.getDay()) % 7) || 7)); return formatDataLocale(x); };
+        const gruppi = []; const mappa = {};
+        dati.forEach((r, n) => {
+          const chiave = (iS >= 0 && (r[iS] || "").trim()) || (iI >= 0 && (r[iI] || "").trim()) || (iPa >= 0 ? "unico" : "riga" + n);
+          if (!mappa[chiave]) { mappa[chiave] = []; gruppi.push(mappa[chiave]); }
+          mappa[chiave].push(r);
+        });
+        const cicli = gruppi.map((righe) => {
+          const pasti = []; let tot = null, nota = null, ini = null, fin = null;
+          righe.forEach((r) => {
+            if (!ini && iI >= 0) ini = dataIso(r[iI]);
+            if (!fin && iF >= 0) fin = dataIso(r[iF]);
+            // le note/commenti del file non si importano: nell'app restano solo i dati inseriti da Morgana
+            const nomePasto = iPa >= 0 ? (r[iPa] || "").trim() : "";
+            const v = { kcal: num(r[iK]), proteine_g: iPr >= 0 ? num(r[iPr]) : null, carboidrati_g: iC >= 0 ? num(r[iC]) : null, grassi_g: iG >= 0 ? num(r[iG]) : null };
+            if (nomePasto && !/^totale/i.test(nomePasto)) pasti.push({ nome: nomePasto, ...v });
+            else if (!tot) tot = v;
+          });
+          if (!tot && pasti.length) {
+            const somma = (k) => pasti.reduce((t, x) => t + (x[k] || 0), 0);
+            tot = { kcal: somma("kcal"), proteine_g: somma("proteine_g"), carboidrati_g: somma("carboidrati_g"), grassi_g: somma("grassi_g") };
+          }
+          return { ini, fin, pasti, tot, nota };
+        }).filter((c) => c.tot && c.tot.kcal !== null && c.tot.kcal > 0);
+        if (cicli.length === 0) { setMsg("Non trovo righe con le kcal."); setLavoro(false); return; }
+        // Date: se non indicate, il primo ciclo parte oggi e ogni ciclo successivo parte il lunedì dopo.
+        let prec = null;
+        cicli.forEach((c) => { c.start = c.ini || (prec ? prossimoLunedi(prec) : formatDataLocale(new Date())); prec = c.start; });
+        cicli.forEach((c, i) => { c.end = c.fin || (cicli[i + 1] ? addGiorni(cicli[i + 1].start, -1) : null); });
+        const nuovi = cicli.map((c) => ({ client_id: clientId, data_aggiornamento: c.start, data_inizio: c.start, data_fine: c.end, kcal: Math.round(c.tot.kcal), proteine_g: c.tot.proteine_g, carboidrati_g: c.tot.carboidrati_g, grassi_g: c.tot.grassi_g, note: c.nota, pasti: c.pasti.length ? c.pasti : null }));
+        const fd = (d) => d.split("-").reverse().slice(0, 2).join("/");
+        if (!confirm(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
+        const { count: giaPresenti } = await supabase.from("nutrition_plans").select("id", { count: "exact", head: true }).eq("client_id", clientId);
+        if (giaPresenti > 0 && confirm(`Questa cliente ha già ${giaPresenti} cicli salvati. OK = li elimino e metto solo quelli nuovi. Annulla = li tengo e aggiungo i nuovi (rischi di averli doppi).`)) {
+          await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
+        }
+        const { error } = await supabase.from("nutrition_plans").insert(nuovi);
+        setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} cicli alimentari ✓`);
+        if (!error) onFatto?.();
+      } else setMsg("Non riconosco il file: serve una colonna “kcal” (cicli) oppure “nome” + “kcal” (alimenti).");
+    } catch (e) { setMsg("Non riesco a leggere il file."); }
+    setLavoro(false);
+  };
+  return (
+    <Card className="p-4 space-y-2">
+      <p className="text-sm font-medium text-slate-700">Importa da file CSV</p>
+      <p className="text-[11px] text-slate-400">Cicli alimentari (colonne: settimana, inizio, fine, pasto, kcal, proteine, carboidrati, grassi, note; le date sono facoltative e se mancano ogni ciclo parte il lunedì dopo) oppure lista alimenti della cliente (nome, marca, unita, nome_pezzo, per, kcal, proteine, carboidrati, grassi, quantita_abituale). Capisco da sola quale dei due è.</p>
+      <label className="block w-full text-center border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2 cursor-pointer">
+        {lavoro ? "Importo..." : "📥 Scegli file CSV"}
+        <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importa(e.target.files[0]); e.target.value = ""; }} />
+      </label>
+      {msg && <p className="text-xs text-slate-600">{msg}</p>}
+    </Card>
+  );
+}
+
+// Solo coach: apre la schermata della cliente così come la vede lei (senza chat e notifiche, per non segnarle come lette).
+function AnteprimaCliente({ client }) {
+  const [aperta, setAperta] = useState(false);
+  return (
+    <>
+      <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">👁 Vedi l’app come la vede {client.nome}</button>
+      {aperta && createPortal(
+        <div className="fixed inset-0 z-[90] bg-slate-200 flex flex-col">
+          <div className="flex-shrink-0 bg-amber-100 text-amber-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
+            <span>👁 Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
+            <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-amber-300 rounded-lg px-3 py-1 font-medium">Esci</button>
+          </div>
+          <div className="flex-1 min-h-0 [&>div]:!h-full"><ClientApp session={null} anteprima={client} /></div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+function pastiPerForm(src) {
+  return (src?.pasti || []).map((x) => ({ nome: x.nome || "", kcal: x.kcal ?? "", p: x.proteine_g ?? "", c: x.carboidrati_g ?? "", g: x.grassi_g ?? "" }));
+}
+function pastiDaForm(lista) {
+  const n = (v) => (v === "" || v == null ? null : Number(v));
+  const out = (lista || []).filter((x) => (x.nome || "").trim()).map((x) => ({ nome: x.nome.trim(), kcal: n(x.kcal), proteine_g: n(x.p), carboidrati_g: n(x.c), grassi_g: n(x.g) }));
+  return out.length ? out : null;
+}
+
+// Solo coach: le notifiche inviate a questa cliente (nuove = non ancora viste, e storico) e le sue azioni nell'app.
+function NotificheDellaCliente({ client }) {
+  const [righe, setRighe] = useState(null);
+  const [azioni, setAzioni] = useState([]);
+  const [quante, setQuante] = useState(20);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("notifiche").select("*").eq("client_id", client.id).order("created_at", { ascending: false }).limit(300);
+      setRighe(data || []);
+      const { data: az } = await supabase.from("avvisi_attivita").select("tipo, giorno, created_at").eq("client_id", client.id).order("created_at", { ascending: false }).limit(60);
+      setAzioni(az || []);
+    })();
+  }, [client.id]);
+  if (righe === null) return <Spinner />;
+  const m = (n) => n.proposta_luogo || "";
+  const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : m(n).startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : m(n).startsWith("promemoria_check") ? "Promemoria: check in arrivo" : m(n).startsWith("auto_check") ? "Check ricevuto ✨" : m(n).startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : m(n).startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : m(n).startsWith("auto_traguardo_streak") ? "Costanza 🔥" : m(n).startsWith("auto_") ? "Messaggio automatico" : m(n).startsWith("lez_prom") ? "Promemoria lezione" : m(n).startsWith("lez_mod") ? "Lezione spostata" : m(n).startsWith("lez_nuova") ? "Nuova lezione" : "Nota";
+  const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-emerald-100 text-emerald-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-rose-100 text-rose-700" } : { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+  const nuove = righe.filter((n) => n.stato === "inviata");
+  const vecchie = righe.filter((n) => n.stato !== "inviata");
+  const Riga = ({ n }) => {
+    const b = badge(n);
+    return (
+      <Card className="p-3 space-y-1">
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-medium text-slate-700 text-sm">{titolo(n)}</p>
+          <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 flex-shrink-0 ${b.c}`}>{b.t}</span>
+        </div>
+        {n.tipo === "proposta_lezione" && <p className="text-slate-600 text-xs">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>}
+        {n.messaggio && <p className="text-slate-600 text-xs whitespace-pre-wrap">{n.messaggio}</p>}
+        <p className="text-slate-400 text-[11px]">Inviata il {new Date(n.created_at).toLocaleDateString("it-IT")} alle {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+      </Card>
+    );
+  };
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Nuove, non ancora viste da {client.nome} ({nuove.length})</p>
+        <div className="space-y-2">
+          {nuove.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna notifica in attesa: ha visto tutto ✨</Card>}
+          {nuove.map((n) => <Riga key={n.id} n={n} />)}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico notifiche ({vecchie.length})</p>
+        <div className="space-y-2">
+          {vecchie.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna notifica nello storico.</Card>}
+          {vecchie.slice(0, quante).map((n) => <Riga key={n.id} n={n} />)}
+          {vecchie.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Azioni di {client.nome} nell’app ({azioni.length})</p>
+        <div className="space-y-2">
+          {azioni.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna azione registrata finora.</Card>}
+          {azioni.map((r, i) => (
+            <Card key={i} className="p-3 flex items-center justify-between gap-3">
+              <p className="text-slate-600 text-sm">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+              <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifica }) {
+  const oggi = new Date().toISOString().slice(0, 10);
+  const sorgente = modifica || ultimo;
   const [f, setF] = useState({
-    kcal: ultimo?.kcal || "", proteine_g: ultimo?.proteine_g || "", carboidrati_g: ultimo?.carboidrati_g || "",
-    grassi_g: ultimo?.grassi_g || "", note: ultimo?.note || "",
+    kcal: sorgente?.kcal || "", proteine_g: sorgente?.proteine_g || "", carboidrati_g: sorgente?.carboidrati_g || "",
+    grassi_g: sorgente?.grassi_g || "", note: modifica ? (modifica.note || "") : "",
+    data_inizio: modifica ? (modifica.data_inizio || "") : oggi,
+    data_fine: modifica ? (modifica.data_fine || "") : "",
+    pasti: pastiPerForm(sorgente),
   });
   const [salvando, setSalvando] = useState(false);
+
+  useEffect(() => {
+    setF({
+      kcal: sorgente?.kcal || "", proteine_g: sorgente?.proteine_g || "", carboidrati_g: sorgente?.carboidrati_g || "",
+      grassi_g: sorgente?.grassi_g || "", note: modifica ? (modifica.note || "") : "",
+      data_inizio: modifica ? (modifica.data_inizio || "") : oggi,
+      data_fine: modifica ? (modifica.data_fine || "") : "",
+      pasti: pastiPerForm(sorgente),
+    });
+  }, [modifica?.id]);
+
   const campo = (label, key) => (
     <div><label className="text-xs text-slate-500">{label}</label>
       <input type="number" value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
@@ -1459,26 +3482,73 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
   );
   const salva = async () => {
     setSalvando(true);
-    await supabase.from("nutrition_plans").insert({
-      client_id: clientId, data_aggiornamento: new Date().toISOString().slice(0, 10),
+    const payload = {
       kcal: f.kcal || null, proteine_g: f.proteine_g || null, carboidrati_g: f.carboidrati_g || null,
       grassi_g: f.grassi_g || null, note: f.note || null,
-    });
+      data_inizio: f.data_inizio || null, data_fine: f.data_fine || null,
+      pasti: pastiDaForm(f.pasti),
+    };
+    if (modifica) {
+      await supabase.from("nutrition_plans").update(payload).eq("id", modifica.id);
+    } else {
+      await supabase.from("nutrition_plans").insert({
+        client_id: clientId, data_aggiornamento: oggi, ...payload,
+      });
+    }
     setSalvando(false);
     onSalvato();
+    if (modifica) onAnnullaModifica?.();
   };
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Valori nutrizionali indicativi</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-700">{modifica ? "Modifica ciclo alimentare" : "Nuovo ciclo alimentare"}</p>
+        {modifica && <button onClick={onAnnullaModifica} className="text-xs text-slate-400 hover:text-slate-600">Annulla modifica</button>}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Inizio ciclo</label>
+          <InputData value={f.data_inizio} onChange={(e) => setF({ ...f, data_inizio: e.target.value })} className="mt-1" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Fine ciclo (facoltativa)</label>
+          <InputData value={f.data_fine} onChange={(e) => setF({ ...f, data_fine: e.target.value })} className="mt-1" />
+        </div>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         {campo("Kcal", "kcal")}
         {campo("Proteine (g)", "proteine_g")}
         {campo("Carboidrati (g)", "carboidrati_g")}
         {campo("Grassi (g)", "grassi_g")}
       </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-slate-500">Suddivisione per pasti (facoltativa)</p>
+          <button onClick={() => setF({ ...f, pasti: [...(f.pasti || []), { nome: "", kcal: "", p: "", c: "", g: "" }] })} className="text-xs text-sky-600 font-medium">+ Pasto</button>
+        </div>
+        {(f.pasti || []).map((r, i) => {
+          const set = (k) => (e) => setF({ ...f, pasti: f.pasti.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) });
+          return (
+            <div key={i} className="space-y-1">
+              <div className="flex gap-1.5">
+                <input value={r.nome} onChange={set("nome")} placeholder="Pasto (es. Colazione)" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <button onClick={() => setF({ ...f, pasti: f.pasti.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-slate-600 px-2">✕</button>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                <input type="number" value={r.kcal} onChange={set("kcal")} placeholder="kcal" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <input type="number" value={r.p} onChange={set("p")} placeholder="P g" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <input type="number" value={r.c} onChange={set("c")} placeholder="C g" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+                <input type="number" value={r.g} onChange={set("g")} placeholder="G g" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+              </div>
+            </div>
+          );
+        })}
+      </div>
       <textarea placeholder="Note per la cliente" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva valori"}</button>
-      {ultimo && <p className="text-slate-400 text-xs">Ultimo aggiornamento: {ultimo.data_aggiornamento}</p>}
+      <button onClick={salva} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
+        {salvando ? "Salvo..." : modifica ? "Salva modifiche" : "Salva nuovo ciclo"}
+      </button>
+      {!modifica && ultimo && <p className="text-slate-400 text-xs">Ultimo aggiornamento: {ultimo.data_aggiornamento}</p>}
     </Card>
   );
 }
@@ -1486,21 +3556,188 @@ function NutrizioneForm({ clientId, ultimo, onSalvato }) {
 function addMesi(dataStr, mesi) {
   const d = new Date(dataStr + "T00:00:00");
   d.setMonth(d.getMonth() + mesi);
-  return d.toISOString().slice(0, 10);
+  return formatDataLocale(d);
 }
 function addGiorni(dataStr, giorni) {
   const d = new Date(dataStr + "T00:00:00");
   d.setDate(d.getDate() + giorni);
-  return d.toISOString().slice(0, 10);
+  return formatDataLocale(d);
+}
+// Formatta una Date usando i componenti locali (anno/mese/giorno), mai toISOString()
+// che converte in UTC e puo' sfasare il giorno di uno in fusi orari come Europe/Rome.
+function formatDataLocale(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const MESI_PER_TIPO_PAGAMENTO = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
+
+// Ricalcola la data di scadenza "da zero" a partire dallo storico reale dei pagamenti a
+// cadenza fissa di un cliente (in ordine di data pagamento), invece di dipendere dalla
+// data reale in cui ogni pagamento e' stato salvato nell'app. Cosi' il risultato resta
+// coerente anche dopo aver aggiunto o cancellato pagamenti (es. doppioni da correggere).
+function mesiDelPagamento(p, pianoCliente) {
+  if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) return MESI_PER_TIPO_PAGAMENTO[p.tipo_piano];
+  if (/coaching online/i.test(p.tipo_piano || "")) {
+    const m = /(\d+)\s*mes/i.exec(p.note || "");
+    if (m) return Number(m[1]);
+    return MESI_PER_TIPO_PAGAMENTO[pianoCliente] || 0;
+  }
+  return 0;
+}
+function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
+  const validi = (pagamenti || [])
+    .filter((p) => p.stato === "saldato" && mesiDelPagamento(p, pianoCliente) > 0)
+    .slice()
+    .sort((a, b) => (a.data_pagamento || "").localeCompare(b.data_pagamento || ""));
+  let scadenza = null;
+  let ultimoTipo = null;
+  for (const p of validi) {
+    let base = p.data_pagamento;
+    if (!scadenza && dataInizio && dataInizio > base) base = dataInizio;
+    if (scadenza && scadenza > base) base = scadenza;
+    scadenza = addMesi(base, mesiDelPagamento(p, pianoCliente));
+    ultimoTipo = MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] ? p.tipo_piano : pianoCliente;
+  }
+  return { scadenza, ultimoTipo };
+}
+
+// Rilegge tutti i pagamenti del cliente dal database e riallinea la scadenza del suo
+// pacchetto di conseguenza. Va richiamata sia dopo aver registrato un nuovo pagamento a
+// cadenza fissa, sia dopo averne cancellato uno, cosi' un doppione eliminato non lascia
+// la scadenza avanzata "a vuoto".
+async function ricalcolaEAggiornaScadenza(clientId) {
+  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note").eq("client_id", clientId);
+  const { data: cli } = await supabase.from("clients").select("piano, data_inizio").eq("id", clientId).single();
+  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio);
+  if (!scadenza) return;
+  const oggiStr = formatDataLocale(new Date());
+  const giorniAScadenza = Math.round((new Date(scadenza + "T00:00:00") - new Date(oggiStr + "T00:00:00")) / 86400000);
+  const statoPacchetto = giorniAScadenza < 0 ? "scaduto" : giorniAScadenza <= 7 ? "in scadenza" : "attivo";
+  const aggiornamento = { data_scadenza: scadenza, stato_pacchetto: statoPacchetto };
+  if (ultimoTipo) aggiornamento.piano = ultimoTipo;
+  await supabase.from("clients").update(aggiornamento).eq("id", clientId);
+}
+
+const METODI_PAGAMENTO = [
+  { value: "satispay", label: "Satispay" },
+  { value: "hype", label: "Hype" },
+  { value: "sella", label: "Sella" },
+  { value: "contanti", label: "Contanti" },
+  { value: "bonifico", label: "Bonifico" },
+  { value: "altro", label: "Altro" },
+];
+const FREQUENZE_PAGAMENTO = [
+  { value: "mensile", label: "Mensile" },
+  { value: "trimestrale", label: "Trimestrale" },
+  { value: "semestrale", label: "Semestrale" },
+  { value: "occasionale", label: "Occasionale" },
+  { value: "a_lezione", label: "A lezione" },
+  { value: "variabile", label: "Variabile (cambia ogni volta)" },
+];
+const labelMetodo = (v) => METODI_PAGAMENTO.find((m) => m.value === v)?.label || v || "—";
+const labelFrequenza = (v) => FREQUENZE_PAGAMENTO.find((f) => f.value === v)?.label || v || "—";
+
+function FatturazioneCliente({ clientId }) {
+  const [b, setB] = useState({ importo_ricorrente: "", frequenza_pagamento: "", metodo_pagamento_abituale: "" });
+  const [caricato, setCaricato] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  const carica = async () => {
+    const { data } = await supabase.from("client_billing").select("*").eq("client_id", clientId).maybeSingle();
+    if (data) setB({ importo_ricorrente: data.importo_ricorrente ?? "", frequenza_pagamento: data.frequenza_pagamento || "", metodo_pagamento_abituale: data.metodo_pagamento_abituale || "" });
+    setCaricato(true);
+  };
+  useEffect(() => { carica(); }, [clientId]);
+
+  const salva = async (campi) => {
+    const nuovo = { ...b, ...campi };
+    setB(nuovo);
+    setSalvando(true);
+    await supabase.from("client_billing").upsert({
+      client_id: clientId,
+      importo_ricorrente: nuovo.importo_ricorrente === "" ? null : Number(nuovo.importo_ricorrente),
+      frequenza_pagamento: nuovo.frequenza_pagamento || null,
+      metodo_pagamento_abituale: nuovo.metodo_pagamento_abituale || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "client_id" });
+    setSalvando(false);
+  };
+
+  if (!caricato) return <Spinner />;
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Quanto paga abitualmente (visibile solo a te)</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-500">Importo (€)</label>
+          <input type="number" step="0.01" value={b.importo_ricorrente} onChange={(e) => setB({ ...b, importo_ricorrente: e.target.value })}
+            onBlur={() => salva({})} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 80" />
+        </div>
+        <div>
+          <label className="text-xs text-slate-500">Frequenza</label>
+          <select value={b.frequenza_pagamento} onChange={(e) => salva({ frequenza_pagamento: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">—</option>
+            {FREQUENZE_PAGAMENTO.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="text-xs text-slate-500">Metodo di pagamento abituale</label>
+          <select value={b.metodo_pagamento_abituale} onChange={(e) => salva({ metodo_pagamento_abituale: e.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">—</option>
+            {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </div>
+      </div>
+      {salvando && <p className="text-slate-400 text-xs">Salvataggio...</p>}
+    </Card>
+  );
+}
+
+function AccontoDaSaldare({ p, onSalvato }) {
+  const [valore, setValore] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const giaSaldato = Number(p.importo_saldato) || 0;
+
+  const registra = async () => {
+    const v = Number(valore);
+    if (!valore || isNaN(v) || v <= 0) return;
+    setSalvando(true);
+    const nuovoSaldato = Math.min(giaSaldato + v, Number(p.importo));
+    const completato = nuovoSaldato >= Number(p.importo) - 0.005; // tolleranza arrotondamento
+    await supabase.from("payments").update(
+      completato ? { importo_saldato: Number(p.importo), stato: "saldato" } : { importo_saldato: nuovoSaldato }
+    ).eq("id", p.id);
+    if (completato && MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
+    setSalvando(false);
+    setValore("");
+    onSalvato();
+  };
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="acconto €"
+        className="w-20 border border-amber-300 rounded-lg px-1.5 py-1 text-[11px]" />
+      <button onClick={registra} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={14} /></button>
+    </div>
+  );
 }
 
 function RegistraPagamento({ client, pagamenti, onRegistrato }) {
+  const [ricevutaPer, setRicevutaPer] = useState(null);
+  const [modificaPer, setModificaPer] = useState(null);
   const [tipo, setTipo] = useState("Mensile");
   const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
+  const [importo, setImporto] = useState("");
+  const [metodo, setMetodo] = useState("");
+  const [stato, setStato] = useState("saldato");
+  const [nota, setNota] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [fatto, setFatto] = useState(false);
-  const mesiPerTipo = { Mensile: 1, Trimestrale: 3, Semestrale: 6 };
   const isGratuito = tipo === "Gratuito";
+  const aggiornaScadenza = ["Mensile", "Trimestrale", "Semestrale"].includes(tipo);
 
   const registra = async () => {
     setSalvando(true);
@@ -1509,19 +3746,37 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
     if (isGratuito) {
       await supabase.from("clients").update({ piano: "Gratuito", stato_pacchetto: "gratuito" }).eq("id", client.id);
     } else {
-      const oggi = new Date().toISOString().slice(0, 10);
-      const base = (client.data_scadenza && client.data_scadenza > oggi) ? client.data_scadenza : dataPagamento;
-      const nuovaScadenza = addMesi(base, mesiPerTipo[tipo]);
-      await supabase.from("payments").insert({ client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo });
-      await supabase.from("clients").update({
-        piano: tipo,
-        data_scadenza: nuovaScadenza,
-        data_inizio: client.data_inizio || dataPagamento,
-        stato_pacchetto: "attivo",
-      }).eq("id", client.id);
+      await supabase.from("payments").insert({
+        client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo,
+        importo: importo === "" ? null : Number(importo), metodo_pagamento: metodo || null, stato, note: nota || null,
+      });
+      if (aggiornaScadenza) {
+        if (!client.data_inizio) {
+          await supabase.from("clients").update({ data_inizio: dataPagamento }).eq("id", client.id);
+        }
+        // Ricalcola dallo storico reale dei pagamenti, non dalla data reale di salvataggio:
+        // cosi' un pagamento inserito in ritardo o di correzione non "salta" mesi a vuoto.
+        await ricalcolaEAggiornaScadenza(client.id);
+      }
     }
     setSalvando(false);
     setFatto(true);
+    setImporto(""); setNota("");
+    onRegistrato();
+  };
+
+  const cambiaStato = async (p) => {
+    await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) await ricalcolaEAggiornaScadenza(client.id);
+    onRegistrato();
+  };
+  const elimina = async (p) => {
+    if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
+    await supabase.from("payments").delete().eq("id", p.id);
+    // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
+      await ricalcolaEAggiornaScadenza(client.id);
+    }
     onRegistrato();
   };
 
@@ -1530,37 +3785,96 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
       <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Registra pagamento</p>
       <div className="space-y-3">
         <div>
-          <label className="text-xs text-slate-500">Tipo di rinnovo</label>
+          <label className="text-xs text-slate-500">Tipo</label>
           <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-            <option value="Mensile">Mensile (+1 mese)</option>
-            <option value="Trimestrale">Trimestrale (+3 mesi)</option>
-            <option value="Semestrale">Semestrale (+6 mesi)</option>
+            <option value="Mensile">Mensile (+1 mese di scadenza)</option>
+            <option value="Trimestrale">Trimestrale (+3 mesi di scadenza)</option>
+            <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
+            <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
+            <option value="A lezione">A lezione (non tocca la scadenza)</option>
+            <option value="Variabile">Variabile (non tocca la scadenza)</option>
+            <option value="Pacchetto lezioni Bulb">Pacchetto lezioni Bulb (non tocca la scadenza)</option>
+            <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
             <option value="Gratuito">Gratuito</option>
           </select>
         </div>
         {!isGratuito && (
-          <div>
-            <label className="text-xs text-slate-500">Data pagamento</label>
-            <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">Data pagamento</label>
+                <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Importo (€)</label>
+                <input type="number" step="0.01" value={importo} onChange={(e) => setImporto(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 80" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Metodo</label>
+                <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                  <option value="">—</option>
+                  {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Stato</label>
+                <select value={stato} onChange={(e) => setStato(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                  <option value="saldato">Saldato</option>
+                  <option value="da_saldare">Da saldare</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Nota (facoltativa)</label>
+              <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. sconto amica, saldo pacchetto..." />
+            </div>
+          </>
         )}
       </div>
       <button onClick={registra} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
-        {salvando ? "Registro..." : isGratuito ? "Imposta come gratuito" : "Registra e aggiorna scadenza"}
+        {salvando ? "Registro..." : isGratuito ? "Imposta come gratuito" : "Registra pagamento"}
       </button>
-      {fatto && <p className="text-emerald-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : "Piano e scadenza aggiornati."}</p>}
+      {fatto && <p className="text-emerald-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : aggiornaScadenza ? "Pagamento registrato e scadenza aggiornata." : "Pagamento registrato."}</p>}
       {pagamenti.length > 0 && (
         <div className="pt-2 border-t border-slate-100">
           <p className="text-slate-400 text-xs mb-1">Storico pagamenti</p>
-          <ul className="space-y-1">
+          <ul className="space-y-1.5">
             {pagamenti.map((p) => (
-              <li key={p.id} className="text-xs text-slate-500 flex justify-between">
-                <span>{p.data_pagamento}</span><span>{p.tipo_piano}</span>
+              <li key={p.id} className="text-xs text-slate-600 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 min-w-0">
+                    <span className="font-medium">{p.data_pagamento}</span> — {p.tipo_piano}
+                    {p.importo != null && ` · ${Number(p.importo).toFixed(2)}€`}
+                    {p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" && p.importo != null ? <span className="text-amber-600"> · metodo mancante</span> : null)}
+                    {p.note && <span className="text-slate-400"> — {p.note}</span>}
+                  </span>
+                  {p.stato && (
+                    <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                      {p.stato === "saldato" ? "Saldato" : "Da saldare"}
+                    </button>
+                  )}
+                  <button onClick={() => setModificaPer(p)} className="flex-shrink-0 text-slate-400 hover:text-slate-600 px-0.5 text-[13px] leading-none" title="Modifica pagamento">✏️</button>
+                  {p.importo != null && p.stato !== "spesa" && (
+                    <button onClick={() => setRicevutaPer(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-500 px-0.5"><FileText size={13} /></button>
+                  )}
+                  <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
+                </div>
+                {p.stato === "da_saldare" && p.importo != null && (
+                  <div className="flex items-center gap-2 pl-1">
+                    {Number(p.importo_saldato) > 0 && (
+                      <span className="text-[11px] text-emerald-600">saldati {Number(p.importo_saldato).toFixed(2)}€, restano {(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€</span>
+                    )}
+                    <AccontoDaSaldare p={p} onSalvato={onRegistrato} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         </div>
       )}
+      {ricevutaPer && <RicevutaModal pagamento={{ ...ricevutaPer, clients: client }} onClose={() => setRicevutaPer(null)} />}
+      {modificaPer && <PagamentoDettaglio pagamento={{ ...modificaPer, clients: client }} onClose={() => setModificaPer(null)} onSelectCliente={() => {}} onSalvato={onRegistrato} />}
     </Card>
   );
 }
@@ -1571,6 +3885,18 @@ function InvitaClienteForm({ client, onInvitato }) {
   const [errore, setErrore] = useState("");
   const [link, setLink] = useState("");
   const [copiato, setCopiato] = useState(false);
+  const [mostraImposta, setMostraImposta] = useState(false);
+  const [nuovaPassword, setNuovaPassword] = useState("");
+  const [confermaPassword, setConfermaPassword] = useState("");
+  const [fattoImposta, setFattoImposta] = useState(false);
+
+  const chiamaFunzione = async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return supabase.functions.invoke("invite-client", {
+      body,
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+  };
 
   const generaLink = async (azione) => {
     if (!email) { setErrore("Inserisci un'email."); return; }
@@ -1578,14 +3904,29 @@ function InvitaClienteForm({ client, onInvitato }) {
     setErrore("");
     setLink("");
     setCopiato(false);
-    const { data: { session } } = await supabase.auth.getSession();
-    const { data, error } = await supabase.functions.invoke("invite-client", {
-      body: { client_id: client.id, email, azione },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    });
+    setFattoImposta(false);
+    const { data, error } = await chiamaFunzione({ client_id: client.id, email, azione });
     setGenerando("");
     if (error || data?.error) { setErrore(data?.error || error.message); return; }
     setLink(data.link);
+    onInvitato();
+  };
+
+  const impostaPassword = async (e) => {
+    e.preventDefault();
+    if (!email) { setErrore("Inserisci un'email."); return; }
+    if (nuovaPassword.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (nuovaPassword !== confermaPassword) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
+    setGenerando("imposta");
+    setErrore("");
+    setLink("");
+    setFattoImposta(false);
+    const { data, error } = await chiamaFunzione({ client_id: client.id, email, azione: "imposta", password: nuovaPassword });
+    setGenerando("");
+    if (error || data?.error) { setErrore(data?.error || error.message); return; }
+    setNuovaPassword("");
+    setConfermaPassword("");
+    setFattoImposta(true);
     onInvitato();
   };
 
@@ -1600,6 +3941,9 @@ function InvitaClienteForm({ client, onInvitato }) {
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="grid grid-cols-1 gap-2">
+        <button onClick={() => { setMostraImposta((v) => !v); setErrore(""); setLink(""); }} className="bg-emerald-500 text-white text-sm font-medium rounded-lg py-2">
+          {mostraImposta ? "Annulla" : "Imposta tu la password (senza link)"}
+        </button>
         <button onClick={() => generaLink("crea")} disabled={!!generando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
           {generando === "crea" ? "Genero..." : "Genera link per creare account e password"}
         </button>
@@ -1607,10 +3951,25 @@ function InvitaClienteForm({ client, onInvitato }) {
           {generando === "reset" ? "Genero..." : "Genera link per reimpostare la password"}
         </button>
       </div>
-      <p className="text-slate-400 text-xs">
-        "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
-      </p>
+      {mostraImposta && (
+        <form onSubmit={impostaPassword} className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+          <input type="password" placeholder="Nuova password (almeno 6 caratteri)" value={nuovaPassword} onChange={(e) => setNuovaPassword(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <input type="password" placeholder="Ripeti la password" value={confermaPassword} onChange={(e) => setConfermaPassword(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <button disabled={generando === "imposta"} className="w-full bg-emerald-600 text-white text-sm font-medium rounded-lg py-2">
+            {generando === "imposta" ? "Salvo..." : "Salva questa password per la cliente"}
+          </button>
+          <p className="text-emerald-700 text-[11px]">Funziona sia se la cliente ha già un account con questa email (le cambia la password), sia se non ce l'ha ancora (glielo crea). Comunicagliela tu, di persona o come preferisci: qui non parte nessuna email.</p>
+        </form>
+      )}
+      {!mostraImposta && (
+        <p className="text-slate-400 text-xs">
+          "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
+        </p>
+      )}
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {fattoImposta && <p className="text-emerald-600 text-xs">Password salvata ✓ — comunicala alla cliente.</p>}
       {link && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
           <p className="text-emerald-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
@@ -1621,6 +3980,201 @@ function InvitaClienteForm({ client, onInvitato }) {
         </div>
       )}
     </div>
+  );
+}
+
+function CambiaPasswordPropria() {
+  const [aperto, setAperto] = useState(false);
+  const [password, setPassword] = useState("");
+  const [conferma, setConferma] = useState("");
+  const [errore, setErrore] = useState("");
+  const [fatto, setFatto] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    setFatto(false);
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (password !== conferma) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
+    setSalvando(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setSalvando(false);
+    if (error) { setErrore(error.message); return; }
+    setPassword("");
+    setConferma("");
+    setFatto(true);
+  };
+
+  if (!aperto) {
+    return (
+      <Card className="p-4">
+        <button onClick={() => setAperto(true)} className="w-full text-left flex items-center justify-between">
+          <span className="text-sm font-medium text-slate-700">Cambia password</span>
+          <span className="text-slate-300 text-xs">Modifica ›</span>
+        </button>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cambia password</p>
+      <form onSubmit={salva} className="space-y-2">
+        <input type="password" placeholder="Nuova password (almeno 6 caratteri)" value={password} onChange={(e) => setPassword(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <input type="password" placeholder="Ripeti la nuova password" value={conferma} onChange={(e) => setConferma(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+        {fatto && <p className="text-emerald-600 text-xs">Password aggiornata ✓</p>}
+        <div className="flex gap-2">
+          <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-lg py-2">{salvando ? "Salvo..." : "Salva nuova password"}</button>
+          <button type="button" onClick={() => setAperto(false)} className="px-4 rounded-lg border border-slate-200 text-sm text-slate-500">Chiudi</button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+// Scheda riassuntiva automatica e compatta: si compone da sola dai dati aggiornati (allenamento senza carichi, mobilità, attivazione, nutrizione).
+function SchedaRiassuntiva({ client, onClose }) {
+  const [dati, setDati] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const [g, e, n] = await Promise.all([
+        supabase.from("training_days").select("*").eq("client_id", client.id).order("ordine"),
+        supabase.from("training_exercises").select("*").eq("client_id", client.id).order("ordine"),
+        supabase.from("nutrition_plans").select("*").eq("client_id", client.id).order("data_inizio", { ascending: true, nullsFirst: false }),
+      ]);
+      if (vivo) setDati({ giorni: (g.data || []).filter((x) => !x.scheda_archiviata), es: e.data || [], piani: n.data || [] });
+    })();
+    return () => { vivo = false; };
+  }, [client.id]);
+
+  const oggi = formatDataLocale(new Date());
+  const fmt = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const fmtC = (d) => (d ? d.split("-").reverse().slice(0, 2).join("/") : "");
+  const corto = (t, n = 34) => { const s = String(t || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+  const piani = dati?.piani || [];
+  const inCorso = piani.find((p) => (p.data_inizio || p.data_aggiornamento) <= oggi && (!p.data_fine || p.data_fine >= oggi));
+  const prossimi = piani.filter((p) => (p.data_inizio || p.data_aggiornamento) > oggi);
+  const ultimo = piani.length ? piani[piani.length - 1] : null;
+  const principale = inCorso || (prossimi.length ? prossimi[0] : ultimo);
+  const altri = principale && prossimi.length ? prossimi.filter((p) => p.id !== principale.id).slice(0, 1) : [];
+  const mobilita = (dati?.es || []).filter((x) => x.tipo === "mobilita" && !x.training_day_id);
+  const vuoto = dati && dati.giorni.length === 0 && mobilita.length === 0 && piani.length === 0;
+  const th = "text-left font-medium text-slate-400 py-0.5";
+  const td = "py-[3px] border-t border-slate-100";
+
+  return createPortal(
+    <div className="scheda-overlay fixed inset-0 bg-black/50 z-50 overflow-y-auto p-3 print:bg-white print:p-0">
+      <style>{`
+        @page { size: A4; margin: 10mm; }
+        @media print {
+          html, body { height: auto !important; }
+          #root { display: none !important; }
+          .scheda-overlay { position: static !important; overflow: visible !important; background: white !important; }
+          .scheda-foglio { box-shadow: none !important; border-radius: 0 !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; font-size: 10px !important; }
+          .no-print { display: none !important; }
+          .scheda-blocco { break-inside: avoid; page-break-inside: avoid; }
+          .scheda-foglio table { font-size: 10px !important; }
+        }
+      `}</style>
+      <div className="scheda-foglio bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-auto p-4 space-y-3 text-slate-800">
+        <div className="flex justify-between items-start border-b border-slate-200 pb-2">
+          <div>
+            <p className="font-semibold text-base leading-tight">Il tuo programma ✨</p>
+            <p className="text-slate-500 text-[11px]">{[client.nome, client.cognome].filter(Boolean).join(" ")} · Coaching by Morgana · aggiornato al {fmt(oggi)}</p>
+          </div>
+          <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={20} /></button>
+        </div>
+
+        {!dati && <p className="text-slate-400 text-sm">Caricamento...</p>}
+        {vuoto && (
+          <div className="text-center text-slate-500 text-sm space-y-3 py-4">
+            <p>Il tuo programma comparirà qui appena Morgana lo prepara ✨</p>
+            {(client.scheda_pdf_path || client.link_scheda) && (
+              <button className="text-sky-600 font-medium" onClick={async () => {
+                if (client.scheda_pdf_path) {
+                  const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
+                  if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                } else window.open(client.link_scheda, "_blank");
+              }}>Apri il programma precedente (PDF)</button>
+            )}
+          </div>
+        )}
+
+        {mobilita.length > 0 && (
+          <div className="scheda-blocco">
+            <p className="text-[10px] uppercase tracking-wide text-teal-700 font-semibold mb-0.5">🧘🏻 Mobilità · ogni giorno</p>
+            <table className="w-full text-[11px]">
+              <tbody>
+                {mobilita.map((x) => (
+                  <tr key={x.id}><td className={`${td} pr-2`}>{x.nome}</td><td className={`${td} text-right text-slate-600 whitespace-nowrap`}>{corto(x.note, 40)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {dati?.giorni.length > 0 && (
+          <div className="grid grid-cols-1 gap-3 print:grid-cols-2">
+            {dati.giorni.map((g) => {
+              const att = dati.es.filter((x) => x.training_day_id === g.id && x.tipo === "attivazione");
+              const forza = dati.es.filter((x) => x.training_day_id === g.id && x.tipo !== "attivazione" && x.tipo !== "mobilita");
+              return (
+                <div key={g.id} className="scheda-blocco border border-slate-200 rounded-lg p-2">
+                  <p className="font-semibold text-[12px] mb-1">{nomeGiornoPulito(g.nome)}</p>
+                  {att.length > 0 && (
+                    <p className="text-[10.5px] text-teal-800 bg-teal-50 rounded px-1.5 py-1 mb-1 leading-snug">
+                      <b>Attivazione:</b> {att.map((x) => `${x.nome}${x.note ? ` ${corto(x.note, 22)}` : ""}`).join(" · ")}
+                    </p>
+                  )}
+                  {forza.length > 0 ? (
+                    <table className="w-full text-[11px]">
+                      <thead><tr><th className={th}>Esercizio</th><th className={`${th} text-right`}>Serie</th><th className={`${th} text-right`}>Rip</th></tr></thead>
+                      <tbody>
+                        {forza.map((x) => (
+                          <tr key={x.id}>
+                            <td className={`${td} pr-1`}>{x.nome}</td>
+                            <td className={`${td} text-right tabular-nums`}>{x.serie ?? ""}</td>
+                            <td className={`${td} text-right whitespace-nowrap tabular-nums`}>{x.ripetizioni ?? ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : <p className="text-[11px] text-slate-400">Nessun esercizio.</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {principale && (
+          <div className="scheda-blocco">
+            <p className="text-[10px] uppercase tracking-wide text-sky-700 font-semibold mb-0.5">🍽️ Nutrizione · {inCorso ? "ciclo in corso" : principale === ultimo && !prossimi.length ? "ultimo ciclo" : "prossimo ciclo"}{principale.data_inizio ? ` · ${fmtC(principale.data_inizio)}${principale.data_fine ? `–${fmtC(principale.data_fine)}` : ""}` : ""}</p>
+            <table className="w-full text-[11px]">
+              <thead><tr><th className={th}>Pasto</th><th className={`${th} text-right`}>kcal</th><th className={`${th} text-right`}>P</th><th className={`${th} text-right`}>C</th><th className={`${th} text-right`}>G</th></tr></thead>
+              <tbody>
+                {Array.isArray(principale.pasti) && principale.pasti.map((m, i) => (
+                  <tr key={i}><td className={td}>{m.nome}</td><td className={`${td} text-right tabular-nums`}>{m.kcal ?? ""}</td><td className={`${td} text-right tabular-nums`}>{m.proteine_g ?? ""}</td><td className={`${td} text-right tabular-nums`}>{m.carboidrati_g ?? ""}</td><td className={`${td} text-right tabular-nums`}>{m.grassi_g ?? ""}</td></tr>
+                ))}
+                <tr className="font-semibold bg-slate-50"><td className={td}>Totale</td><td className={`${td} text-right tabular-nums`}>{principale.kcal}</td><td className={`${td} text-right tabular-nums`}>{principale.proteine_g}</td><td className={`${td} text-right tabular-nums`}>{principale.carboidrati_g}</td><td className={`${td} text-right tabular-nums`}>{principale.grassi_g}</td></tr>
+              </tbody>
+            </table>
+            {altri.map((p) => (
+              <p key={p.id} className="text-[10.5px] text-slate-600 mt-1">Poi dal {fmtC(p.data_inizio)}: <b>{p.kcal} kcal</b> · P {p.proteine_g} · C {p.carboidrati_g} · G {p.grassi_g}</p>
+            ))}
+          </div>
+        )}
+
+        {!vuoto && dati && (
+          <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
+        )}
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1682,31 +4236,41 @@ function EliminaClienteBottone({ client, onEliminato }) {
 
 function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
   const [data, setData] = useState(lezione.data || "");
-  const [ora, setOra] = useState(lezione.ora || "");
+  const [ora, setOra] = useState((lezione.ora || "").slice(0, 5));
   const [nota, setNota] = useState(lezione.nota || "");
   const [salvando, setSalvando] = useState(false);
   const [salvato, setSalvato] = useState(false);
-  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "") || nota !== (lezione.nota || "");
+  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "").slice(0, 5) || nota !== (lezione.nota || "");
 
-  const salva = async () => {
+  const salva = async (ov = {}) => {
+    const dataV = "data" in ov ? ov.data : data;
+    const oraV = "ora" in ov ? ov.ora : ora;
     setSalvando(true);
     setSalvato(false);
-    const campi = { data: data || null, ora: ora || null, nota: nota || null };
+    const campi = { data: dataV || null, ora: dataV ? (oraV || null) : null, nota: nota || null };
     await supabase.from("lezioni_svolte").update(campi).eq("id", lezione.id);
 
-    let calendarEventId = lezione.calendar_event_id;
-    if (data) {
+    // Rileggiamo dal database lo stato reale del collegamento, invece di fidarci
+    // di un valore potenzialmente non aggiornato, per evitare eventi duplicati o mancanti.
+    const { data: rigaAttuale } = await supabase.from("lezioni_svolte").select("calendar_event_id").eq("id", lezione.id).single();
+    let calendarEventId = rigaAttuale?.calendar_event_id || null;
+    if (dataV) {
       if (calendarEventId) {
-        await supabase.from("calendar_events").update({ data, ora: ora || null }).eq("id", calendarEventId);
+        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null }).eq("id", calendarEventId);
       } else {
         const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
-          client_id: client.id, tipo: "lezione", data, ora: ora || null, luogo: client.sede_abituale || null, stato: "confermato",
+          client_id: client.id, tipo: "lezione", data: dataV, ora: oraV || null, luogo: client.sede_abituale || null, stato: "confermato",
         }).select().single();
         if (nuovoEvento) {
           calendarEventId = nuovoEvento.id;
           await supabase.from("lezioni_svolte").update({ calendar_event_id: calendarEventId }).eq("id", lezione.id);
         }
       }
+    } else if (calendarEventId) {
+      // Data cancellata: l'appuntamento sparisce anche dal calendario, come se lo eliminassi
+      await supabase.from("lezioni_svolte").update({ calendar_event_id: null }).eq("id", lezione.id);
+      await supabase.from("calendar_events").delete().eq("id", calendarEventId);
+      calendarEventId = null;
     }
 
     setSalvando(false);
@@ -1722,8 +4286,8 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
           {lezione.fatta && <CheckCircle2 size={16} className="text-white" />}
         </button>
         <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
-        <InputData value={data} onChange={(e) => { setData(e.target.value); setSalvato(false); }} className="flex-1" />
-        <select value={ora} onChange={(e) => { setOra(e.target.value); setSalvato(false); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
+        <InputData value={data} onChange={(e) => { const v = e.target.value; setData(v); setSalvato(false); if (!v) { setOra(""); salva({ data: "", ora: "" }); } }} className="flex-1" onBlur={(e) => { if (!e.target.value && (lezione.data || lezione.calendar_event_id)) { setOra(""); salva({ data: "", ora: "" }); } }} />
+        <select value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
           <option value="">--:--</option>
           {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -1731,42 +4295,87 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
       <input value={nota} onChange={(e) => { setNota(e.target.value); setSalvato(false); }} placeholder="Nota sulla lezione"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
       <div className="flex items-center gap-2">
-        <button onClick={salva} disabled={salvando || !modificato}
+        <button onClick={() => salva()} disabled={salvando || !modificato}
           className={`flex-1 rounded-lg py-2 text-xs font-medium ${modificato ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-400"}`}>
           {salvando ? "Salvo..." : "Salva"}
         </button>
+        {(lezione.data || lezione.calendar_event_id) && (
+          <button onClick={() => { setData(""); setOra(""); salva({ data: "", ora: "" }); }} disabled={salvando}
+            className="rounded-lg py-2 px-3 text-xs font-medium bg-rose-50 text-rose-600 flex-shrink-0">
+            Elimina appuntamento
+          </button>
+        )}
         {salvato && !modificato && <span className="text-emerald-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
       </div>
     </Card>
   );
 }
 
+function StoricoPacchetti({ pacchetti }) {
+  if (pacchetti.length === 0) return null;
+  return (
+    <div className="pt-2">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Pacchetti precedenti</p>
+      <div className="space-y-1">
+        {pacchetti.map((p) => (
+          <Card key={p.id} className="p-3 text-sm text-slate-600">
+            {p.numero_lezioni} lezioni — completato il {p.completato_il ? new Date(p.completato_il).toLocaleDateString("it-IT") : "-"}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LezioniPacchetto({ client, onCompletato }) {
+  const [pacchetti, setPacchetti] = useState([]);
   const [lezioni, setLezioni] = useState([]);
   const [caricando, setCaricando] = useState(true);
-  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
+  const [nuovoNumero, setNuovoNumero] = useState("8");
 
   const carica = async () => {
-    const { data: rows } = await supabase.from("lezioni_svolte").select("*").eq("client_id", client.id).order("numero");
-    let attuali = rows || [];
-    if (incluse > attuali.length) {
-      const mancanti = [];
-      for (let n = attuali.length + 1; n <= incluse; n++) mancanti.push({ client_id: client.id, numero: n, fatta: false });
-      const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
-      attuali = [...attuali, ...(creati || [])].sort((a, b) => a.numero - b.numero);
+    const { data: pacchettiData } = await supabase.from("pacchetti_lezioni").select("*").eq("client_id", client.id).order("creato_il");
+    let pacchettiAttuali = pacchettiData || [];
+
+    // Primo utilizzo: se non esiste ancora nessun pacchetto ma il tab Dati ne ha impostato uno, lo creo ora
+    if (pacchettiAttuali.length === 0 && client.pacchetto_lezioni) {
+      const { data: nuovo } = await supabase.from("pacchetti_lezioni")
+        .insert({ client_id: client.id, numero_lezioni: Number(client.pacchetto_lezioni), stato: "attivo" }).select().single();
+      if (nuovo) pacchettiAttuali = [nuovo];
     }
-    setLezioni(attuali);
+
+    const attivo = pacchettiAttuali.find((p) => p.stato === "attivo");
+    if (attivo) {
+      const { data: righeEsistenti } = await supabase.from("lezioni_svolte").select("*").eq("pacchetto_id", attivo.id).order("numero");
+      let righe = righeEsistenti || [];
+      if (attivo.numero_lezioni > righe.length) {
+        const mancanti = [];
+        for (let n = righe.length + 1; n <= attivo.numero_lezioni; n++) mancanti.push({ client_id: client.id, pacchetto_id: attivo.id, numero: n, fatta: false });
+        const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
+        righe = [...righe, ...(creati || [])].sort((a, b) => a.numero - b.numero);
+      }
+      setLezioni(righe);
+    } else {
+      setLezioni([]);
+    }
+    setPacchetti(pacchettiAttuali);
     setCaricando(false);
   };
-  useEffect(() => { carica(); }, [client.id, incluse]);
+  useEffect(() => { carica(); }, [client.id, client.pacchetto_lezioni]);
+
+  const pacchettoAttivo = pacchetti.find((p) => p.stato === "attivo");
+  const pacchettiCompletati = [...pacchetti.filter((p) => p.stato === "completato")].sort((a, b) => new Date(b.completato_il) - new Date(a.completato_il));
 
   const cambiaFatta = async (id, fatta) => {
     setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, fatta } : l)));
     await supabase.from("lezioni_svolte").update({ fatta }).eq("id", id);
-    const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === incluse;
-    if (tutteFatte && incluse > 0 && client.stato_pacchetto !== "scaduto") {
+    if (fatta) inviaPush({ evento: "lezione", client_id: client.id });
+    const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === lezioni.length;
+    if (tutteFatte && lezioni.length > 0 && pacchettoAttivo) {
+      await supabase.from("pacchetti_lezioni").update({ stato: "completato", completato_il: new Date().toISOString() }).eq("id", pacchettoAttivo.id);
       await supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", client.id);
       onCompletato?.();
+      carica();
     }
   };
 
@@ -1774,17 +4383,85 @@ function LezioniPacchetto({ client, onCompletato }) {
     setLezioni((prev) => prev.map((l) => (l.id === lezioneAggiornata.id ? lezioneAggiornata : l)));
   };
 
-  const svolte = lezioni.filter((l) => l.fatta).length;
+  const aggiungiLezioneExtra = async () => {
+    if (!pacchettoAttivo) return;
+    const prossimoNumero = lezioni.length + 1;
+    const { data } = await supabase.from("lezioni_svolte").insert({ client_id: client.id, pacchetto_id: pacchettoAttivo.id, numero: prossimoNumero, fatta: false }).select().single();
+    if (data) setLezioni((prev) => [...prev, data]);
+  };
+
+  const modificaNumeroPacchetto = async (valoreInserito) => {
+    const nuovoNumero = Number(valoreInserito);
+    if (!pacchettoAttivo || !nuovoNumero || nuovoNumero < 1 || nuovoNumero === pacchettoAttivo.numero_lezioni) return;
+    const svolteCount = lezioni.filter((l) => l.fatta).length;
+    if (nuovoNumero < svolteCount) {
+      alert(`Non puoi impostare un numero inferiore alle lezioni già svolte (${svolteCount}).`);
+      return;
+    }
+    await supabase.from("pacchetti_lezioni").update({ numero_lezioni: nuovoNumero }).eq("id", pacchettoAttivo.id);
+    await supabase.from("clients").update({ pacchetto_lezioni: String(nuovoNumero) }).eq("id", client.id);
+
+    if (nuovoNumero > lezioni.length) {
+      const mancanti = [];
+      for (let n = lezioni.length + 1; n <= nuovoNumero; n++) mancanti.push({ client_id: client.id, pacchetto_id: pacchettoAttivo.id, numero: n, fatta: false });
+      const { data: creati } = await supabase.from("lezioni_svolte").insert(mancanti).select();
+      setLezioni((prev) => [...prev, ...(creati || [])].sort((a, b) => a.numero - b.numero));
+    } else if (nuovoNumero < lezioni.length) {
+      // Rimuove solo le lezioni non ancora svolte, partendo dal fondo — mai quelle già fatte
+      const daRimuovere = lezioni.filter((l) => !l.fatta).sort((a, b) => b.numero - a.numero).slice(0, lezioni.length - nuovoNumero);
+      await supabase.from("lezioni_svolte").delete().in("id", daRimuovere.map((l) => l.id));
+      setLezioni((prev) => prev.filter((l) => !daRimuovere.some((d) => d.id === l.id)));
+    }
+    setPacchetti((prev) => prev.map((p) => (p.id === pacchettoAttivo.id ? { ...p, numero_lezioni: nuovoNumero } : p)));
+  };
+
+  const iniziaNuovoPacchetto = async () => {
+    const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: client.id, numero_lezioni: Number(nuovoNumero), stato: "attivo" }).select().single();
+    if (nuovo) {
+      await supabase.from("clients").update({ pacchetto_lezioni: nuovoNumero, stato_pacchetto: "attivo" }).eq("id", client.id);
+      await carica();
+    }
+  };
 
   if (caricando) return <Spinner />;
-  if (!incluse) return <Card className="p-6 text-center text-slate-400 text-sm">Imposta prima un pacchetto lezioni nel tab Dati.</Card>;
+
+  const opzioniPacchetto = ["1", "4", "8", "10", "24", "48"];
+
+  if (!pacchettoAttivo) {
+    return (
+      <div className="space-y-3">
+        <Card className="p-6 space-y-3">
+          <p className="text-center text-slate-400 text-sm">
+            {pacchettiCompletati.length > 0 ? "Nessun pacchetto attivo — l'ultimo è stato completato." : "Imposta prima un pacchetto lezioni nel tab Dati."}
+          </p>
+          {pacchettiCompletati.length > 0 && (
+            <div className="flex items-center gap-2">
+              <select value={nuovoNumero} onChange={(e) => setNuovoNumero(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm">
+                {opzioniPacchetto.map((n) => <option key={n} value={n}>{n} lezioni</option>)}
+              </select>
+              <button onClick={iniziaNuovoPacchetto} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">Inizia nuovo pacchetto</button>
+            </div>
+          )}
+        </Card>
+        <StoricoPacchetti pacchetti={pacchettiCompletati} />
+      </div>
+    );
+  }
+
+  const svolte = lezioni.filter((l) => l.fatta).length;
+  const totale = lezioni.length;
 
   return (
     <div className="space-y-3">
       <Card className="p-4">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Pacchetto</p>
-        <p className="text-2xl font-semibold text-slate-800">{svolte} / {incluse} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
-        {svolte === incluse && <p className="text-amber-600 text-xs mt-1">Pacchetto completo — stato impostato automaticamente su "scaduto".</p>}
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Pacchetto attuale</p>
+          <select defaultValue={pacchettoAttivo.numero_lezioni} onChange={(e) => modificaNumeroPacchetto(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 text-xs">
+            {["1", "4", "8", "10", "24", "48"].map((n) => <option key={n} value={n}>{n} lezioni</option>)}
+          </select>
+        </div>
+        <p className="text-2xl font-semibold text-slate-800">{svolte} / {totale} <span className="text-base font-normal text-slate-400">lezioni svolte</span></p>
+        {totale > pacchettoAttivo.numero_lezioni && <p className="text-slate-400 text-xs mt-1">Include {totale - pacchettoAttivo.numero_lezioni} lezione/i extra aggiunta/e manualmente</p>}
       </Card>
 
       <div className="space-y-2">
@@ -1792,17 +4469,42 @@ function LezioniPacchetto({ client, onCompletato }) {
           <RigaLezione key={l.id} lezione={l} client={client} onFattaCambiata={cambiaFatta} onSalvato={onRigaSalvata} />
         ))}
       </div>
+      <button onClick={aggiungiLezioneExtra} className="w-full border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-xl py-2.5">
+        + Aggiungi lezione extra (es. per recuperare una cancellazione)
+      </button>
       <p className="text-slate-400 text-xs px-1">Ricordati di toccare "Salva" dopo aver scritto data e ora — solo così la lezione compare anche nel calendario coach.</p>
+
+      <StoricoPacchetti pacchetti={pacchettiCompletati} />
     </div>
   );
 }
 
 async function collegaLezionePacchetto(clientId, evento) {
+  if (!evento || evento.tipo !== "lezione") return;
+  const { data: gia } = await supabase.from("lezioni_svolte").select("id").eq("calendar_event_id", evento.id).limit(1).maybeSingle();
+  if (gia) {
+    await supabase.from("lezioni_svolte").update({ data: evento.data, ora: evento.ora || null }).eq("id", gia.id);
+    return;
+  }
+  const { data: pacc } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", clientId).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+  if (!pacc) return;
   const { data: libera } = await supabase.from("lezioni_svolte")
-    .select("id").eq("client_id", clientId).is("calendar_event_id", null).order("numero").limit(1).maybeSingle();
+    .select("id").eq("pacchetto_id", pacc.id).eq("fatta", false).is("calendar_event_id", null).order("numero").limit(1).maybeSingle();
   if (libera) {
     await supabase.from("lezioni_svolte").update({ data: evento.data, ora: evento.ora || null, calendar_event_id: evento.id }).eq("id", libera.id);
+  } else {
+    const { data: ultima } = await supabase.from("lezioni_svolte").select("numero").eq("pacchetto_id", pacc.id).order("numero", { ascending: false }).limit(1).maybeSingle();
+    await supabase.from("lezioni_svolte").insert({ client_id: clientId, pacchetto_id: pacc.id, numero: (ultima?.numero || 0) + 1, fatta: false, data: evento.data, ora: evento.ora || null, calendar_event_id: evento.id });
   }
+}
+async function scollegaLezionePacchetto(eventoId) {
+  await supabase.from("lezioni_svolte").update({ data: null, ora: null, calendar_event_id: null }).eq("calendar_event_id", eventoId).eq("fatta", false);
+}
+async function sincronizzaLezionePacchetto(eventoId) {
+  const { data: ev } = await supabase.from("calendar_events").select("*").eq("id", eventoId).single();
+  if (!ev || ev.tipo !== "lezione") return;
+  if (ev.stato === "confermato") await collegaLezionePacchetto(ev.client_id, ev);
+  else if (ev.stato === "annullata" || ev.stato === "richiesta") await scollegaLezionePacchetto(ev.id);
 }
 
 function RigaStato({ label, valore, presente }) {
@@ -1816,6 +4518,347 @@ function RigaStato({ label, valore, presente }) {
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* MODULO SCHEDA (solo coach) — libreria, tecniche, trend, segnali      */
+/* ------------------------------------------------------------------ */
+
+const PAROLE_CHIAVE_COMPOUND = ["squat", "hip hinge", "spinta", "tirata", "stacco", "accosciata", "estensione anca"];
+function isCompoundPattern(pattern) {
+  if (!pattern) return false;
+  const p = pattern.toLowerCase();
+  if (p.includes("isolamento")) return false;
+  return PAROLE_CHIAVE_COMPOUND.some((k) => p.includes(k));
+}
+const TAG_FEEDBACK = [
+  { value: "stanca", label: "Stanca" }, { value: "energica", label: "Energica" },
+  { value: "troppo_lavoro", label: "Troppo lavoro" }, { value: "poco_lavoro", label: "Poco lavoro" },
+  { value: "dolore", label: "Dolore/fastidio" }, { value: "vuole_aggiungere_giorno", label: "Vuole aggiungere giorno" },
+  { value: "vuole_togliere_giorno", label: "Vuole togliere giorno" },
+];
+const PAROLE_ATTENZIONE = ["stanca", "stress", "affatic", "ciclo", "dolore", "male", "pesant", "difficile", "non dormo", "poco sonno", "gonfia", "gonfiore", "vacanz", "malat", "influenza", "ritenzione"];
+const CAMPI_MISURA_CHECK = ["peso_kg", "petto_cm", "spalle_cm", "sopra_ombelico_cm", "ombelico_cm", "sotto_ombelico_cm", "coscia_dx_cm", "braccio_dx_cm", "collo_cm", "glutei_cm"];
+
+const CONDIZIONI_SALUTE = [
+  { value: "ipertensione", label: "Ipertensione", pattern_evitati: [], avviso: "Evitare isometrie prolungate e sforzi in apnea (Valsalva) su carichi vicini al massimale." },
+  { value: "pavimento_pelvico", label: "Pavimento pelvico", pattern_evitati: [], avviso: "Evitare Valsalva e picchi di pressione intra-addominale; espirare nello sforzo, carichi moderati." },
+  { value: "ginocchia", label: "Ginocchia doloranti / scarsa mobilità", pattern_evitati: ["Squat monopodalico", "Isometria squat"], avviso: "Evitare affondi profondi e squat a ROM completo; preferire leg press/leg extension a range controllato." },
+  { value: "lombare", label: "Zona lombare / iperlordosi", pattern_evitati: [], esclusioni_nome: ["Romanian Deadlift Bilanciere"], avviso: "Evitare stacchi da terra pesanti; preferire Hip Thrust guidato/con stop e RDL con manubri a controllo del bacino." },
+  { value: "spalle", label: "Spalle / cifosi / anteposizione", pattern_evitati: [], avviso: "Aumentare il volume di tirata orizzontale (rapporto tirata/spinta 2:1), privilegiare estensioni toraciche ed evitare push verticale pesante a ROM ampio." },
+  { value: "anche", label: "Anche bloccate / dolorose", pattern_evitati: ["Squat", "Squat laterale"], avviso: "Evitare squat profondi e affondi laterali ampi; privilegiare hip hinge e ROM parziale controllato." },
+  { value: "caviglie", label: "Caviglia rigida / scarsa mobilità", pattern_evitati: ["Isometria caviglia"], esclusioni_nome: ["Squat Corpo Libero", "Goblet Squat"], avviso: "Sostituire lo squat libero con Leg Press a piedi bassi o squat con rialzo sotto i talloni." },
+  { value: "valgismo", label: "Valgismo ginocchia", pattern_evitati: [], avviso: "Curare l'allineamento ginocchio-piede in ogni esercizio di spinta per le gambe; evitare carichi che favoriscono il collasso verso l'interno." },
+];
+
+const TECNICHE_BLOCCO2 = ["Top Set (RIR 1) + 2 Back-off (-15%)", 'TUT eccentrica 3-4", RIR 1-2', "Cluster set: 2x(3+3), rec. 20\" interno"];
+const TECNICHE_BLOCCO3 = ["Drop set: -30/40% carico, a cedimento tecnico", 'Rest-pause: cedimento + 15" + AMRAP', "Tensione continua, no lockout in uscita"];
+
+// Soglie di volume settimanale per gruppo muscolare (serie a intensità reale RIR 0-2)
+const VOLUME_LANDMARKS = {
+  Quadricipiti: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [18, 20] },
+  Glutei: { mv: [4, 6], mev: [8, 10], mav: [12, 18], mrv: [20, 22] },
+  Femorali: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
+  Schiena: { mv: [6, 8], mev: [8, 10], mav: [14, 20], mrv: [22, 25] },
+  Petto: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [18, 20] },
+  Spalle: { mv: [6, 8], mev: [8, 12], mav: [14, 22], mrv: [24, 26] }, // riferimento: deltoidi laterali
+  Bicipiti: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
+  Tricipiti: { mv: [4, 6], mev: [6, 8], mav: [10, 14], mrv: [16, 18] },
+  Polpacci: { mv: [4, 6], mev: [8, 10], mav: [12, 16], mrv: [20, 20] },
+  Core: { mv: [0, 0], mev: [0, 0], mav: [10, 14], mrv: [10, 14] }, // solo se aggiunto manualmente, tetto fisso 10-14 (anche in focus)
+};
+const SERIE_MAX_PER_SESSIONE = 10; // evita junk volume in singola seduta (regola avanzati, applicata a tutti per sicurezza)
+
+const GRUPPI_UPPER = ["Petto", "Schiena", "Spalle", "Bicipiti", "Tricipiti"];
+const GRUPPI_TONIFICAZIONE_DONNA = ["Petto", "Bicipiti", "Tricipiti"];
+
+function serieIdealiPerGruppo(gruppo, livello, inFocus, sesso) {
+  const landmark = VOLUME_LANDMARKS[gruppo];
+  if (!landmark) return livello === "base" ? 8 : 12;
+  // Gruppo in focus di crescita: spinge verso il volume massimo tollerabile (MRV) invece che sull'ottimale.
+  if (inFocus) return landmark.mrv[0];
+  // Donne, senza focus esplicito: petto/braccia restano a livello di tonificazione/mantenimento (MEV), non MAV.
+  if (sesso === "F" && GRUPPI_TONIFICAZIONE_DONNA.includes(gruppo)) return landmark.mev[1];
+  // Uomini: maggiore enfasi upper body anche senza focus esplicito (tra MAV alto e MRV).
+  if (sesso === "M" && GRUPPI_UPPER.includes(gruppo)) return Math.round((landmark.mav[1] + landmark.mrv[0]) / 2);
+  // Principiante/Intermedio: limite inferiore del volume ottimale (MAV min). Avanzato: verso l'alto (MAV max).
+  return livello === "avanzata" ? landmark.mav[1] : landmark.mav[0];
+}
+
+// Bicipiti/Tricipiti ricevono già stimolo indiretto dalle tirate (Schiena) e spinte (Petto/Spalle):
+// riduciamo il volume diretto in base a quante sessioni di quel tipo sono già presenti in settimana.
+function aggiustaVolumeIndiretto(gruppo, serieBase, giorniGenerator) {
+  if (gruppo === "Bicipiti") {
+    const sessioniTirata = giorniGenerator.filter((g) => g.gruppi.includes("Schiena")).length;
+    const riduzione = Math.min(0.5, sessioniTirata * 0.2);
+    return Math.max(4, Math.round(serieBase * (1 - riduzione)));
+  }
+  if (gruppo === "Tricipiti") {
+    const sessioniSpinta = giorniGenerator.filter((g) => g.gruppi.includes("Petto") || g.gruppi.includes("Spalle")).length;
+    const riduzione = Math.min(0.5, sessioniSpinta * 0.15);
+    return Math.max(4, Math.round(serieBase * (1 - riduzione)));
+  }
+  return serieBase;
+}
+
+// Frequenza settimanale ideale per gruppo (da note di programmazione del metodo)
+const FREQUENZA_IDEALE = {
+  Quadricipiti: 2, Glutei: 2, Femorali: 1, Schiena: 2, Petto: 2,
+  Spalle: 2, Bicipiti: 1, Tricipiti: 1, Polpacci: 2,
+};
+
+// Combinazioni di giorno valide (split scientificamente sensate) — il generatore pesca solo da qui
+const COMBINAZIONI_VALIDE = [
+  ["Femorali", "Schiena"], ["Glutei", "Femorali"], ["Glutei"], ["Femorali"], ["Spalle"],
+  ["Spalle", "Petto"], ["Spalle", "Petto", "Tricipiti"], ["Petto", "Tricipiti"], ["Schiena"],
+  ["Schiena", "Bicipiti"], ["Bicipiti", "Tricipiti"], ["Bicipiti", "Tricipiti", "Spalle"], ["Petto"],
+];
+// Gruppi senza combinazione dedicata: si aggiungono come richiamo alla giornata più coerente
+const GRUPPI_RICHIAMO = ["Quadricipiti", "Polpacci"];
+
+// Template di split per numero di giorni a settimana (combo principale + richiami), pensati per coprire
+// tutti i 10 gruppi con frequenza ragionevole in base alle note di programmazione del metodo
+const TEMPLATE_SPLIT = {
+  1: [{ combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti", "Schiena", "Spalle", "Petto"] }],
+  2: [
+    { combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti", "Polpacci"] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Bicipiti", "Schiena"] },
+  ],
+  3: [
+    { combo: ["Glutei", "Femorali"], richiami: ["Quadricipiti"] },
+    { combo: ["Schiena", "Bicipiti"], richiami: [] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: ["Polpacci"] },
+  ],
+  4: [
+    { combo: ["Femorali", "Schiena"], richiami: [] },
+    { combo: ["Glutei"], richiami: ["Quadricipiti"] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: [] },
+    { combo: ["Bicipiti", "Tricipiti", "Spalle"], richiami: ["Polpacci"] },
+  ],
+  5: [
+    { combo: ["Glutei", "Femorali"], richiami: [] },
+    { combo: ["Spalle", "Petto"], richiami: [] },
+    { combo: ["Schiena", "Bicipiti"], richiami: [] },
+    { combo: ["Petto", "Tricipiti"], richiami: [] },
+    { combo: ["Glutei"], richiami: ["Quadricipiti", "Polpacci"] },
+  ],
+  6: [
+    { combo: ["Glutei", "Femorali"], richiami: [] },
+    { combo: ["Spalle", "Petto", "Tricipiti"], richiami: [] },
+    { combo: ["Schiena", "Bicipiti"], richiami: [] },
+    { combo: ["Femorali", "Schiena"], richiami: [] },
+    { combo: ["Spalle"], richiami: ["Polpacci"] },
+    { combo: ["Bicipiti", "Tricipiti"], richiami: ["Quadricipiti"] },
+  ],
+};
+
+function generaSplitAutomatica(numeroGiorni, focus) {
+  const n = Math.min(6, Math.max(1, Number(numeroGiorni) || 3));
+  const template = TEMPLATE_SPLIT[n] || TEMPLATE_SPLIT[3];
+  const giorni = template.map((t) => ({ gruppi: [...t.combo, ...t.richiami] }));
+
+  // I gruppi in focus vogliono più frequenza: se compaiono una sola volta, li aggiungiamo
+  // come richiamo su un'altra giornata che non li ha già (e non è già troppo carica)
+  (focus || []).forEach((gruppoFocus) => {
+    const occorrenze = giorni.filter((g) => g.gruppi.includes(gruppoFocus)).length;
+    if (occorrenze < 2) {
+      const candidato = giorni.find((g) => !g.gruppi.includes(gruppoFocus) && g.gruppi.length < 4);
+      if (candidato) candidato.gruppi.push(gruppoFocus);
+    }
+  });
+
+  return giorni.map((g) => ({ nome: g.gruppi.join(" + "), gruppi: g.gruppi, nomeManuale: false }));
+}
+
+const RISCALDAMENTO_STANDARD = [
+  "Foam rolling (SMR): 30 sec per distretto target della seduta",
+  "Mobilità dinamica anche (es. 90/90, affondi con rotazione)",
+  "Mobilità rachide toracico (open book, cat-cow modificato)",
+  "Attivazione neuromuscolare specifica sul primo esercizio (serie leggera di avvicinamento)",
+];
+
+function targetPassiGiornalieri(livelloAttivita) {
+  if (livelloAttivita === "sedentario") return "8.000 - 10.000 passi/giorno";
+  if (livelloAttivita === "intermedio") return "10.000 - 12.000 passi/giorno";
+  return "12.000+ passi/giorno";
+}
+
+function adattoAlLivello(es, livello) {
+  if (livello === "base") return !!es.solo_base && (es.attrezzo || "").toLowerCase().includes("corpo libero");
+  return !es.solo_base;
+}
+
+// BLOCCO 2 = complessi fondamentali (1-2 multiarticolari primari) · BLOCCO 3 = accessori/isolamento (3-5 esercizi)
+function decidiRipetizioni(es, livello, blocco) {
+  if (blocco === 2) return livello === "avanzata" ? "5-7" : "6-8";
+  // blocco 3: multiarticolari secondari (unilaterali/monopodalici) 8-10, isolamento puro 10-12
+  if (es.unilaterale || isCompoundPattern(es.pattern)) return "8-10";
+  return "10-12";
+}
+function decidiRecupero(blocco) {
+  return blocco === 2 ? "120-180 sec" : "60-90 sec";
+}
+
+function esercizioEscluso(es, escluse) {
+  if (escluse.pattern.includes(es.pattern)) return true;
+  if (escluse.nomi.includes(es.nome)) return true;
+  return false;
+}
+
+function scegliVariati(candidati, numero) {
+  const perPattern = new Map();
+  candidati.forEach((e) => {
+    if (!perPattern.has(e.pattern)) perPattern.set(e.pattern, []);
+    perPattern.get(e.pattern).push(e);
+  });
+  const patternUnici = [...perPattern.keys()];
+  const scelti = [];
+  let giro = 0;
+  while (scelti.length < numero && scelti.length < candidati.length && giro < patternUnici.length * 5) {
+    const pattern = patternUnici[giro % patternUnici.length];
+    const disponibili = perPattern.get(pattern);
+    if (disponibili && disponibili.length > 0) scelti.push(disponibili.shift());
+    giro++;
+  }
+  return scelti;
+}
+
+const ESERCIZI_MARGINALI = { Spalle: ["Alzate frontali"] }; // deltoide anteriore: già stimolato dal petto, da usare solo se serve varietà
+
+function scegliEserciziBlocco({ gruppo, serieTotali, libreria, livello, escluse, blocco, giaScelti }) {
+  let candidati = libreria.filter((e) =>
+    (e.gruppo === gruppo || e.gruppo_secondario === gruppo) &&
+    adattoAlLivello(e, livello) &&
+    !esercizioEscluso(e, escluse)
+  );
+  // Blocco 2: solo esercizi compound (forza meccanica); Blocco 3: tutto il resto (accessori/isolamento)
+  candidati = candidati.filter((e) => (blocco === 2 ? isCompoundPattern(e.pattern) : true));
+  // Esercizi marginali (es. deltoide anteriore): in coda, usati solo se servono per completare la varietà
+  const marginali = ESERCIZI_MARGINALI[gruppo] || [];
+  candidati = [...candidati.filter((e) => !marginali.includes(e.nome)), ...candidati.filter((e) => marginali.includes(e.nome))];
+  // Preferenza morbida: primi in lista quelli non ancora usati in nessun altro giorno della settimana.
+  // Se la libreria non basta a coprire tutte le sessioni senza ripetere, va bene ripetere piuttosto che lasciare vuoto.
+  candidati = [...candidati.filter((e) => !giaScelti.includes(e.id)), ...candidati.filter((e) => giaScelti.includes(e.id))];
+  if (serieTotali <= 0) return [];
+  if (candidati.length === 0) return [{ esercizio: null, gruppoMancante: gruppo, serie: serieTotali }];
+
+  const numeroEsercizi = blocco === 2
+    ? Math.min(2, candidati.length)
+    : Math.max(1, Math.min(5, candidati.length, Math.round(serieTotali / 3)));
+  // Un esercizio per ogni tipo di movimento diverso quando possibile (es. schiena: tirata dall'alto, dal basso, orizzontale)
+  let scelti = scegliVariati(candidati, numeroEsercizi);
+
+  // Schiena, blocco accessori: garantisce sempre almeno un esercizio di ampiezza (tirata verticale)
+  // e uno di spessore (tirata orizzontale), non lasciarlo al caso del round-robin.
+  if (gruppo === "Schiena" && blocco === 3 && scelti.length >= 2) {
+    const eAmpiezza = (e) => e.pattern.toLowerCase().includes("verticale");
+    const eSpessore = (e) => e.pattern.toLowerCase().includes("orizzontale");
+    const haAmpiezza = scelti.some(eAmpiezza);
+    const haSpessore = scelti.some(eSpessore);
+    if (!haAmpiezza) {
+      const sostituto = candidati.find((e) => eAmpiezza(e) && !scelti.includes(e));
+      if (sostituto) scelti = [sostituto, ...scelti.slice(1)];
+    } else if (!haSpessore) {
+      const sostituto = candidati.find((e) => eSpessore(e) && !scelti.includes(e));
+      if (sostituto) scelti = [sostituto, ...scelti.slice(1)];
+    }
+  }
+
+  const base = Math.floor(serieTotali / scelti.length);
+  const resto = serieTotali % scelti.length;
+  return scelti.map((es, i) => ({ esercizio: es, serie: base + (i < resto ? 1 : 0) }));
+}
+
+function normalizzaNomeEsercizio(testo) {
+  if (!testo) return "";
+  return testo.replace(/\s*\d+\s*[xX×]\s*\d+(-\d+)?\s*$/, "").trim();
+}
+
+function costruisciLookupEsercizi(libreria, aliasRows) {
+  const map = new Map();
+  libreria.forEach((e) => map.set(e.nome.toLowerCase(), e));
+  aliasRows.forEach((a) => {
+    const es = libreria.find((e) => e.id === a.esercizio_id);
+    if (es) map.set(a.alias.toLowerCase(), es);
+  });
+  return map;
+}
+function risolviEsercizio(nomeGrezzo, lookup) {
+  const pulito = normalizzaNomeEsercizio(nomeGrezzo).toLowerCase();
+  return lookup.get(pulito) || null;
+}
+
+function assegnaTecnicheGiorno(esercizi, fase, livello) {
+  if (livello !== "avanzata" || !fase || fase < 3) return esercizi.map(() => "");
+  const primoCompoundIdx = esercizi.findIndex((e) => isCompoundPattern(e.pattern));
+  let ultimoIsolamentoIdx = -1;
+  esercizi.forEach((e, i) => { if (!isCompoundPattern(e.pattern)) ultimoIsolamentoIdx = i; });
+  const tecBlocco2 = TECNICHE_BLOCCO2[(fase - 3) % TECNICHE_BLOCCO2.length];
+  const tecBlocco3 = TECNICHE_BLOCCO3[(fase - 3) % TECNICHE_BLOCCO3.length];
+  return esercizi.map((e, i) => {
+    if (i === primoCompoundIdx) return tecBlocco2;
+    if (i === ultimoIsolamentoIdx) return tecBlocco3;
+    return "";
+  });
+}
+
+function analizzaTrendCarico(kgValori, livello) {
+  const valori = kgValori.filter((v) => v != null);
+  if (valori.length < 2) return "Dati insufficienti";
+  const ultimo = valori[valori.length - 1], precedente = valori[valori.length - 2];
+  if (ultimo > precedente) return "Trend positivo: valutare +2.5kg o +1 rep alla prossima seduta";
+  if (ultimo < precedente) return "Non progredire: verificare causa";
+  let consecutivi = 1;
+  for (let i = valori.length - 2; i >= 0; i--) { if (valori[i] === ultimo) consecutivi++; else break; }
+  const soglie = { base: 3, intermedia: 4, avanzata: 6 };
+  const soglia = soglie[livello] || 4;
+  return consecutivi > soglia ? "Stallo: valutare variazione o deload" : "Stabile: tentare piccolo incremento se tecnica pulita";
+}
+
+function analizzaSegnaliCheck(ultimo, precedente) {
+  if (!ultimo || !precedente) return { segnale: "Dati insufficienti (serve almeno 2 check)", avvisoDistanza: null };
+  const confrontabili = CAMPI_MISURA_CHECK.filter((c) => ultimo[c] != null && precedente[c] != null);
+  const aumentate = confrontabili.filter((c) => ultimo[c] > precedente[c]);
+  const misureAumento = confrontabili.length > 0 && aumentate.length / confrontabili.length >= 0.6;
+  const notaTesto = (ultimo.note_cliente || "").toLowerCase();
+  const notaAttenzione = PAROLE_ATTENZIONE.some((p) => notaTesto.includes(p));
+  let segnale = "Nessun segnale";
+  if (misureAumento && notaAttenzione) segnale = "Attenzione alta: valutare deload";
+  else if (misureAumento || notaAttenzione) segnale = "Attenzione media: monitorare";
+  const giorni = Math.round((new Date(ultimo.data_check) - new Date(precedente.data_check)) / 86400000);
+  const avvisoDistanza = giorni > 45 ? `Confronto tra check distanti ${giorni} giorni: interpretare come trend di lungo periodo, non come stallo settimanale.` : null;
+  return { segnale, avvisoDistanza };
+}
+
+function calibrazioneCheck(ultimo, precedente) {
+  if (!ultimo || !precedente) return [];
+  const consigli = ["Riferimento proteico: 1.8-2.2 g/kg, ciclicizzando carboidrati/grassi in base all'aderenza."];
+  const giorni = Math.round((new Date(ultimo.data_check) - new Date(precedente.data_check)) / 86400000);
+  if (ultimo.peso_kg != null && precedente.peso_kg != null && giorni > 0) {
+    const caloPercentuale = (precedente.peso_kg - ultimo.peso_kg) / precedente.peso_kg;
+    if (caloPercentuale > 0.02) consigli.push("Il peso scende rapidamente: se anche i carichi stanno calando, valutare +carboidrati peri-workout.");
+  }
+  const confrontabili = CAMPI_MISURA_CHECK.filter((c) => c !== "peso_kg" && ultimo[c] != null && precedente[c] != null);
+  const invariate = confrontabili.filter((c) => Math.abs(ultimo[c] - precedente[c]) < 0.5).length;
+  if (confrontabili.length > 0 && invariate / confrontabili.length >= 0.7) {
+    consigli.push("Misure quasi invariate: ricalibra il target passi (+1.500/die) oppure scala 100-150 kcal da carboidrati/grassi.");
+  }
+  consigli.push("Progressione scheda: mantieni l'ossatura degli esercizi fondamentali cambiando lo stimolo (da volume a intensità, o pause isometriche); ruota gli accessori nel range 8-12 reps.");
+  return consigli;
+}
+
+function suggerimentiFeedback(tags, obiettivoAttuale) {
+  const out = [];
+  if (tags.includes("dolore")) out.push("Priorità alta: valutare in sessione, eventualmente sostituire esercizio o ridurre ROM/carico sulla zona interessata.");
+  if (tags.includes("stanca") || tags.includes("troppo_lavoro")) {
+    out.push("Allenamento: valutare deload leggero (-20/30% volume).");
+    out.push(obiettivoAttuale !== "definizione" ? "Alimentazione: valutare +20/30g carboidrati nei prossimi 3-4 giorni." : "Alimentazione: verificare sonno/aderenza prima di intervenire sui carboidrati.");
+  }
+  if (tags.includes("energica") || tags.includes("poco_lavoro")) out.push("Valutare un set extra o piccolo incremento carico/intensità.");
+  if (tags.includes("vuole_aggiungere_giorno")) out.push("Valutare inserimento sessione aggiuntiva, contenuto da calibrare.");
+  if (tags.includes("vuole_togliere_giorno")) out.push("Valutare riduzione di un giorno, individuare quello a minor priorità da assorbire negli altri.");
+  return out;
+}
+
 
 function RiepilogoCliente({ client, checkins, onVaiADati }) {
   const [lezioniInfo, setLezioniInfo] = useState(null);
@@ -1875,17 +4918,837 @@ function RiepilogoCliente({ client, checkins, onVaiADati }) {
   );
 }
 
+function SelettoreEsercizio({ libreria, onScegli, onAnnulla }) {
+  const [ricerca, setRicerca] = useState("");
+  const [gruppoFiltro, setGruppoFiltro] = useState("");
+  const gruppi = [...new Set(libreria.map((e) => e.gruppo).filter(Boolean))].sort();
+  const filtrati = libreria.filter((e) => {
+    const matchRicerca = !ricerca || e.nome.toLowerCase().includes(ricerca.toLowerCase());
+    const matchGruppo = !gruppoFiltro || e.gruppo === gruppoFiltro;
+    return matchRicerca && matchGruppo;
+  });
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-700">Scegli esercizio dalla libreria</p>
+        <button onClick={onAnnulla} className="text-slate-400 text-xs">Annulla</button>
+      </div>
+      <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca per nome..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <select value={gruppoFiltro} onChange={(e) => setGruppoFiltro(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        <option value="">Tutti i gruppi muscolari</option>
+        {gruppi.map((g) => <option key={g} value={g}>{g}</option>)}
+      </select>
+      <div className="max-h-64 overflow-y-auto space-y-1">
+        {filtrati.map((e) => (
+          <button key={e.id} onClick={() => onScegli(e)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 text-sm border border-slate-100">
+            <span className="font-medium text-slate-700">{e.nome}</span>
+            <span className="text-slate-400 text-xs block">{e.gruppo}{e.pattern ? ` · ${e.pattern}` : ""}{e.unilaterale ? " · unilaterale" : ""}</span>
+          </button>
+        ))}
+        {filtrati.length === 0 && <p className="text-slate-400 text-sm text-center py-4">Nessun esercizio trovato.</p>}
+      </div>
+      <button onClick={() => onScegli(null)} className="w-full text-sky-600 text-xs font-medium py-2">Usa testo libero (esercizio non in libreria)</button>
+    </Card>
+  );
+}
+
+function EsercizioSchedaRiga({ es, onCambia, onElimina, onMuovi }) {
+  const [mostraLibreria, setMostraLibreria] = useState(false);
+  const [libreria, setLibreria] = useState([]);
+  const nomeVisibile = es.esercizi_libreria?.nome || es.nome_libero || "(scegli esercizio)";
+
+  const apriLibreria = async () => {
+    const { data } = await supabase.from("esercizi_libreria").select("*").order("nome");
+    setLibreria(data || []);
+    setMostraLibreria(true);
+  };
+
+  return (
+    <Card className="p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={apriLibreria} className="flex-1 text-left font-medium text-slate-700 text-sm">{nomeVisibile}</button>
+        <div className="flex gap-1 flex-shrink-0">
+          <button onClick={() => onMuovi(-1)} className="text-slate-300 hover:text-slate-600 px-1">▲</button>
+          <button onClick={() => onMuovi(1)} className="text-slate-300 hover:text-slate-600 px-1">▼</button>
+          <button onClick={onElimina} className="text-slate-300 hover:text-rose-500 px-1"><X size={16} /></button>
+        </div>
+      </div>
+      {mostraLibreria && (
+        <SelettoreEsercizio libreria={libreria} onAnnulla={() => setMostraLibreria(false)}
+          onScegli={(scelto) => {
+            if (scelto) onCambia({ esercizio_id: scelto.id, nome_libero: null });
+            else { const nome = prompt("Nome esercizio (testo libero):"); if (nome) onCambia({ esercizio_id: null, nome_libero: nome }); }
+            setMostraLibreria(false);
+          }} />
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <input defaultValue={es.serie || ""} onBlur={(e) => onCambia({ serie: e.target.value })} placeholder="Serie" className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+        <input defaultValue={es.ripetizioni || ""} onBlur={(e) => onCambia({ ripetizioni: e.target.value })} placeholder="Ripetizioni" className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+        <input defaultValue={es.carico || ""} onBlur={(e) => onCambia({ carico: e.target.value })} placeholder="Carico" className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+        <input defaultValue={es.recupero || ""} onBlur={(e) => onCambia({ recupero: e.target.value })} placeholder="Recupero" className="border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+      </div>
+      <input key={"tec-" + es.id + es.tecnica} defaultValue={es.tecnica || ""} onBlur={(e) => onCambia({ tecnica: e.target.value, tecnica_auto: false })} placeholder="Tecnica"
+        className={`w-full border rounded-lg px-2 py-1.5 text-xs ${es.tecnica_auto ? "border-sky-200 bg-sky-50" : "border-slate-200"}`} />
+      <input defaultValue={es.note || ""} onBlur={(e) => onCambia({ note: e.target.value })} placeholder="Note" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
+    </Card>
+  );
+}
+
+
+function apriStampaScheda(client, scheda, trend, feedback) {
+  const tuttiEsercizi = scheda.giorni.flatMap((g) => g.esercizi);
+  const esc = (s) => (s == null ? "" : String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+  const trendConProblemi = tuttiEsercizi
+    .map((es) => ({ nome: es.esercizi_libreria?.nome || es.nome_libero, msg: trend[es.id] }))
+    .filter((t) => t.msg && t.msg !== "Dati insufficienti");
+  const nessunDatoCarico = tuttiEsercizi.length > 0 && tuttiEsercizi.every((es) => !trend[es.id] || trend[es.id] === "Dati insufficienti");
+  const ultimoFeedback = feedback[0];
+  const suggerimentiUltimo = ultimoFeedback ? suggerimentiFeedback(ultimoFeedback.tags || [], client.obiettivo_attuale).join(" ") : "";
+
+  const rigaEsercizio = (es) => `
+    <tr>
+      <td>${esc(es.esercizi_libreria?.nome || es.nome_libero)}</td>
+      <td>${esc(es.serie)}${es.ripetizioni ? " x " + esc(es.ripetizioni) : ""}</td>
+      <td>${esc(es.carico) || "—"}</td>
+      <td>${esc(es.recupero)}</td>
+      <td>${esc(es.tecnica) || "—"}</td>
+    </tr>`;
+
+  const righeGiorni = scheda.giorni.map((g, idx) => {
+    const bloccoForza = g.esercizi.filter((es) => es.note === "Blocco forza (complesso fondamentale)");
+    const bloccoAccessorio = g.esercizi.filter((es) => es.note === "Blocco accessorio");
+    const altri = g.esercizi.filter((es) => es.note !== "Blocco forza (complesso fondamentale)" && es.note !== "Blocco accessorio");
+    const tabellaBlocco = (titolo, righe) => righe.length === 0 ? "" : `
+      <p class="blocco-label">${titolo}</p>
+      <table>
+        <thead><tr><th>Esercizio</th><th>Serie x Rip</th><th>Carico</th><th>Recupero</th><th>Tecnica</th></tr></thead>
+        <tbody>${righe.map(rigaEsercizio).join("")}</tbody>
+      </table>`;
+    return `
+    <div class="giorno" style="${idx > 0 ? "page-break-before: always;" : ""}">
+      <div class="giorno-header">${esc(g.nome)}</div>
+      <p class="riscaldamento"><strong>Riscaldamento (5-10 min):</strong> ${RISCALDAMENTO_STANDARD.join(" · ")}</p>
+      ${tabellaBlocco("Blocco forza — complessi fondamentali", bloccoForza)}
+      ${tabellaBlocco("Blocco accessori — ipertrofia mirata", bloccoAccessorio)}
+      ${tabellaBlocco("Esercizi", altri)}
+    </div>`;
+  }).join("");
+
+  const noteCoach = `
+    <div class="note-coach">
+      <h3>Note del Coach</h3>
+      ${nessunDatoCarico ? '<p>Nessun dato di carico disponibile: valutare una progressione per VOLUME (+1 serie), DENSITÀ (-10% recupero) o TEMPO SOTTO TENSIONE (fermo di 2") invece che sul carico.</p>' : ""}
+      ${trendConProblemi.map((t) => `<p>${esc(t.nome)}: ${esc(t.msg)}</p>`).join("")}
+      ${ultimoFeedback ? `<p>Ultimo feedback (${esc(ultimoFeedback.data?.split("-").reverse().join("/"))}): ${esc(suggerimentiUltimo || "nessuna azione suggerita")}</p>` : ""}
+      <p><strong>NEAT — target giornaliero:</strong> ${esc(targetPassiGiornalieri(client.livello_attivita))}</p>
+    </div>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Scheda ${esc(client.nome)} ${esc(client.cognome)}</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; color: #1e293b; max-width: 700px; margin: 0 auto; padding: 32px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sottotitolo { color: #64748b; font-size: 13px; margin-top: 4px; }
+  .intestazione { border-bottom: 2px solid #334155; padding-bottom: 16px; margin-bottom: 24px; }
+  .giorno { margin-bottom: 32px; }
+  .giorno-header { background: #334155; color: white; font-size: 16px; font-weight: 600; padding: 10px 14px; border-radius: 6px; margin-bottom: 10px; }
+  .riscaldamento { font-size: 11px; color: #64748b; margin: 0 0 14px; font-style: italic; }
+  .blocco-label { font-size: 12px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.03em; margin: 14px 0 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
+  th { text-align: left; border-bottom: 2px solid #cbd5e1; padding: 4px 6px 4px 0; color: #475569; }
+  td { border-bottom: 1px solid #e2e8f0; padding: 6px 6px 6px 0; }
+  .note-coach { margin-top: 24px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; background: #f8fafc; page-break-before: always; }
+  .note-coach h3 { margin-top: 0; font-size: 14px; }
+  .note-coach p { font-size: 13px; margin: 4px 0; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  <div class="intestazione">
+    <h1>${esc(client.nome)} ${esc(client.cognome)}</h1>
+    <p class="sottotitolo">Fase ${esc(client.fase_allenamento || "—")} · Livello ${esc(client.livello_allenamento || "—")} · Obiettivo: ${esc(client.obiettivo_attuale || "—")}</p>
+  </div>
+  ${righeGiorni}
+  ${noteCoach}
+</body>
+</html>`;
+
+  const finestra = window.open("", "_blank");
+  if (!finestra) { alert("Il browser ha bloccato l'apertura della finestra. Consenti i popup per questo sito e riprova."); return; }
+  finestra.document.open();
+  finestra.document.write(html);
+  finestra.document.close();
+  finestra.focus();
+  setTimeout(() => finestra.print(), 300);
+}
+
+function GiornoScheda({ giorno, client, onEliminaGiorno, onRinominaGiorno, onMuoviGiorno, onEsercizioCambiato }) {
+  const [esercizi, setEsercizi] = useState(giorno.esercizi);
+  useEffect(() => { setEsercizi(giorno.esercizi); }, [giorno.esercizi]);
+
+  const cambiaEsercizio = async (esId, campi) => {
+    setEsercizi((prev) => prev.map((e) => (e.id === esId ? { ...e, ...campi } : e)));
+    const { esercizi_libreria, ...daSalvare } = campi;
+    await supabase.from("scheda_esercizi").update(daSalvare).eq("id", esId);
+    onEsercizioCambiato();
+  };
+  const eliminaEsercizio = async (esId) => {
+    setEsercizi((prev) => prev.filter((e) => e.id !== esId));
+    await supabase.from("scheda_esercizi").delete().eq("id", esId);
+    onEsercizioCambiato();
+  };
+  const muoviEsercizio = async (esId, direzione) => {
+    const idx = esercizi.findIndex((e) => e.id === esId);
+    const altroIdx = idx + direzione;
+    if (altroIdx < 0 || altroIdx >= esercizi.length) return;
+    const nuovo = [...esercizi];
+    [nuovo[idx], nuovo[altroIdx]] = [nuovo[altroIdx], nuovo[idx]];
+    setEsercizi(nuovo);
+    await Promise.all(nuovo.map((e, i) => supabase.from("scheda_esercizi").update({ ordine: i }).eq("id", e.id)));
+  };
+  const aggiungiEsercizio = async () => {
+    const { data } = await supabase.from("scheda_esercizi").insert({ giorno_id: giorno.id, ordine: esercizi.length, tecnica_auto: true }).select().single();
+    if (data) setEsercizi((prev) => [...prev, data]);
+  };
+  const suggerisciTecniche = async () => {
+    const tecniche = assegnaTecnicheGiorno(esercizi.map((e) => ({ pattern: e.esercizi_libreria?.pattern })), client.fase_allenamento, client.livello_allenamento);
+    for (let i = 0; i < esercizi.length; i++) {
+      if (esercizi[i].tecnica_auto !== false) await cambiaEsercizio(esercizi[i].id, { tecnica: tecniche[i], tecnica_auto: true });
+    }
+  };
+
+  return (
+    <Card className="p-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <input defaultValue={giorno.nome} onBlur={(e) => onRinominaGiorno(giorno.id, e.target.value)} className="flex-1 font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+        <button onClick={() => onMuoviGiorno(giorno.id, -1)} className="text-slate-300 hover:text-slate-600 px-1">▲</button>
+        <button onClick={() => onMuoviGiorno(giorno.id, 1)} className="text-slate-300 hover:text-slate-600 px-1">▼</button>
+        <button onClick={() => onEliminaGiorno(giorno.id)} className="text-slate-300 hover:text-rose-500 px-1"><X size={16} /></button>
+      </div>
+      <div className="space-y-2">
+        {esercizi.map((es) => (
+          <EsercizioSchedaRiga key={es.id} es={es} onCambia={(c) => cambiaEsercizio(es.id, c)} onElimina={() => eliminaEsercizio(es.id)} onMuovi={(d) => muoviEsercizio(es.id, d)} />
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <button onClick={aggiungiEsercizio} className="flex-1 border border-dashed border-slate-300 text-slate-500 text-xs font-medium rounded-lg py-2">+ Esercizio</button>
+        <button onClick={suggerisciTecniche} className="flex-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg py-2">Suggerisci tecniche</button>
+      </div>
+    </Card>
+  );
+}
+
+function LivelloFaseObiettivo({ client, salvaCliente }) {
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Livello e fase</p>
+      <div className="grid grid-cols-2 gap-3">
+        <select defaultValue={client.livello_allenamento || ""} onBlur={(e) => salvaCliente({ livello_allenamento: e.target.value || null })} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">Livello...</option><option value="base">Base</option><option value="intermedia">Intermedia</option><option value="avanzata">Avanzata</option>
+        </select>
+        <input type="number" defaultValue={client.fase_allenamento || ""} onBlur={(e) => salvaCliente({ fase_allenamento: e.target.value ? Number(e.target.value) : null })} placeholder="Fase (numero)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => {
+        const nuovo = e.target.value || null;
+        if (nuovo === (client.obiettivo_attuale || null)) return; // niente da fare se non è cambiato
+        // Ogni cambio di obiettivo segna l'inizio di una nuova fase: l'andamento generale nella
+        // scheda progressi guarda da questa data in poi, così un cut seguito da un reverse (o da
+        // una massa) non si mescolano nello stesso trend.
+        salvaCliente({ obiettivo_attuale: nuovo, obiettivo_dal: nuovo ? formatDataLocale(new Date()) : null });
+      }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+        <option value="">Obiettivo attuale...</option>
+        <option value="definizione">Definizione (cut)</option>
+        <option value="mantenimento">Mantenimento</option>
+        <option value="massa">Massa (bulk)</option>
+        <option value="reverse">Reverse (dopo definizione/gara)</option>
+      </select>
+      {client.obiettivo_dal && (
+        <p className="text-[11px] text-slate-400">In questa fase dal {client.obiettivo_dal.split("-").reverse().join("/")} — l'andamento generale nella scheda progressi si basa sui check da questa data in poi.</p>
+      )}
+    </Card>
+  );
+}
+
+function SchedaCoach({ client, checkins, salvaCliente }) {
+  const [libreria, setLibreria] = useState([]);
+  const [aliasRows, setAliasRows] = useState([]);
+  const [schede, setSchede] = useState([]);
+  const [schedaCorrente, setSchedaCorrente] = useState(null);
+  const [feedback, setFeedback] = useState([]);
+  const [trend, setTrend] = useState({});
+  const [caricando, setCaricando] = useState(true);
+  const [vistaStampa, setVistaStampa] = useState(false);
+  const [tagSelezionati, setTagSelezionati] = useState([]);
+  const [notaFeedback, setNotaFeedback] = useState("");
+  const [mostraGeneratore, setMostraGeneratore] = useState(false);
+  const [giorniGenerator, setGiorniGenerator] = useState([{ nome: "Giorno A", gruppi: [] }]);
+  const [numeroGiorniSettimana, setNumeroGiorniSettimana] = useState(3);
+  const [serieGruppi, setSerieGruppi] = useState({});
+  const [generando, setGenerando] = useState(false);
+  const [condizioniAltroTesto, setCondizioniAltroTesto] = useState(client.problematiche_salute_note || "");
+
+  const caricaGiorni = async (schedaId) => {
+    const { data: giorniData } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", schedaId).order("ordine");
+    const giorni = [];
+    for (const g of giorniData || []) {
+      const { data: es } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome, pattern, gruppo)").eq("giorno_id", g.id).order("ordine");
+      giorni.push({ ...g, esercizi: es || [] });
+    }
+    return giorni;
+  };
+
+  const calcolaTrend = async (lib, al, giorni) => {
+    const lookup = costruisciLookupEsercizi(lib, al);
+    const { data: trainingEx } = await supabase.from("training_exercises").select("id, nome").eq("client_id", client.id);
+    const { data: trainingEntries } = await supabase.from("training_entries").select("exercise_id, data, kg").eq("client_id", client.id).order("data");
+    const risultati = {};
+    for (const se of giorni.flatMap((g) => g.esercizi)) {
+      const nomeCanonico = (se.esercizi_libreria?.nome || normalizzaNomeEsercizio(se.nome_libero) || "").toLowerCase();
+      if (!nomeCanonico) continue;
+      const idsCorrispondenti = (trainingEx || []).filter((te) => {
+        const risolto = risolviEsercizio(te.nome, lookup);
+        return (risolto ? risolto.nome : normalizzaNomeEsercizio(te.nome)).toLowerCase() === nomeCanonico;
+      }).map((te) => te.id);
+      const kgValori = (trainingEntries || []).filter((e) => idsCorrispondenti.includes(e.exercise_id) && e.kg != null).map((e) => e.kg);
+      risultati[se.id] = kgValori.length ? analizzaTrendCarico(kgValori, client.livello_allenamento) : "Dati insufficienti";
+    }
+    setTrend(risultati);
+  };
+
+  const carica = async () => {
+    setCaricando(true);
+    const { data: lib } = await supabase.from("esercizi_libreria").select("*").order("nome");
+    const { data: al } = await supabase.from("esercizi_alias").select("*");
+    setLibreria(lib || []); setAliasRows(al || []);
+
+    const { data: sc } = await supabase.from("schede").select("*").eq("client_id", client.id).order("creata_il", { ascending: false });
+    setSchede(sc || []);
+    const attiva = (sc || []).find((s) => s.stato === "bozza") || (sc || [])[0] || null;
+    let giorni = [];
+    if (attiva) { giorni = await caricaGiorni(attiva.id); setSchedaCorrente({ ...attiva, giorni }); }
+    else setSchedaCorrente(null);
+
+    const { data: fb } = await supabase.from("feedback_soggettivo").select("*").eq("client_id", client.id).order("data", { ascending: false }).limit(10);
+    setFeedback(fb || []);
+
+    if (attiva) await calcolaTrend(lib || [], al || [], giorni);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+
+  const aggiornaGiornoLocale = (giornoId, campi) => {
+    setSchedaCorrente((prev) => ({ ...prev, giorni: prev.giorni.map((g) => (g.id === giornoId ? { ...g, ...campi } : g)) }));
+  };
+  const aggiungiGiorno = async () => {
+    const { data } = await supabase.from("scheda_giorni").insert({ scheda_id: schedaCorrente.id, nome: `Giorno ${schedaCorrente.giorni.length + 1}`, ordine: schedaCorrente.giorni.length }).select().single();
+    if (data) setSchedaCorrente((prev) => ({ ...prev, giorni: [...prev.giorni, { ...data, esercizi: [] }] }));
+  };
+  const rinominaGiorno = async (giornoId, nome) => { aggiornaGiornoLocale(giornoId, { nome }); await supabase.from("scheda_giorni").update({ nome }).eq("id", giornoId); };
+  const eliminaGiorno = async (giornoId) => {
+    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi?")) return;
+    setSchedaCorrente((prev) => ({ ...prev, giorni: prev.giorni.filter((g) => g.id !== giornoId) }));
+    await supabase.from("scheda_giorni").delete().eq("id", giornoId);
+  };
+  const muoviGiorno = async (giornoId, direzione) => {
+    const idx = schedaCorrente.giorni.findIndex((g) => g.id === giornoId);
+    const altroIdx = idx + direzione;
+    if (altroIdx < 0 || altroIdx >= schedaCorrente.giorni.length) return;
+    const nuovo = [...schedaCorrente.giorni];
+    [nuovo[idx], nuovo[altroIdx]] = [nuovo[altroIdx], nuovo[idx]];
+    setSchedaCorrente((prev) => ({ ...prev, giorni: nuovo }));
+    await Promise.all(nuovo.map((g, i) => supabase.from("scheda_giorni").update({ ordine: i }).eq("id", g.id)));
+  };
+
+  const creaNuovaBozza = async (daDuplicare) => {
+    const { data: nuova } = await supabase.from("schede").insert({ client_id: client.id, stato: "bozza" }).select().single();
+    if (!nuova) return;
+    if (daDuplicare) {
+      for (const g of daDuplicare.giorni) {
+        const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: nuova.id, nome: g.nome, ordine: g.ordine }).select().single();
+        if (!nuovoGiorno) continue;
+        for (const es of g.esercizi) {
+          await supabase.from("scheda_esercizi").insert({
+            giorno_id: nuovoGiorno.id, esercizio_id: es.esercizio_id, nome_libero: es.nome_libero, ordine: es.ordine,
+            serie: es.serie, ripetizioni: es.ripetizioni, carico: es.carico, recupero: es.recupero, tecnica: es.tecnica, tecnica_auto: es.tecnica_auto, note: es.note,
+          });
+        }
+      }
+    }
+    await carica();
+  };
+  const finalizzaScheda = async () => {
+    await supabase.from("schede").update({ stato: "finale", finalizzata_il: new Date().toISOString() }).eq("id", schedaCorrente.id);
+    await carica();
+  };
+
+  const salvaFeedback = async () => {
+    if (tagSelezionati.length === 0 && !notaFeedback.trim()) return;
+    await supabase.from("feedback_soggettivo").insert({ client_id: client.id, tags: tagSelezionati, nota_libera: notaFeedback || null });
+    setTagSelezionati([]); setNotaFeedback("");
+    carica();
+  };
+
+  const toggleCondizione = (value) => {
+    const attuali = client.problematiche_salute || [];
+    const nuove = attuali.includes(value) ? attuali.filter((v) => v !== value) : [...attuali, value];
+    salvaCliente({ problematiche_salute: nuove });
+  };
+  const salvaCondizioniAltro = () => salvaCliente({ problematiche_salute_note: condizioniAltroTesto || null });
+
+  const gruppiDisponibili = [...new Set(libreria.map((e) => e.gruppo).filter(Boolean))].sort();
+
+  const aggiungiGiornoGenerator = () => setGiorniGenerator((prev) => [...prev, { nome: `Giorno ${String.fromCharCode(65 + prev.length)}`, gruppi: [], nomeManuale: false }]);
+  const rimuoviGiornoGenerator = (idx) => setGiorniGenerator((prev) => prev.filter((_, i) => i !== idx));
+  const rinominaGiornoGenerator = (idx, nome) => setGiorniGenerator((prev) => prev.map((g, i) => (i === idx ? { ...g, nome, nomeManuale: true } : g)));
+  const toggleGruppoGiorno = (idx, gruppo) => setGiorniGenerator((prev) => prev.map((g, i) => {
+    if (i !== idx) return g;
+    const gruppi = g.gruppi.includes(gruppo) ? g.gruppi.filter((x) => x !== gruppo) : [...g.gruppi, gruppo];
+    const nome = g.nomeManuale ? g.nome : (gruppi.length ? gruppi.join(" + ") : `Giorno ${String.fromCharCode(65 + idx)}`);
+    return { ...g, gruppi, nome };
+  }));
+  const gruppiUsatiNelGeneratore = [...new Set(giorniGenerator.flatMap((g) => g.gruppi))];
+
+  const opzioniSerie = Array.from({ length: 17 }, (_, i) => 4 + i * 2); // 4, 6, 8 ... 36
+  useEffect(() => {
+    setSerieGruppi((prev) => {
+      const next = { ...prev };
+      let cambiato = false;
+      gruppiUsatiNelGeneratore.forEach((gr) => {
+        if (!(gr in next)) {
+          const base = serieIdealiPerGruppo(gr, client.livello_allenamento, (client.focus_crescita || []).includes(gr), client.sesso);
+          next[gr] = aggiustaVolumeIndiretto(gr, base, giorniGenerator);
+          cambiato = true;
+        }
+      });
+      return cambiato ? next : prev;
+    });
+  }, [JSON.stringify(gruppiUsatiNelGeneratore), client.livello_allenamento, JSON.stringify(client.focus_crescita), client.sesso]);
+
+  const generaSchedaAutomatica = async () => {
+    setGenerando(true);
+    const condizioniAttive = CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value));
+    const escluse = { pattern: condizioniAttive.flatMap((c) => c.pattern_evitati), nomi: condizioniAttive.flatMap((c) => c.esclusioni_nome || []) };
+
+    // Il volume settimanale per gruppo va diviso tra tutte le sessioni in cui quel gruppo compare
+    const occorrenzeGruppo = {};
+    giorniGenerator.forEach((g) => g.gruppi.forEach((gr) => { occorrenzeGruppo[gr] = (occorrenzeGruppo[gr] || 0) + 1; }));
+
+    let schedaIdTarget;
+    if (schedaCorrente && schedaCorrente.stato === "bozza") {
+      schedaIdTarget = schedaCorrente.id;
+      if (schedaCorrente.giorni.length > 0) await supabase.from("scheda_giorni").delete().eq("scheda_id", schedaIdTarget);
+    } else {
+      const { data: nuova } = await supabase.from("schede").insert({ client_id: client.id, stato: "bozza" }).select().single();
+      if (!nuova) { setGenerando(false); return; }
+      schedaIdTarget = nuova.id;
+    }
+
+    const livello = client.livello_allenamento;
+    const fase = client.fase_allenamento;
+    const isAvanzataFaseAlta = livello === "avanzata" && fase >= 3;
+    const tecBlocco2 = isAvanzataFaseAlta ? TECNICHE_BLOCCO2[(fase - 3) % TECNICHE_BLOCCO2.length] : "";
+    const tecBlocco3 = isAvanzataFaseAlta ? TECNICHE_BLOCCO3[(fase - 3) % TECNICHE_BLOCCO3.length] : "";
+    const GRUPPI_SENZA_COMPOUND = ["Bicipiti", "Tricipiti"];
+    const giaScelti = []; // condiviso su tutta la settimana: evita di ripetere lo stesso esercizio nei giorni diversi quando possibile
+
+    for (let gi = 0; gi < giorniGenerator.length; gi++) {
+      const giornoDef = giorniGenerator[gi];
+      const { data: nuovoGiorno } = await supabase.from("scheda_giorni").insert({ scheda_id: schedaIdTarget, nome: giornoDef.nome, ordine: gi }).select().single();
+      if (!nuovoGiorno) continue;
+
+      let righeBlocco2 = [];
+      let righeBlocco3 = [];
+      for (const gruppo of giornoDef.gruppi) {
+        const totale = Number(serieGruppi[gruppo] || 0);
+        const perSessione = Math.min(SERIE_MAX_PER_SESSIONE, Math.max(1, Math.round(totale / (occorrenzeGruppo[gruppo] || 1))));
+        // Bicipiti/Tricipiti non hanno esercizi multiarticolari: tutto il volume va al blocco accessori
+        const senzaCompound = GRUPPI_SENZA_COMPOUND.includes(gruppo);
+        const serieB2 = senzaCompound ? 0 : Math.round(perSessione * 0.4);
+        const serieB3 = perSessione - serieB2;
+
+        const sceltiB2 = senzaCompound ? [] : scegliEserciziBlocco({ gruppo, serieTotali: serieB2, libreria, livello, escluse, blocco: 2, giaScelti });
+        sceltiB2.forEach((r) => { if (r.esercizio) giaScelti.push(r.esercizio.id); });
+        righeBlocco2.push(...sceltiB2);
+
+        const sceltiB3 = scegliEserciziBlocco({ gruppo, serieTotali: serieB3, libreria, livello, escluse, blocco: 3, giaScelti });
+        sceltiB3.forEach((r) => { if (r.esercizio) giaScelti.push(r.esercizio.id); });
+        righeBlocco3.push(...sceltiB3);
+      }
+      righeBlocco2 = righeBlocco2.slice(0, 2); // il metodo prevede max 1-2 complessi fondamentali per sessione
+      righeBlocco3 = righeBlocco3.slice(0, 5); // max 3-5 accessori per sessione
+
+      let ordine = 0;
+      for (let i = 0; i < righeBlocco2.length; i++) {
+        const { esercizio, serie, gruppoMancante } = righeBlocco2[i];
+        if (!esercizio) {
+          await supabase.from("scheda_esercizi").insert({ giorno_id: nuovoGiorno.id, nome_libero: `⚠️ Nessun compound trovato per "${gruppoMancante}" — aggiungi a mano`, ordine: ordine++, serie: String(serie), tecnica_auto: false });
+          continue;
+        }
+        await supabase.from("scheda_esercizi").insert({
+          giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: ordine++,
+          serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, livello, 2), recupero: decidiRecupero(2),
+          tecnica: i === 0 ? tecBlocco2 : "", tecnica_auto: true, note: "Blocco forza (complesso fondamentale)",
+        });
+      }
+      for (let i = 0; i < righeBlocco3.length; i++) {
+        const { esercizio, serie, gruppoMancante } = righeBlocco3[i];
+        if (!esercizio) {
+          await supabase.from("scheda_esercizi").insert({ giorno_id: nuovoGiorno.id, nome_libero: `⚠️ Nessun accessorio trovato per "${gruppoMancante}" — aggiungi a mano`, ordine: ordine++, serie: String(serie), tecnica_auto: false });
+          continue;
+        }
+        const isUltimo = i === righeBlocco3.length - 1;
+        await supabase.from("scheda_esercizi").insert({
+          giorno_id: nuovoGiorno.id, esercizio_id: esercizio.id, ordine: ordine++,
+          serie: String(serie), ripetizioni: decidiRipetizioni(esercizio, livello, 3), recupero: decidiRecupero(3),
+          tecnica: isUltimo ? tecBlocco3 : "", tecnica_auto: true, note: "Blocco accessorio",
+        });
+      }
+    }
+    setGenerando(false);
+    setMostraGeneratore(false);
+    await carica();
+  };
+
+  if (caricando) return <Spinner />;
+
+  const checkOrdinati = [...checkins].sort((a, b) => b.data_check.localeCompare(a.data_check));
+  const segnaliCheck = analizzaSegnaliCheck(checkOrdinati[0], checkOrdinati[1]);
+  const isBozza = schedaCorrente?.stato === "bozza";
+
+
+  return (
+    <div className="space-y-5">
+      <Card className="p-4 space-y-1.5 bg-slate-50">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Ricorda ad ogni sessione (fisso, non modificabile qui)</p>
+        <p className="text-slate-600 text-xs"><strong>Riscaldamento 5-10':</strong> {RISCALDAMENTO_STANDARD.join(" · ")}</p>
+        <p className="text-slate-600 text-xs"><strong>NEAT giornaliero:</strong> {targetPassiGiornalieri(client.livello_attivita)}</p>
+      </Card>
+
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Problematiche articolari/salute da tenere conto</p>
+        <div className="flex flex-wrap gap-2">
+          {CONDIZIONI_SALUTE.map((c) => (
+            <button key={c.value} onClick={() => toggleCondizione(c.value)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${(client.problematiche_salute || []).includes(c.value) ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <textarea value={condizioniAltroTesto} onChange={(e) => setCondizioniAltroTesto(e.target.value)} onBlur={salvaCondizioniAltro}
+          placeholder="Altro (testo libero)..." rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        {(client.problematiche_salute || []).length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+            {CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).map((c) => (
+              <p key={c.value} className="text-amber-700 text-xs"><strong>{c.label}:</strong> {c.avviso}</p>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {(!schedaCorrente || isBozza) && !mostraGeneratore && (
+        <div className="flex gap-2">
+          {!schedaCorrente && <button onClick={() => creaNuovaBozza(null)} className="flex-1 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-3">+ Scheda vuota (manuale)</button>}
+          <button onClick={() => setMostraGeneratore(true)} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-3">✨ {isBozza ? "Rigenera con il generatore" : "Genera automaticamente"}</button>
+        </div>
+      )}
+
+      {mostraGeneratore && (
+        <Card className="p-4 space-y-4">
+          <p className="text-sm font-medium text-slate-700">Genera scheda automatica</p>
+          <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {client.obiettivo_attuale || "—"}</p>
+
+          <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
+            <div>
+              <label className="text-xs text-slate-500">Focus di crescita (facoltativo — non significa allenare <em>solo</em> questi gruppi, ma dargli maggiore enfasi/volume rispetto agli altri)</label>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {Object.keys(VOLUME_LANDMARKS).map((gr) => (
+                  <button key={gr} onClick={() => salvaCliente({ focus_crescita: (client.focus_crescita || []).includes(gr) ? (client.focus_crescita || []).filter((x) => x !== gr) : [...(client.focus_crescita || []), gr] })}
+                    className={`px-2.5 py-1 rounded-full text-xs ${(client.focus_crescita || []).includes(gr) ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+                    {gr}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-slate-500 flex-1">Giorni di allenamento a settimana</label>
+              <select value={numeroGiorniSettimana} onChange={(e) => setNumeroGiorniSettimana(Number(e.target.value))} className="w-16 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center">
+                {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <button onClick={() => setGiorniGenerator(generaSplitAutomatica(numeroGiorniSettimana, client.focus_crescita))}
+              className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
+              🧠 Elabora la split migliore per questa cliente
+            </button>
+            <p className="text-slate-400 text-[11px]">Genera una proposta di split scientificamente sensata; puoi comunque modificarla liberamente qui sotto prima di generare la scheda.</p>
+          </div>
+
+          <div className="space-y-3">
+            {giorniGenerator.map((g, idx) => (
+              <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input value={g.nome} onChange={(e) => rinominaGiornoGenerator(idx, e.target.value)} className="flex-1 border-0 bg-transparent font-medium text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
+                  {giorniGenerator.length > 1 && <button onClick={() => rimuoviGiornoGenerator(idx)} className="text-slate-300 hover:text-rose-500"><X size={16} /></button>}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {gruppiDisponibili.map((gr) => (
+                    <button key={gr} onClick={() => toggleGruppoGiorno(idx, gr)}
+                      className={`px-2.5 py-1 rounded-full text-xs ${g.gruppi.includes(gr) ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>
+                      {gr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={aggiungiGiornoGenerator} className="w-full border border-dashed border-slate-300 text-slate-500 text-xs font-medium rounded-lg py-2">+ Giorno</button>
+
+          {gruppiUsatiNelGeneratore.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Serie settimanali totali per gruppo</p>
+              <p className="text-slate-400 text-xs">Precompilate in automatico da livello ({client.livello_allenamento || "non impostato"}) e soglie di volume; il totale viene diviso tra le sessioni in cui compare quel gruppo (max {SERIE_MAX_PER_SESSIONE}/seduta).</p>
+              {gruppiUsatiNelGeneratore.map((gr) => {
+                const occorrenze = giorniGenerator.filter((g) => g.gruppi.includes(gr)).length;
+                const perSessione = Math.max(1, Math.round(Number(serieGruppi[gr] || 0) / occorrenze));
+                const lm = VOLUME_LANDMARKS[gr];
+                return (
+                  <div key={gr} className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <span className="text-sm text-slate-600 block">{gr}</span>
+                      {lm && <span className="text-slate-400 text-[11px] block">MEV {lm.mev[0]}-{lm.mev[1]} · MAV {lm.mav[0]}-{lm.mav[1]} · MRV {lm.mrv[0]}-{lm.mrv[1]}</span>}
+                      {occorrenze > 1 && <span className="text-slate-400 text-[11px]">≈ {perSessione} per sessione × {occorrenze} sessioni</span>}
+                    </div>
+                    <select value={serieGruppi[gr] || ""} onChange={(e) => setSerieGruppi((prev) => ({ ...prev, [gr]: e.target.value }))}
+                      className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center">
+                      {opzioniSerie.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={generaSchedaAutomatica} disabled={generando || gruppiUsatiNelGeneratore.length === 0} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2 disabled:opacity-50">
+              {generando ? "Genero..." : "Genera bozza"}
+            </button>
+            <button onClick={() => setMostraGeneratore(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+          </div>
+        </Card>
+      )}
+
+      {schedaCorrente && (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isBozza ? "Bozza in corso" : "Scheda attuale (finale)"}</p>
+            {!isBozza && (
+              <div className="flex gap-3">
+                <button onClick={() => setMostraGeneratore(true)} className="text-emerald-600 text-xs font-medium">✨ Genera fase successiva</button>
+                <button onClick={() => creaNuovaBozza(schedaCorrente)} className="text-sky-600 text-xs font-medium">Duplica e modifica →</button>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {schedaCorrente.giorni.map((g) => (
+              isBozza ? (
+                <GiornoScheda key={g.id} giorno={g} client={client} onEliminaGiorno={eliminaGiorno} onRinominaGiorno={rinominaGiorno} onMuoviGiorno={muoviGiorno} onEsercizioCambiato={() => calcolaTrend(libreria, aliasRows, schedaCorrente.giorni)} />
+              ) : (
+                <Card key={g.id} className="p-3">
+                  <p className="font-semibold text-slate-800 mb-2">{g.nome}</p>
+                  <div className="space-y-1 text-sm">
+                    {g.esercizi.map((es) => (
+                      <p key={es.id} className="text-slate-600">{es.esercizi_libreria?.nome || es.nome_libero} — {es.serie}x{es.ripetizioni} {es.carico ? `· ${es.carico}` : ""} {es.tecnica ? `· ${es.tecnica}` : ""}</p>
+                    ))}
+                  </div>
+                </Card>
+              )
+            ))}
+          </div>
+
+          {isBozza && (
+            <div className="flex gap-2">
+              <button onClick={aggiungiGiorno} className="flex-1 border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-xl py-2">+ Giorno</button>
+              <button onClick={finalizzaScheda} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2">Finalizza scheda</button>
+            </div>
+          )}
+          <button onClick={() => apriStampaScheda(client, schedaCorrente, trend, feedback)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">Stampa / Salva PDF</button>
+        </>
+      )}
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Segnali dai check</p>
+        <Card className="p-4 space-y-2">
+          <p className="text-sm text-slate-700">{segnaliCheck.segnale}</p>
+          {segnaliCheck.avvisoDistanza && <p className="text-amber-600 text-xs">{segnaliCheck.avvisoDistanza}</p>}
+          {calibrazioneCheck(checkOrdinati[0], checkOrdinati[1]).map((c, i) => (
+            <p key={i} className="text-slate-600 text-xs border-t border-slate-100 pt-2 first:border-0 first:pt-0">{c}</p>
+          ))}
+        </Card>
+      </div>
+
+      <div>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Feedback soggettivo</p>
+        <Card className="p-4 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {TAG_FEEDBACK.map((t) => (
+              <button key={t.value} onClick={() => setTagSelezionati((prev) => prev.includes(t.value) ? prev.filter((x) => x !== t.value) : [...prev, t.value])}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium ${tagSelezionati.includes(t.value) ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <textarea value={notaFeedback} onChange={(e) => setNotaFeedback(e.target.value)} placeholder="Nota libera (facoltativa)" rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <button onClick={salvaFeedback} className="w-full bg-slate-800 text-white text-sm font-medium rounded-lg py-2">Salva feedback</button>
+          {feedback.length > 0 && (
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              {feedback.map((f) => (
+                <div key={f.id} className="text-xs text-slate-600">
+                  <p className="font-medium">{f.data?.split("-").reverse().join("/")} — {(f.tags || []).map((t) => TAG_FEEDBACK.find((x) => x.value === t)?.label).join(", ")}</p>
+                  {f.nota_libera && <p className="text-slate-500">{f.nota_libera}</p>}
+                  {suggerimentiFeedback(f.tags || [], client.obiettivo_attuale).map((s, i) => <p key={i} className="text-sky-700">→ {s}</p>)}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {schede.filter((s) => s.stato === "finale").length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico schede finalizzate</p>
+          <div className="space-y-1">
+            {schede.filter((s) => s.stato === "finale").map((s) => (
+              <Card key={s.id} className="p-3 text-sm text-slate-600">Finalizzata il {new Date(s.finalizzata_il).toLocaleDateString("it-IT")}</Card>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+async function esportaDatiCliente(client, setInCorso) {
+  setInCorso(true);
+  const cid = client.id;
+  const [
+    { data: checkins }, { data: notes }, { data: nutrizione }, { data: giorniLog }, { data: eserciziLog },
+    { data: entriesLog }, { data: lezioni }, { data: pagamenti }, { data: schede }, { data: feedback },
+  ] = await Promise.all([
+    supabase.from("checkins").select("*").eq("client_id", cid).order("data_check"),
+    supabase.from("notes").select("*").eq("client_id", cid).order("data"),
+    supabase.from("nutrition_plans").select("*").eq("client_id", cid).order("data_aggiornamento"),
+    supabase.from("training_days").select("*").eq("client_id", cid).order("ordine"),
+    supabase.from("training_exercises").select("*").eq("client_id", cid).order("ordine"),
+    supabase.from("training_entries").select("*").eq("client_id", cid).order("data"),
+    supabase.from("lezioni_svolte").select("*").eq("client_id", cid).order("numero"),
+    supabase.from("payments").select("*").eq("client_id", cid).order("data_pagamento"),
+    supabase.from("schede").select("*").eq("client_id", cid).order("creata_il", { ascending: false }),
+    supabase.from("feedback_soggettivo").select("*").eq("client_id", cid).order("data"),
+  ]);
+
+  const schedeComplete = [];
+  for (const s of schede || []) {
+    const { data: giorni } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", s.id).order("ordine");
+    const giorniConEs = [];
+    for (const g of giorni || []) {
+      const { data: es } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome)").eq("giorno_id", g.id).order("ordine");
+      giorniConEs.push({ ...g, esercizi: es || [] });
+    }
+    schedeComplete.push({ ...s, giorni: giorniConEs });
+  }
+
+  const r = [];
+  r.push(`# Dati completi — ${client.nome} ${client.cognome}`);
+  r.push(`Esportato il ${new Date().toLocaleDateString("it-IT")}`);
+  r.push("");
+  r.push("## Anagrafica");
+  r.push(`- Codice: ${client.codice || "-"}`);
+  r.push(`- Email: ${client.email || "-"} · Telefono: ${client.telefono || "-"}`);
+  r.push(`- Sesso: ${client.sesso || "-"} · Età: ${calcolaEta(client.data_nascita) ?? client.eta ?? "-"} · Data nascita: ${client.data_nascita || "-"} · Altezza: ${client.altezza_cm || "-"} cm`);
+  r.push(`- Tipo servizio: ${client.tipo_servizio || "-"} · Piano: ${client.piano || "-"}`);
+  r.push(`- Livello attività: ${client.livello_attivita || "-"}`);
+  r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${client.obiettivo_attuale || "-"}`);
+  r.push(`- Focus di crescita: ${(client.focus_crescita || []).join(", ") || "-"}`);
+  r.push(`- Problematiche di salute: ${(client.problematiche_salute || []).join(", ") || "-"}${client.problematiche_salute_note ? " — " + client.problematiche_salute_note : ""}`);
+  r.push(`- Note particolari: ${client.note_particolari || "-"}`);
+  r.push("");
+
+  r.push("## Check nel tempo");
+  (checkins || []).forEach((c) => {
+    r.push(`### ${c.data_check}`);
+    r.push(`Peso: ${c.peso_kg ?? "-"} kg · Petto: ${c.petto_cm ?? "-"} · Vita: ${c.ombelico_cm ?? "-"} · Glutei: ${c.glutei_cm ?? "-"} · Coscia: ${c.coscia_dx_cm ?? "-"} · Braccio: ${c.braccio_dx_cm ?? "-"}`);
+    if (c.note_cliente) r.push(`Nota cliente: ${c.note_cliente}`);
+  });
+  r.push("");
+
+  r.push("## Note");
+  (notes || []).forEach((n) => r.push(`- [${n.data}] (${n.tipo}) ${n.testo}`));
+  r.push("");
+
+  r.push("## Nutrizione");
+  (nutrizione || []).forEach((n) => r.push(`- [${n.data_aggiornamento}] ${n.kcal ?? "-"} kcal · P ${n.proteine_g ?? "-"}g · C ${n.carboidrati_g ?? "-"}g · G ${n.grassi_g ?? "-"}g${n.note ? " — " + n.note : ""}`));
+  r.push("");
+
+  r.push("## Diario allenamento (log carichi)");
+  (giorniLog || []).forEach((g) => {
+    r.push(`### ${g.nome}`);
+    (eserciziLog || []).filter((e) => e.training_day_id === g.id).forEach((e) => {
+      r.push(`- ${e.nome}: ${e.serie ?? "-"}x${e.ripetizioni ?? "-"}`);
+      (entriesLog || []).filter((en) => en.exercise_id === e.id).forEach((en) => r.push(`  - ${en.data}: ${en.kg ?? "-"}kg`));
+    });
+  });
+  r.push("");
+
+  if ((lezioni || []).length) {
+    r.push("## Lezioni (pacchetto)");
+    lezioni.forEach((l) => r.push(`- #${l.numero}: ${l.fatta ? "fatta" : "da fare"}${l.data ? ` il ${l.data} ${l.ora || ""}` : ""}`));
+    r.push("");
+  }
+
+  r.push("## Schede di allenamento (attuale e storico)");
+  schedeComplete.forEach((s) => {
+    r.push(`### Scheda ${s.stato} (creata il ${(s.creata_il || "").slice(0, 10)})`);
+    s.giorni.forEach((g) => {
+      r.push(`**${g.nome}**`);
+      g.esercizi.forEach((es) => r.push(`- ${es.esercizi_libreria?.nome || es.nome_libero}: ${es.serie ?? "-"}x${es.ripetizioni ?? "-"}${es.tecnica ? " · " + es.tecnica : ""}`));
+    });
+  });
+  r.push("");
+
+  if ((feedback || []).length) {
+    r.push("## Feedback soggettivo");
+    feedback.forEach((f) => r.push(`- [${f.data}] ${(f.tags || []).join(", ")}${f.nota_libera ? " — " + f.nota_libera : ""}`));
+    r.push("");
+  }
+
+  if ((pagamenti || []).length) {
+    r.push("## Pagamenti");
+    pagamenti.forEach((p) => r.push(`- ${p.data_pagamento}: ${p.tipo_piano}${p.importo != null ? ` — ${p.importo}€` : ""}${p.metodo_pagamento ? ` (${p.metodo_pagamento})` : ""}${p.stato ? ` [${p.stato}]` : ""}`));
+  }
+
+  scaricaFile(`dati-${client.cognome || ""}-${client.nome || ""}-${new Date().toISOString().slice(0, 10)}.md`, r.join("\n"), "text/markdown");
+  setInCorso(false);
+}
+
 function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
   const [notes, setNotes] = useState([]);
   const [nutrizione, setNutrizione] = useState(null);
+  const [nutrizioneStorico, setNutrizioneStorico] = useState([]);
   const [pagamenti, setPagamenti] = useState([]);
   const [tab, setTab] = useState("riepilogo");
+  const [schedaRiass, setSchedaRiass] = useState(false);
+  const [esportazioneInCorso, setEsportazioneInCorso] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
   const [checkInModifica, setCheckInModifica] = useState(null);
   const [mostraNotaForm, setMostraNotaForm] = useState(false);
+  const [nutrizioneModifica, setNutrizioneModifica] = useState(null);
 
   const carica = async () => {
     const { data: c } = await supabase.from("clients").select("*").eq("id", clientId).single();
@@ -1895,7 +5758,9 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     const { data: nt } = await supabase.from("notes").select("*").eq("client_id", clientId).order("data", { ascending: false });
     setNotes(nt || []);
     const { data: nu } = await supabase.from("nutrition_plans").select("*").eq("client_id", clientId).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
-    setNutrizione(nu);
+    const { data: nuStorico } = await supabase.from("nutrition_plans").select("*").eq("client_id", clientId).order("data_aggiornamento", { ascending: true });
+    setNutrizioneStorico(nuStorico || []);
+    setNutrizione(pianoAttivo(nuStorico) || nu);
     const { data: pg } = await supabase.from("payments").select("*").eq("client_id", clientId).order("data_pagamento", { ascending: false });
     setPagamenti(pg || []);
   };
@@ -1915,11 +5780,14 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const tabs = [
     { key: "riepilogo", label: "Riepilogo" },
     { key: "dati", label: "Dati" },
-    ...(isOnline ? [{ key: "check", label: "Check" }] : []),
+    ...(isOnline ? [{ key: "check", label: "Check" }] : []), // tab "Scheda" congelato temporaneamente (workflow spostato su CSV esterno)
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
     { key: "progressi", label: "Progressi" },
     { key: "allenamento", label: "Allenamento" },
     { key: "nutrizione", label: "Nutrizione" },
+    { key: "kcal", label: "Alimentazione" },
+    { key: "chat", label: "Chat" },
+    { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
   ];
 
@@ -1928,8 +5796,20 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       <button onClick={onBack} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti i clienti</button>
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
-        <StatoBadge stato={client.stato_check} />
+        <div className="flex items-center gap-2">
+          <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
+            {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
+          </button>
+          <StatoBadge stato={client.stato_check} />
+        </div>
       </div>
+      {client.archiviato && (
+        <div className="flex items-center justify-between gap-3 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-500">
+          <span>Cliente archiviato — non compare nelle liste attive, nei promemoria né nei rinnovi.</span>
+          <button onClick={() => salvaCliente({ archiviato: false })} disabled={salvando} className="flex-shrink-0 text-sky-600 font-medium">Riattiva</button>
+        </div>
+      )}
+      <AnteprimaCliente client={client} />
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${tab === t.key ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{t.label}</button>
@@ -1941,6 +5821,16 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
           <div>
+            <label className="text-slate-400 text-xs">Nome</label>
+            <input defaultValue={client.nome || ""} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== client.nome) salvaCliente({ nome: v }); }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs">Cognome</label>
+            <input defaultValue={client.cognome || ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (client.cognome || "")) salvaCliente({ cognome: v || null }); }}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
             <label className="text-slate-400 text-xs">Piano</label>
             <select defaultValue={client.piano || ""} onBlur={(e) => salvaCliente({ piano: e.target.value || null })}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
@@ -1948,6 +5838,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <option value="Mensile">Mensile</option>
               <option value="Trimestrale">Trimestrale</option>
               <option value="Semestrale">Semestrale</option>
+              <option value="Variabile">Variabile</option>
               <option value="FRIEND">FRIEND</option>
               <option value="Gratuito">Gratuito</option>
             </select>
@@ -1982,9 +5873,11 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                 <option value="1">1 lezione</option>
                 <option value="4">4 lezioni (1 al mese)</option>
                 <option value="8">8 lezioni (2 al mese)</option>
+                <option value="10">10 lezioni</option>
                 <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
                 <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
               </select>
+              <p className="text-slate-400 text-[11px] mt-1">Vale solo per impostare il primo pacchetto. Per aggiungere lezioni a un pacchetto già avviato o iniziarne uno nuovo dopo il completamento, usa il tab "Lezioni".</p>
             </div>
           )}
           {(client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido") && (
@@ -2006,6 +5899,29 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               </button>
             </div>
           )}
+          {client.tipo_servizio !== "presenza" && (
+            <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+              <span className="text-sm text-slate-700">Video degli esercizi per la cliente</span>
+              <button onClick={() => salvaCliente({ video_attivi: client.video_attivi === false })}
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.video_attivi !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                <span className="w-5 h-5 bg-white rounded-full block" />
+              </button>
+            </div>
+          )}
+          <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+            <span className="text-sm text-slate-700">Sezione nutrizione visibile alla cliente</span>
+            <button onClick={() => salvaCliente({ nutrizione_attiva: client.nutrizione_attiva === false })}
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              <span className="w-5 h-5 bg-white rounded-full block" />
+            </button>
+          </div>
+          <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+            <span className="text-sm text-slate-700">Diario Kcal visibile alla cliente</span>
+            <button onClick={() => salvaCliente({ kcal_attivo: client.kcal_attivo === false })}
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.kcal_attivo !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              <span className="w-5 h-5 bg-white rounded-full block" />
+            </button>
+          </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data inizio</label>
             <InputData defaultValue={client.data_inizio || ""} onBlur={(e) => salvaCliente({ data_inizio: e.target.value || null })}
@@ -2013,8 +5929,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           </div>
           <div className="col-span-2">
             <label className="text-slate-400 text-xs">Data scadenza</label>
-            <InputData defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
+            <InputData key={client.data_scadenza || "nessuna"} defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
               className="mt-1" />
+            {client.data_scadenza && (
+              <button onClick={() => { if (confirm("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
+                className="mt-2 text-rose-600 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
+            )}
           </div>
           <div>
             <label className="text-slate-400 text-xs">Altezza (cm)</label>
@@ -2080,6 +6000,27 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <label className="text-slate-400 text-xs">Oppure carica la scheda come PDF</label>
             <SchedaPdfUpload client={client} onCaricato={carica} />
           </div>
+          {(client.scheda_pdf_path || client.link_scheda) && (
+            <div className="col-span-2">
+              <button
+                onClick={async () => {
+                  if (client.scheda_pdf_path) {
+                    const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
+                    if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+                    else alert("Non riesco ad aprire il PDF della scheda.");
+                  } else {
+                    window.open(client.link_scheda, "_blank");
+                  }
+                }}
+                className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+              >
+                <Dumbbell size={16} /> Apri scheda della cliente
+              </button>
+            </div>
+          )}
+          <div className="col-span-2">
+            <FatturazioneCliente clientId={clientId} />
+          </div>
           <div className="col-span-2">
             <RegistraPagamento client={client} pagamenti={pagamenti} onRegistrato={carica} />
           </div>
@@ -2091,12 +6032,21 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <InvitaClienteForm client={client} onInvitato={carica} />
           </div>
           <div className="col-span-2 border-t border-slate-100 pt-4">
+            <button onClick={() => salvaCliente({ archiviato: !client.archiviato })} disabled={salvando} className="text-slate-500 text-sm font-medium">
+              {client.archiviato ? "↩ Riattiva cliente" : "🗄 Archivia cliente (percorso non attivo)"}
+            </button>
+            <p className="text-slate-400 text-xs mt-1">{client.archiviato ? "Torna a comparire in tutte le liste e nei promemoria." : "Nasconde il cliente dalle liste attive, dal calendario e dai promemoria, senza cancellare nulla. Lo ritrovi qui sotto in \"Mostra archiviati\", riattivabile in ogni momento."}</p>
+          </div>
+          <div className="col-span-2 border-t border-slate-100 pt-4">
             <EliminaClienteBottone client={client} onEliminato={() => { onBack(); onChanged?.(); }} />
           </div>
         </Card>
       )}
 
+      {tab === "chat" && <ChatMessaggi clientId={clientId} ruolo="coach" onLetti={() => onChanged?.()} />}
       {tab === "lezioni" && <LezioniPacchetto client={client} onCompletato={carica} />}
+
+      {tab === "scheda" && <SchedaCoach client={client} checkins={checkins} salvaCliente={salvaCliente} />}
 
       {tab === "check" && (
         <div className="space-y-3">
@@ -2115,11 +6065,24 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               <ul className="space-y-2">
                 {checkins.map((r) => (
                   <li key={r.id} className="border-b border-slate-100 pb-2">
-                    <button onClick={() => setCheckInModifica(r)} className="flex justify-between items-center text-sm w-full text-left">
-                      <span className="text-slate-600">{r.data_check}</span>
-                      <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
-                      <StatoBadge stato={r.stato} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setCheckInModifica(r)} className="flex-1 min-w-0 flex justify-between items-center text-sm text-left">
+                        <span className="text-slate-600">{r.data_check}</span>
+                        <span className="text-slate-700">{r.peso_kg ? `${r.peso_kg} kg` : "—"}</span>
+                        <StatoBadge stato={r.stato} />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Eliminare il check del ${r.data_check}? L'operazione non è reversibile.`)) return;
+                          await supabase.from("checkins").delete().eq("id", r.id);
+                          carica();
+                        }}
+                        className="flex-shrink-0 text-slate-300 hover:text-rose-500 p-1"
+                        title="Elimina check"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
                     <FotoCheck checkin={r} />
                   </li>
                 ))}
@@ -2130,13 +6093,46 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} titolo="Progressi e storico check" />}
+      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta tutto lo storico di questa cliente (Excel con foto)" />}
+      {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
 
-      {tab === "allenamento" && <DiarioAllenamento clientId={clientId} />}
+      {tab === "allenamento" && (
+        <div className="space-y-5">
+          <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
+          <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
+          {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
+          <DiarioAllenamento clientId={clientId} isAdmin />
+        </div>
+      )}
 
       {tab === "nutrizione" && (
-        <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica} />
+        <div className="space-y-3">
+          <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica}
+            modifica={nutrizioneModifica} onAnnullaModifica={() => setNutrizioneModifica(null)} />
+          <ImportaNutrizioneCSV clientId={clientId} onFatto={carica} />
+          <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica}
+            onElimina={async (r) => {
+              if (!confirm(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
+              const { error } = await supabase.from("nutrition_plans").delete().eq("id", r.id);
+              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              if (nutrizioneModifica?.id === r.id) setNutrizioneModifica(null);
+              carica();
+            }} />
+          {nutrizioneStorico.length > 0 && (
+            <button onClick={async () => {
+              if (!confirm(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
+              const { error } = await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
+              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              setNutrizioneModifica(null);
+              carica();
+            }} className="w-full border border-red-100 bg-red-50 text-red-600 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
+          )}
+        </div>
       )}
+
+      {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
+
+      {tab === "notifiche" && <NotificheDellaCliente client={client} />}
 
       {tab === "note" && (
         <div className="space-y-3">
@@ -2208,6 +6204,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
             <option value="1">1 lezione</option>
             <option value="4">4 lezioni (1 al mese)</option>
             <option value="8">8 lezioni (2 al mese)</option>
+            <option value="10">10 lezioni</option>
             <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
             <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
           </select>
@@ -2287,18 +6284,47 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const COLORE_TIPO = { check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500" };
+const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-orange-500" };
+const ORDINE_TIPO_DOT = { compleanno: 7, check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
+const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
+
+// Avvisa la cliente (notifica in app + push) quando una lezione viene inserita o spostata
+async function avvisaLezioneCliente(ev, tipoAvviso) {
+  try {
+    if (!ev || ev.tipo !== "lezione" || !ev.client_id || !ev.data) return;
+    const oggi = new Date(); oggi.setHours(12, 0, 0, 0);
+    const d = new Date(ev.data + "T12:00:00");
+    const diff = Math.round((d - oggi) / 86400000);
+    if (diff < 0) return;
+    const giorni = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+    const quando = diff === 0 ? "oggi" : diff === 1 ? "domani" : `${giorni[d.getDay()]} ${ev.data.split("-").reverse().slice(0, 2).join("/")}`;
+    const ora = ev.ora ? ` alle ${ev.ora.slice(0, 5)}` : "";
+    const dove = ev.luogo ? ` (${ev.luogo})` : "";
+    const messaggio = tipoAvviso === "mod"
+      ? `Ho spostato la tua lezione: ora è ${quando}${ora}${dove} 🫶🏻`
+      : `Ti ho segnato una lezione ${quando}${ora}${dove} 🫶🏻 La trovi nella sezione Appuntamenti ✨`;
+    const { data: n } = await supabase.from("notifiche").insert({
+      client_id: ev.client_id, tipo: "nota", messaggio, proposta_data: ev.data, proposta_luogo: `lez_${tipoAvviso}_${ev.id}`, stato: "inviata",
+    }).select("id").single();
+    if (n?.id) inviaPush({ evento: "nota", notifica_id: n.id });
+  } catch (e) { /* non blocca mai il salvataggio */ }
+}
 
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
+  const [f, setF] = useState({
+    client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10),
+    ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "", titolo: "",
+  });
   const [salvando, setSalvando] = useState(false);
 
   const salva = async () => {
-    if (!f.client_id) return;
+    if (f.tipo === "personale" ? !f.titolo.trim() : !f.client_id) return;
     setSalvando(true);
-    const payload = { ...f, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
+    const payload = f.tipo === "personale"
+      ? { tipo: "personale", data: f.data, ora: f.ora || null, titolo: f.titolo.trim(), nota: f.nota || null, stato: "confermato" }
+      : { client_id: f.client_id, tipo: f.tipo, data: f.data, ora: f.ora || null, nota: f.nota || null, luogo: f.tipo === "lezione" ? f.luogo : null, stato: "confermato" };
     const { data: creato } = await supabase.from("calendar_events").insert(payload).select().single();
-    if (creato && f.tipo === "lezione") await collegaLezionePacchetto(f.client_id, creato);
+    if (creato && f.tipo === "lezione") { await collegaLezionePacchetto(f.client_id, creato); await avvisaLezioneCliente(creato, "nuova"); }
     setSalvando(false);
     onSalvato();
   };
@@ -2306,16 +6332,30 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">Nuovo evento</p>
-      <div>
-        <label className="text-xs text-slate-500">Cliente</label>
-        <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
-        </select>
-      </div>
       <div className="flex gap-2">
         <button onClick={() => setF({ ...f, tipo: "lezione" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "lezione" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Lezione 1:1</button>
         <button onClick={() => setF({ ...f, tipo: "call" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "call" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600"}`}>Call</button>
+        <button onClick={() => setF({ ...f, tipo: "personale" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "personale" ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"}`}>Personale/extra</button>
       </div>
+      {f.tipo === "personale" ? (
+        <div>
+          <label className="text-xs text-slate-500">Titolo attività</label>
+          <input value={f.titolo} onChange={(e) => setF({ ...f, titolo: e.target.value })} placeholder="Es. Allenamento"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {SUGGERIMENTI_PERSONALE.map((s) => (
+              <button key={s} onClick={() => setF({ ...f, titolo: s })} className="text-[11px] bg-slate-100 text-slate-600 rounded-full px-2.5 py-1">{s}</button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div>
+          <label className="text-xs text-slate-500">Cliente</label>
+          <select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+          </select>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
         <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -2325,9 +6365,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       {f.tipo === "lezione" && (
         <div>
           <label className="text-xs text-slate-500">Sede</label>
-          <select value={f.luogo} onChange={(e) => setF({ ...f, luogo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-            {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
+          <SelezionaLuogo value={f.luogo} onChange={(v) => setF({ ...f, luogo: v })} />
         </div>
       )}
       <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -2340,18 +6378,30 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
 }
 
 function EditEventoForm({ evento, onSalvato, onAnnulla }) {
-  const [f, setF] = useState({ data: evento.data, ora: evento.ora ? evento.ora.slice(0, 5) : "", luogo: evento.luogo || "", stato: evento.stato });
+  const [f, setF] = useState({
+    data: evento.data, ora: evento.ora ? evento.ora.slice(0, 5) : "", luogo: evento.luogo || "",
+    stato: evento.stato, titolo: evento.titolo || "", nota: evento.nota || "",
+  });
   const [salvando, setSalvando] = useState(false);
+  const isPersonale = evento.tipo === "personale";
 
   const salva = async () => {
     setSalvando(true);
-    await supabase.from("calendar_events").update({ data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato }).eq("id", evento.id);
+    const payload = isPersonale
+      ? { data: f.data, ora: f.ora || null, titolo: f.titolo.trim() || evento.titolo, nota: f.nota || null }
+      : { data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato };
+    await supabase.from("calendar_events").update(payload).eq("id", evento.id);
+    if (!isPersonale) await sincronizzaLezionePacchetto(evento.id);
+    if (evento.tipo === "lezione" && f.stato === "confermato" && (f.data !== evento.data || (f.ora || "") !== (evento.ora ? evento.ora.slice(0, 5) : "") || (f.luogo || "") !== (evento.luogo || ""))) {
+      await avvisaLezioneCliente({ ...evento, data: f.data, ora: f.ora || null, luogo: f.luogo || null }, "mod");
+    }
     setSalvando(false);
     onSalvato();
   };
   const elimina = async () => {
     if (!confirm("Eliminare definitivamente questo evento?")) return;
     setSalvando(true);
+    await scollegaLezionePacchetto(evento.id);
     await supabase.from("calendar_events").delete().eq("id", evento.id);
     setSalvando(false);
     onSalvato();
@@ -2359,7 +6409,13 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : "Call"})</p>
+      <p className="text-sm font-medium text-slate-700">
+        Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : evento.tipo === "call" ? "Call" : "Personale/extra"})
+      </p>
+      {isPersonale && (
+        <input value={f.titolo} onChange={(e) => setF({ ...f, titolo: e.target.value })} placeholder="Titolo attività"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
         <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
@@ -2368,17 +6424,18 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
         </select>
       </div>
       {evento.tipo === "lezione" && (
-        <select value={f.luogo} onChange={(e) => setF({ ...f, luogo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">— sede —</option>
-          {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
+        <SelezionaLuogo value={f.luogo} vuoto="— sede —" onChange={(v) => setF({ ...f, luogo: v })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      )}
+      {isPersonale ? (
+        <textarea placeholder="Nota (facoltativa)" value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      ) : (
+        <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="richiesta">Da confermare</option>
+          <option value="confermato">Confermato</option>
+          <option value="annullata">Annullato</option>
+          <option value="persa">Persa</option>
         </select>
       )}
-      <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        <option value="richiesta">Da confermare</option>
-        <option value="confermato">Confermato</option>
-        <option value="annullata">Annullato</option>
-        <option value="persa">Persa</option>
-      </select>
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva modifiche"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
@@ -2394,21 +6451,53 @@ function CalendarioAgenda({ clients, onSelect }) {
   const [anno, setAnno] = useState(oggi.getFullYear());
   const [giornoFiltro, setGiornoFiltro] = useState(null);
   const [eventiCalendario, setEventiCalendario] = useState([]);
+  const [promemoriaRighe, setPromemoriaRighe] = useState([]);
   const [mostraForm, setMostraForm] = useState(false);
   const [eventoInModifica, setEventoInModifica] = useState(null);
 
   const caricaEventi = async () => {
     const { data } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").order("data");
     setEventiCalendario(data || []);
+    const { data: pr } = await supabase.from("promemoria_messaggi").select("client_id, settimana, inviato");
+    setPromemoriaRighe(pr || []);
   };
   useEffect(() => { caricaEventi(); }, []);
+
+  const primoDelMese = new Date(anno, mese, 1);
+  const giorniNelMese = new Date(anno, mese + 1, 0).getDate();
+  const offset = (primoDelMese.getDay() + 6) % 7;
+
+  const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
+
+  const sabatoDi = (ds) => {
+    // La settimana del promemoria messaggi inizia (e si azzera) il sabato.
+    const d = new Date(ds + "T00:00:00");
+    const diff = (d.getDay() + 1) % 7; // giorni trascorsi dall'ultimo sabato (0 se oggi è sabato)
+    d.setDate(d.getDate() - diff);
+    return formatDataLocale(d);
+  };
 
   const eventi = [];
   clients.forEach((c) => {
     if (c.tipo_servizio !== "presenza" && c.prossimo_check) eventi.push({ data: c.prossimo_check, ora: null, tipo: "check", nome: `${c.nome} ${c.cognome}`, label: "Check da fare", clientId: c.id });
     if (c.data_scadenza && c.stato_pacchetto !== "scaduto") eventi.push({ data: c.data_scadenza, ora: null, tipo: "scadenza", nome: `${c.nome} ${c.cognome}`, label: "Pacchetto in scadenza", clientId: c.id });
+    if (!c.archiviato && c.data_nascita && /^\d{4}-\d{2}-\d{2}/.test(c.data_nascita)) {
+      const [ya, mm, dd] = c.data_nascita.slice(0, 10).split("-");
+      [anno, anno + 1].forEach((y) => {
+        const gg = mm === "02" && dd === "29" && !(new Date(y, 1, 29).getMonth() === 1) ? "28" : dd;
+        const eta = y - Number(ya);
+        if (eta > 0) eventi.push({ data: `${y}-${mm}-${gg}`, ora: null, tipo: "compleanno", nome: `${c.nome} ${c.cognome}`.trim(), label: `🎂 Compleanno — compie ${eta} anni`, clientId: c.id });
+      });
+    }
   });
   eventiCalendario.forEach((e) => {
+    if (e.tipo === "personale") {
+      const pezzi = [];
+      if (e.stato === "annullata") pezzi.push("annullata");
+      if (e.nota) pezzi.push(e.nota);
+      eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: "personale", nome: e.titolo || "Attività personale", label: pezzi.join(" — "), clientId: null });
+      return;
+    }
     const nomeCliente = e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente";
     const pezzi = [e.tipo === "lezione" ? "Lezione 1:1" : "Call"];
     if (e.luogo) pezzi.push(e.luogo);
@@ -2416,16 +6505,28 @@ function CalendarioAgenda({ clients, onSelect }) {
     if (e.stato === "annullata") pezzi.push("annullata");
     if (e.stato === "persa") pezzi.push("persa");
     if (e.fuori_disponibilita) pezzi.push("eccezione (fuori orario standard)");
-    if (e.extra_euro) pezzi.push(`+${e.extra_euro}€ da riscuotere`);
+    if (e.extra_euro) pezzi.push("costo aggiuntivo da riscuotere");
     if (e.nota) pezzi.push(e.nota);
     eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: e.tipo, nome: nomeCliente, label: pezzi.join(" — "), clientId: e.client_id });
+
   });
 
-  const primoDelMese = new Date(anno, mese, 1);
-  const giorniNelMese = new Date(anno, mese + 1, 0).getDate();
-  const offset = (primoDelMese.getDay() + 6) % 7;
+  // Promemoria di fine settimana (venerdì): chi manca ancora da contattare
+  for (let g = 1; g <= giorniNelMese; g++) {
+    const ds = dataStr(g);
+    const giornoSettimana = new Date(ds + "T00:00:00").getDay(); // 0 = domenica ... 6 = sabato
+    if (giornoSettimana === 5) {
+      const settimana = sabatoDi(ds);
+      const inviateSettimana = new Set(promemoriaRighe.filter((r) => r.settimana === settimana && r.inviato).map((r) => r.client_id));
+      const mancanti = clients.filter((c) => !inviateSettimana.has(c.id));
+      eventi.push({
+        data: ds, ora: null, tipo: "promemoria", nome: "Promemoria di fine settimana",
+        label: mancanti.length === 0 ? "Tutte le clienti contattate questa settimana" : `${mancanti.length} client${mancanti.length === 1 ? "e" : "i"} ancora da contattare: ${mancanti.map((c) => `${c.nome} ${c.cognome}`).join(", ")}`,
+        clientId: null,
+      });
+    }
+  }
 
-  const dataStr = (g) => `${anno}-${String(mese + 1).padStart(2, "0")}-${String(g).padStart(2, "0")}`;
   const eventiDelGiorno = (g) => eventi.filter((e) => e.data === dataStr(g));
 
   const cambiaMese = (delta) => {
@@ -2443,12 +6544,12 @@ function CalendarioAgenda({ clients, onSelect }) {
 
   const eventiVisibili = giornoFiltro
     ? ordinaGiornoSingolo(eventiDelGiorno(giornoFiltro))
-    : eventi.filter((e) => e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data) || (a.ora || "").localeCompare(b.ora || "")).slice(0, 15);
+    : eventi.filter((e) => e.tipo !== "messaggi" && e.data >= oggi.toISOString().slice(0, 10)).sort((a, b) => a.data.localeCompare(b.data) || (a.ora || "").localeCompare(b.ora || "")).slice(0, 15);
 
   return (
     <div className="space-y-3">
       {!mostraForm && (
-        <button onClick={() => setMostraForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi lezione o call</button>
+        <button onClick={() => setMostraForm(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2">+ Aggiungi evento (lezione, call o personale)</button>
       )}
       {mostraForm && <NuovoEventoForm clients={clients} onAnnulla={() => setMostraForm(false)} onSalvato={() => { setMostraForm(false); caricaEventi(); }} />}
 
@@ -2471,7 +6572,7 @@ function CalendarioAgenda({ clients, onSelect }) {
               <span>{g}</span>
               {evs.length > 0 && (
                 <span className="flex gap-0.5">
-                  {evs.slice(0, 3).map((e, idx) => <span key={idx} className={`w-1.5 h-1.5 rounded-full ${COLORE_TIPO[e.tipo]}`} />)}
+                  {[...evs].sort((a, b) => ORDINE_TIPO_DOT[a.tipo] - ORDINE_TIPO_DOT[b.tipo]).slice(0, 3).map((e, idx) => <span key={idx} className={`w-1.5 h-1.5 rounded-full ${COLORE_TIPO[e.tipo]}`} />)}
                 </span>
               )}
             </button>
@@ -2484,6 +6585,10 @@ function CalendarioAgenda({ clients, onSelect }) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Scadenza</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" /> Lezione 1:1</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Personale/extra</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Promemoria</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-pink-400" /> Compleanni</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400" /> Messaggi clienti</span>
       </div>
 
       <div className="space-y-2 pt-2">
@@ -2497,18 +6602,29 @@ function CalendarioAgenda({ clients, onSelect }) {
         {eventiVisibili.length === 0 && <p className="text-slate-400 text-sm px-1">Nessun evento {giornoFiltro ? "in questo giorno" : "in programma"}.</p>}
         {eventiVisibili.map((e, i) => (
           <Card key={i} className="p-3 flex items-center gap-3">
-            <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
-              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
-              {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-700 truncate">{e.nome}</p>
-                <p className="text-slate-500 text-xs truncate">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+            {e.clientId ? (
+              <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+                {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 ">{e.nome}</p>
+                  <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                </div>
+              </button>
+            ) : (
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+                {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 ">{e.nome}</p>
+                  <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                </div>
               </div>
-            </button>
+            )}
             {e.id && (
               <button onClick={() => setEventoInModifica(e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
             )}
-            <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+            {e.clientId && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
           </Card>
         ))}
       </div>
@@ -2525,10 +6641,11 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
 
   const invia = async () => {
     setSalvando(true);
-    await supabase.from("notifiche").insert({
+    const { data: nuovaProposta } = await supabase.from("notifiche").insert({
       client_id: evento.client_id, tipo: "proposta_lezione", calendar_event_id: evento.id,
       proposta_data: data, proposta_ora: ora, proposta_luogo: luogo, messaggio: messaggio || null, stato: "inviata",
-    });
+    }).select("id").single();
+    if (nuovaProposta?.id) inviaPush({ evento: "nota", notifica_id: nuovaProposta.id });
     setSalvando(false);
     onFatto();
   };
@@ -2542,15 +6659,383 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
           {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
-      <select value={luogo} onChange={(e) => setLuogo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-        {LUOGHI.map((l) => <option key={l} value={l}>{l}</option>)}
-      </select>
+      <SelezionaLuogo value={luogo} onChange={setLuogo} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <textarea placeholder="Messaggio (facoltativo)" value={messaggio} onChange={(e) => setMessaggio(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="flex gap-2">
         <button onClick={invia} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia proposta"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
       </div>
     </Card>
+  );
+}
+
+const MESSAGGI_PRONTI = [
+  { titolo: "Check ricevuto", testo: "Check ricevuto, grazie {nome}! 🫶🏻 Lo guardo con calma e ti scrivo presto ✨" },
+  { titolo: "Come è andata la settimana?", testo: "Ciao {nome}! 🫶🏻 Com'è andata questa settimana? Allenamenti, alimentazione, energia, sonno: raccontami tutto, così aggiustiamo il tiro dove serve ✨💪🏻" },
+  { titolo: "Promemoria check", testo: "Ciao {nome}! 🫶🏻 Ti ricordo il check (misure e foto): mi serve per aggiornare al meglio il tuo percorso. Grazie mille! ✨" },
+  { titolo: "Promemoria pagamento", testo: "Ciao {nome}! 🫶🏻 Il tuo pacchetto sta per scadere: quando riesci procedi con il saldo così proseguiamo senza interruzioni. Grazie mille, sei super! ✨" },
+  { titolo: "Non vedo carichi da un po'", testo: "Ciao {nome}! 🫶🏻 Non vedo carichi registrati da qualche giorno: va tutto bene? Se ti serve una mano a ripartire scrivimi pure, ci sono io 💪🏻✨" },
+  { titolo: "Complimenti", testo: "Brava {nome}! 🔥 Sto vedendo i tuoi progressi e sono davvero belli, sono fiera di te! Continua così 💪🏻✨" },
+  { titolo: "Rinnovo pacchetto lezioni", testo: "Ciao {nome}! 🫶🏻 Il tuo pacchetto lezioni sta per finire: ti va di rinnovarlo? Dimmi pure e ti blocco le prossime date 🧘🏻‍♀️✨" },
+];
+
+function SelettoreMessaggiPronti({ nome, onScegli }) {
+  const primoNome = (nome || "").trim().split(" ")[0];
+  return (
+    <select value="" onChange={(e) => { const m = MESSAGGI_PRONTI[Number(e.target.value)]; if (m) onScegli(m.testo.replace(/\{nome\}/g, primoNome)); }}
+      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 bg-white">
+      <option value="">✨ Messaggi pronti...</option>
+      {MESSAGGI_PRONTI.map((m, i) => <option key={m.titolo} value={i}>{m.titolo}</option>)}
+    </select>
+  );
+}
+
+// Coach: per ogni cliente online/ibrida, cosa manca ancora (scheda CSV, PDF, video, nutrizione)
+function DaCompletareClienti({ clients, onSelect }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const giorni = await leggiTutto(() => supabase.from("training_days").select("id, client_id, scheda_archiviata").order("id"));
+        const es = await leggiTutto(() => supabase.from("training_exercises").select("client_id, training_day_id, nome").order("id"));
+        const piani = await leggiTutto(() => supabase.from("nutrition_plans").select("client_id").order("id"));
+        const { data: lib } = await supabase.from("esercizi_video").select("parole_chiave, video_url, senza_video");
+        const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").eq("stato", "da_saldare").order("id"));
+        if (vivo) setD({ giorni, es, piani, lib: lib || [], pag });
+      } catch (e) { if (vivo) setD({ giorni: [], es: [], piani: [], lib: [], pag: [] }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  const [aperta, setAperta] = useState(true);
+  if (!d) return null;
+  const attivi = new Set(d.giorni.filter((g) => !g.scheda_archiviata).map((g) => g.id));
+  const conGiorni = new Set(d.giorni.filter((g) => !g.scheda_archiviata).map((g) => g.client_id));
+  const conPiano = new Set(d.piani.map((p) => p.client_id));
+  const oggi = formatDataLocale(new Date());
+  const giorniFa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
+  const daSaldare = new Set(d.pag.map((p) => p.client_id));
+  const righe = clients
+    .map((c) => {
+      const manca = [];
+      const online = c.tipo_servizio === "online" || c.tipo_servizio === "ibrido";
+      if (daSaldare.has(c.id)) manca.push({ k: "pag", t: "Pagamento da saldare 💳" });
+      if (c.stato_pacchetto === "scaduto") manca.push({ k: "scad", t: "Pacchetto scaduto: rinnovo da proporre" });
+      if (online && c.prossimo_check && c.prossimo_check < oggi && c.stato_check === "da_compilare") manca.push({ k: "check", t: `Check in ritardo di ${giorniFa(c.prossimo_check)} giorni` });
+      if (online && !c.prossimo_check) manca.push({ k: "nocheck", t: "Data del prossimo check non impostata" });
+      if (!online) return { c, manca };
+      if (!conGiorni.has(c.id)) manca.push({ k: "csv", t: "Scheda CSV (allenamento) da caricare" });
+      if (c.nutrizione_attiva !== false && !conPiano.has(c.id)) manca.push({ k: "nutri", t: "Piano nutrizionale da inserire" });
+      return { c, manca };
+    })
+    .filter((r) => r.manca.length > 0);
+  return (
+    <Card className="p-4 space-y-1">
+      <button onClick={() => setAperta((v) => !v)} className="w-full flex items-center justify-between pb-1">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Da completare per cliente ({righe.length})</span>
+        <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
+      </button>
+      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
+      {aperta && righe.map(({ c, manca }) => (
+        <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+          {manca.map((m) => <span key={m.k} className="block text-xs text-rose-600">• {m.t}</span>)}
+        </button>
+      ))}
+      {aperta && <p className="text-[11px] text-slate-400 pt-1">Se una cliente segue la nutrizione con un altro professionista, disattiva "nutrizione" nella sua scheda e non comparirà più qui.</p>}
+    </Card>
+  );
+}
+
+// Varianti di un esercizio (attrezzo, presa, lateralità...): servono per capire se il video della libreria è proprio quello giusto
+const VARIANTI_ES = {
+  bilanciere: ["bilanciere"], manubri: ["manubri", "manubrio"], cavo: ["cavo", "cavi", "corda"],
+  macchina: ["macchina", "macchinario"], multipower: ["multipower"], kettlebell: ["kettlebell"],
+  elastico: ["elastico", "band"], "monopodalico/unilaterale": ["monopodal", "unilaterale", "singol", "una gamba", "b-stance", "d-stance"],
+  inclinata: ["inclinat"], "presa stretta": ["stretta"], "presa larga": ["larga"], "presa neutra": ["neutra"], sumo: ["sumo"], trx: ["trx"],
+};
+
+// Coach: per ogni cliente, quali esercizi del programma attuale (forza, mobilità e attivazione) non hanno ancora video e/o spiegazioni
+function EserciziMancantiClienti({ clients, onSelect }) {
+  const [d, setD] = useState(null);
+  const [aperta, setAperta] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const giorni = await leggiTutto(() => supabase.from("training_days").select("id, client_id, scheda_archiviata").order("id"));
+        const es = await leggiTutto(() => supabase.from("training_exercises").select("client_id, training_day_id, nome, tipo, esecuzione").order("id"));
+        const { data: lib } = await supabase.from("esercizi_video").select("nome, attrezzo, parole_chiave, video_url, senza_video, posizionamento, movimento, errori");
+        if (vivo) setD({ giorni, es, lib: lib || [] });
+      } catch (e) { if (vivo) setD({ giorni: [], es: [], lib: [] }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  if (!d) return null;
+  const pieno = (t) => (t || "").trim().length > 0;
+  const archiviati = new Set(d.giorni.filter((g) => g.scheda_archiviata).map((g) => g.id));
+  const righe = clients
+    .filter((c) => !c.archiviato && c.video_attivi !== false)
+    .map((c) => {
+      const visti = {};
+      d.es.filter((e) => e.client_id === c.id && !archiviati.has(e.training_day_id)).forEach((e) => {
+        const nome = (e.nome || "").trim();
+        if (!nome) return;
+        const k = nome.toLowerCase();
+        if (!visti[k]) visti[k] = { nome, tipo: e.tipo, haEsec: false };
+        if (pieno(e.esecuzione)) visti[k].haEsec = true;
+      });
+      const mancano = [], varianti = [];
+      Object.values(visti).forEach((v) => {
+        const etichetta = v.tipo === "mobilita" ? `${v.nome} (mobilità)` : v.tipo === "attivazione" ? `${v.nome} (attivazione)` : v.nome;
+        const info = trovaEsercizioVideo(v.nome, d.lib);
+        if (!info) { mancano.push({ t: etichetta, m: v.haEsec ? "non è nella libreria: manca il video" : "non è nella libreria: mancano video e spiegazioni" }); return; }
+        const senzaVideo = !pieno(info.video_url) && !info.senza_video;
+        const senzaSpieg = !(pieno(info.posizionamento) && pieno(info.movimento) && pieno(info.errori)) && !v.haEsec;
+        if (senzaVideo || senzaSpieg) {
+          mancano.push({ t: etichetta, m: senzaVideo && senzaSpieg ? "mancano video e spiegazioni" : senzaVideo ? "manca il video" : "mancano le spiegazioni" });
+          return;
+        }
+        const testoLib = `${info.nome} ${info.parole_chiave} ${info.attrezzo || ""}`.toLowerCase();
+        const nl = v.nome.toLowerCase();
+        const scoperte = Object.entries(VARIANTI_ES).filter(([, sin]) => sin.some((x) => nl.includes(x)) && !sin.some((x) => testoLib.includes(x))).map(([nome]) => nome);
+        if (scoperte.length) varianti.push({ t: etichetta, m: `variante (${scoperte.join(", ")}) con il video di «${info.nome}»` });
+      });
+      return { c, mancano, varianti };
+    })
+    .filter((r) => r.mancano.length > 0 || r.varianti.length > 0);
+  const totMancano = righe.reduce((s, r) => s + r.mancano.length, 0);
+  const totVarianti = righe.reduce((s, r) => s + r.varianti.length, 0);
+  return (
+    <Card className="p-4 space-y-1">
+      <button onClick={() => setAperta((v) => !v)} className="w-full flex items-center justify-between pb-1 text-left">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Video e spiegazioni da completare ({totMancano})</span>
+        <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
+      </button>
+      {!aperta && <p className="text-[11px] text-slate-400">{totMancano === 0 ? "Tutto coperto ✓" : `${totMancano} esercizi senza video o spiegazioni`}{totVarianti > 0 ? ` · ${totVarianti} varianti con video generico` : ""}. Include mobilità e attivazione.</p>}
+      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
+      {aperta && righe.map(({ c, mancano, varianti }) => (
+        <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+          {mancano.map((m) => <span key={m.t} className="block text-xs text-rose-600">• {m.t}: {m.m}</span>)}
+          {varianti.map((m) => <span key={m.t} className="block text-xs text-amber-600">• {m.t}: {m.m}</span>)}
+        </button>
+      ))}
+      {aperta && <p className="text-[11px] text-slate-400 pt-1">In rosso manca qualcosa. In arancione c'è un video generico: valuta se serve il video della variante. Le spiegazioni scritte nel programma contano come spiegazioni.</p>}
+    </Card>
+  );
+}
+
+function OggiCoach({ clients, onSelect, vai }) {
+  const [dati, setDati] = useState(null);
+  const oggi = formatDataLocale(new Date());
+  const domani = addGiorni(oggi, 1);
+  const giorniDa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
+  const fmt = (d) => d.split("-").reverse().slice(0, 2).join("/");
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data: ev } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").gte("data", oggi).lte("data", addGiorni(oggi, 7)).order("data").order("ora");
+        const { count: richieste } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
+        const { count: checkDaEsaminare } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
+        const { data: msg } = await supabase.from("messaggi").select("client_id, mittente, created_at").order("created_at", { ascending: false }).limit(1000);
+        const ultimoMsg = {};
+        (msg || []).forEach((m) => { if (!ultimoMsg[m.client_id]) ultimoMsg[m.client_id] = m; });
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("client_id, data").gte("data", addGiorni(oggi, -60)).order("id"));
+        const ultimoCarico = {};
+        righe.forEach((r) => { if (r.data && (!ultimoCarico[r.client_id] || r.data > ultimoCarico[r.client_id])) ultimoCarico[r.client_id] = r.data; });
+        const chk = await leggiTutto(() => supabase.from("checkins").select("client_id, data_check").order("id"));
+        const primoCheck = {};
+        chk.forEach((r) => { if (r.data_check && (!primoCheck[r.client_id] || r.data_check < primoCheck[r.client_id])) primoCheck[r.client_id] = r.data_check; });
+        const gg = await leggiTutto(() => supabase.from("training_days").select("client_id").order("id"));
+        const conGiorni = {};
+        gg.forEach((r) => { conGiorni[r.client_id] = true; });
+        const { data: sch } = await supabase.from("schede").select("client_id, stato");
+        (sch || []).forEach((r) => { if (r.stato === "finale") conGiorni[r.client_id] = true; });
+        const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").order("id"));
+        const pagato = {};
+        pag.forEach((r) => { if (r.stato === "saldato") pagato[r.client_id] = true; });
+        if (vivo) setDati({ ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico, primoCheck, conGiorni, pagato });
+      } catch (e) { if (vivo) setDati({ ev: [], richieste: 0, checkDaEsaminare: 0, ultimoMsg: {}, ultimoCarico: {}, primoCheck: {}, conGiorni: {}, pagato: {} }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  if (!dati) return <Spinner />;
+
+  const attivi = dati.ev.filter((e) => e.stato !== "annullata" && e.stato !== "persa");
+  const nomeEv = (e) => (e.tipo === "personale" ? (e.titolo || "Attività personale") : e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente");
+  const nuoveClienti = clients
+    .filter((c) => c.tipo_servizio !== "presenza" && dati.primoCheck[c.id] && !c.scheda_pdf_path && !(c.link_scheda || "").trim() && !dati.conGiorni[c.id])
+    .map((c) => ({ c, check: dati.primoCheck[c.id], scad: addGiorni(dati.primoCheck[c.id], 7), pagato: !!dati.pagato[c.id] }))
+    .sort((a, b) => a.scad.localeCompare(b.scad));
+  const vociDelGiorno = (data) => {
+    const v = [];
+    nuoveClienti.filter((n) => n.scad === data).forEach((n) => v.push({ key: `sk-${n.c.id}`, ora: null, titolo: `${n.c.nome} ${n.c.cognome}`, sub: "Ultimo giorno per consegnare la scheda", clientId: n.c.id }));
+    attivi.filter((e) => e.data === data).forEach((e) => v.push({
+      key: e.id, ora: e.ora ? e.ora.slice(0, 5) : null, titolo: nomeEv(e), clientId: e.client_id,
+      sub: `${e.tipo === "lezione" ? "Lezione 1:1" : e.tipo === "personale" ? "Personale" : "Call"}${e.luogo ? ` · ${e.luogo}` : ""}${e.stato === "richiesta" ? " · da confermare" : ""}`,
+    }));
+    clients.forEach((c) => {
+      if (c.tipo_servizio !== "presenza" && c.prossimo_check === data) v.push({ key: `ck-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Check da fare", clientId: c.id });
+      if (c.data_scadenza === data && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto") v.push({ key: `sc-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Pacchetto in scadenza", clientId: c.id });
+    });
+    return v.sort((x, y) => (x.ora || "").localeCompare(y.ora || ""));
+  };
+  const RigaVoce = ({ e }) => (
+    <button onClick={() => e.clientId && onSelect(e.clientId)} className="w-full flex items-center gap-3 text-left">
+      <span className="text-sm font-semibold text-slate-700 w-12 flex-shrink-0">{e.ora || "•"}</span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm text-slate-700 font-medium truncate">{e.titolo}</span>
+        <span className="block text-xs text-slate-500 truncate">{e.sub}</span>
+      </span>
+    </button>
+  );
+  const Giorno = ({ titolo, data }) => {
+    const lista = vociDelGiorno(data);
+    return (
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{titolo} · {fmt(data)}</p>
+        {lista.length === 0 && <p className="text-slate-400 text-sm">Nessun impegno in agenda.</p>}
+        {lista.map((e) => <RigaVoce key={e.key} e={e} />)}
+      </Card>
+    );
+  };
+  const giorniSettimana = [2, 3, 4, 5, 6, 7].map((n) => addGiorni(oggi, n)).map((d) => ({ d, voci: vociDelGiorno(d) })).filter((g) => g.voci.length > 0);
+  const nomeGiorno = (d) => new Date(`${d}T12:00:00`).toLocaleDateString("it-IT", { weekday: "long", day: "2-digit", month: "2-digit" });
+
+  const msgSenzaRisposta = clients.filter((c) => dati.ultimoMsg[c.id]?.mittente === "cliente");
+  const scadenze = [];
+  clients.forEach((c) => {
+    if (c.stato_pacchetto === "scaduto") scadenze.push({ c, testo: "Pacchetto scaduto", ord: "0000" });
+  });
+  scadenze.sort((a, b) => a.ord.localeCompare(b.ord));
+
+  // Rinnovi del mese in corso e del mese successivo
+  const chiaveMese = (anno, mese0) => { const d = new Date(anno, mese0, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const [annoOggi, meseOggi] = [Number(oggi.slice(0, 4)), Number(oggi.slice(5, 7)) - 1];
+  const mesiRinnovi = [chiaveMese(annoOggi, meseOggi), chiaveMese(annoOggi, meseOggi + 1)].map((k) => ({
+    k,
+    titolo: new Date(`${k}-01T12:00:00`).toLocaleDateString("it-IT", { month: "long" }),
+    righe: clients
+      .filter((c) => !c.archiviato && c.data_scadenza && c.data_scadenza.startsWith(k) && c.stato_pacchetto !== "gratuito")
+      .sort((x, y) => x.data_scadenza.localeCompare(y.data_scadenza)),
+  }));
+  const giorniAlla = (d) => Math.round((new Date(`${d}T12:00:00`) - new Date(`${oggi}T12:00:00`)) / 86400000);
+  const testoGiorni = (n) => (n === 0 ? "oggi" : n === 1 ? "domani" : n > 1 ? `tra ${n} giorni` : n === -1 ? "scaduto ieri" : `scaduto da ${-n} giorni`);
+
+  const daSeguire = [];
+  clients.forEach((c) => {
+    const motivi = [];
+    const uc = dati.ultimoCarico[c.id];
+    if (uc && giorniDa(uc) >= 10) motivi.push(`nessun carico da ${giorniDa(uc)} giorni`);
+    if (c.tipo_servizio !== "presenza" && c.prossimo_check && c.prossimo_check < oggi && c.stato_check === "da_compilare") motivi.push(`check in ritardo di ${giorniDa(c.prossimo_check)} giorni`);
+    const um = dati.ultimoMsg[c.id];
+    if (um?.mittente === "cliente" && (Date.now() - new Date(um.created_at).getTime()) > 86400000) motivi.push("chat senza risposta da oltre un giorno");
+    if (motivi.length) daSeguire.push({ c, motivi });
+  });
+
+  const Voce = ({ n, label, onClick }) => (
+    <button onClick={onClick} className="w-full flex items-center justify-between py-2 text-left">
+      <span className="text-sm text-slate-700">{label}</span>
+      <span className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${n > 0 ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-400"}`}>{n}</span>
+    </button>
+  );
+
+  return (
+    <div className="space-y-4">
+      <Giorno titolo="Oggi" data={oggi} />
+      <Giorno titolo="In programma domani" data={domani} />
+
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">In programma questa settimana</p>
+        {giorniSettimana.length === 0 && <p className="text-slate-400 text-sm">Niente in programma nei prossimi giorni.</p>}
+        {giorniSettimana.map((g) => (
+          <div key={g.d} className="space-y-2">
+            <p className="text-xs font-semibold text-sky-700 capitalize">{nomeGiorno(g.d)}</p>
+            {g.voci.map((e) => <RigaVoce key={e.key} e={e} />)}
+          </div>
+        ))}
+      </Card>
+
+      {nuoveClienti.length > 0 && (
+        <Card className="p-4 space-y-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Nuove clienti: scheda da creare</p>
+          <p className="text-[11px] text-slate-400 pb-1">Entro 7 giorni dall'invio dei dati</p>
+          {nuoveClienti.map((n) => {
+            const g = -giorniDa(n.scad);
+            const testo = g > 0 ? `tra ${g} ${g === 1 ? "giorno" : "giorni"}` : g === 0 ? "scade oggi" : `scaduta da ${-g} ${g === -1 ? "giorno" : "giorni"}`;
+            return (
+              <button key={n.c.id} onClick={() => onSelect(n.c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-slate-700 font-medium truncate">{n.c.nome} {n.c.cognome}</span>
+                  <span className={`text-xs font-semibold flex-shrink-0 ${g < 0 ? "text-rose-600" : g <= 2 ? "text-amber-600" : "text-slate-500"}`}>{testo}</span>
+                </span>
+                <span className="block text-xs text-slate-500">Check inviato il {fmt(n.check)} · scheda entro il {fmt(n.scad)} · {n.pagato ? "pagamento ricevuto ✓" : "pagamento da verificare"}</span>
+              </button>
+            );
+          })}
+        </Card>
+      )}
+
+      <Card className="p-4 divide-y divide-slate-100">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-2">Da fare</p>
+        <Voce n={dati.richieste} label="Richieste di lezione da confermare" onClick={() => vai("notifiche")} />
+        <Voce n={dati.checkDaEsaminare} label="Check ricevuti da esaminare" onClick={() => vai("notifiche")} />
+        <Voce n={msgSenzaRisposta.length} label="Chat in attesa di risposta" onClick={() => vai("chat")} />
+      </Card>
+
+      {scadenze.length > 0 && (
+        <Card className="p-4 space-y-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Pacchetti scaduti</p>
+          {scadenze.map((s, i) => (
+            <button key={i} onClick={() => onSelect(s.c.id)} className="w-full flex items-center justify-between py-1.5 text-left">
+              <span className="text-sm text-slate-700 font-medium">{s.c.nome} {s.c.cognome}</span>
+              <span className="text-xs text-amber-600">{s.testo}</span>
+            </button>
+          ))}
+        </Card>
+      )}
+
+      <Card className="p-4 space-y-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Reminder rinnovi ✨</p>
+        {mesiRinnovi.map((m) => (
+          <div key={m.k} className="space-y-1">
+            <p className="text-sm font-semibold text-slate-700 capitalize">{m.titolo} <span className="text-slate-400 font-normal">({m.righe.length})</span></p>
+            {m.righe.length === 0 && <p className="text-slate-400 text-sm">Nessun rinnovo in scadenza.</p>}
+            {m.righe.map((c) => {
+              const n = giorniAlla(c.data_scadenza);
+              return (
+                <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-1.5 text-left border-b border-slate-100 last:border-0">
+                  <span>
+                    <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+                    <span className="block text-[11px] text-slate-400">{c.piano || "—"} · scade il {c.data_scadenza.split("-").reverse().slice(0, 2).join("/")}</span>
+                  </span>
+                  <span className={`text-xs ${n < 0 ? "text-rose-500" : n <= 7 ? "text-amber-600" : "text-slate-500"}`}>{testoGiorni(n)}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </Card>
+
+      <Card className="p-4 space-y-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Clienti da seguire</p>
+        {daSeguire.length === 0 && <p className="text-emerald-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
+        {daSeguire.map(({ c, motivi }) => (
+          <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
+            <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+            <span className="block text-xs text-rose-500">{motivi.join(" · ")}</span>
+          </button>
+        ))}
+      </Card>
+
+      <EserciziMancantiClienti clients={clients} onSelect={onSelect} />
+
+      <DaCompletareClienti clients={clients} onSelect={onSelect} />
+    </div>
   );
 }
 
@@ -2563,7 +7048,8 @@ function InviaNotaForm({ clients, onFatto }) {
   const invia = async () => {
     if (!clientId || !messaggio.trim()) return;
     setSalvando(true);
-    await supabase.from("notifiche").insert({ client_id: clientId, tipo: "nota", messaggio, stato: "inviata" });
+    const { data: nuovaNota } = await supabase.from("notifiche").insert({ client_id: clientId, tipo: "nota", messaggio, stato: "inviata" }).select("id").single();
+    if (nuovaNota?.id) inviaPush({ evento: "nota", notifica_id: nuovaNota.id });
     setSalvando(false);
     setMessaggio("");
     setFatto(true);
@@ -2576,6 +7062,7 @@ function InviaNotaForm({ clients, onFatto }) {
       <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         {clients.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
       </select>
+      <SelettoreMessaggiPronti nome={(() => { const c = clients.find((x) => x.id === clientId); return c ? c.nome : ""; })()} onScegli={(t) => { setMessaggio(t); setFatto(false); }} />
       <textarea placeholder="Scrivi la nota..." value={messaggio} onChange={(e) => { setMessaggio(e.target.value); setFatto(false); }} rows={3} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia nota"}</button>
       {fatto && <p className="text-emerald-600 text-xs">Nota inviata!</p>}
@@ -2583,13 +7070,516 @@ function InviaNotaForm({ clients, onFatto }) {
   );
 }
 
-function CentroNotificheCoach({ clients, onSelect }) {
+function sabatoSettimanaCorrente() {
+  // Restituisce il sabato di inizio della settimana corrente: il promemoria messaggi
+  // si azzera esattamente al sabato, per la nuova settimana di contatti.
+  const oggi = new Date();
+  const diff = (oggi.getDay() + 1) % 7; // getDay(): 0 = domenica ... 6 = sabato
+  const sabato = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate() - diff);
+  return formatDataLocale(sabato);
+}
+
+function PromemoriaMessaggi({ clients }) {
+  const settimana = useMemo(() => sabatoSettimanaCorrente(), []);
+  const [stato, setStato] = useState({});
+  const [caricando, setCaricando] = useState(true);
+
+  const carica = async () => {
+    const { data } = await supabase.from("promemoria_messaggi").select("client_id, inviato").eq("settimana", settimana);
+    const map = {};
+    (data || []).forEach((r) => { map[r.client_id] = r.inviato; });
+    setStato(map);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, [settimana]);
+
+  const toggle = async (clientId, attuale) => {
+    const nuovo = !attuale;
+    setStato((s) => ({ ...s, [clientId]: nuovo }));
+    await supabase.from("promemoria_messaggi").upsert(
+      { client_id: clientId, settimana, inviato: nuovo, data_invio: nuovo ? new Date().toISOString() : null },
+      { onConflict: "client_id,settimana" }
+    );
+  };
+
+  if (caricando) return <Spinner />;
+
+  const bulb = clients.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido");
+  const online = clients.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido");
+
+  const Gruppo = ({ titolo, sottotitolo, elenco }) => {
+    // Mostra solo le clienti non ancora spuntate: quelle già contattate escono dalla lista
+    // (restano comunque recuperabili con "Mostra le già contattate", in caso di tap per sbaglio).
+    const [mostraFatte, setMostraFatte] = useState(false);
+    const daContattare = elenco.filter((c) => !stato[c.id]);
+    const contattate = elenco.filter((c) => !!stato[c.id]);
+    const visibili = mostraFatte ? elenco : daContattare;
+    return (
+      <div>
+        <div className="flex items-baseline justify-between px-1 mb-2">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{titolo}</p>
+          <span className="text-[11px] text-slate-400">{sottotitolo}</span>
+        </div>
+        <Card className="p-1 divide-y divide-slate-100">
+          {elenco.length === 0 && <p className="text-center text-slate-400 text-sm py-3">Nessuna cliente in questo gruppo.</p>}
+          {elenco.length > 0 && daContattare.length === 0 && !mostraFatte && <p className="text-center text-emerald-600 text-sm py-3">Tutte le clienti contattate questa settimana ✓</p>}
+          {visibili.map((c) => {
+            const fatto = !!stato[c.id];
+            return (
+              <button key={c.id} onClick={() => toggle(c.id, fatto)} className="w-full flex items-center gap-3 px-2 py-2.5 text-left">
+                <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-emerald-500 border-emerald-500" : "border-slate-300"}`}>
+                  {fatto && <Check size={13} className="text-white" />}
+                </span>
+                <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}>{c.nome} {c.cognome}</span>
+                {!fatto && <span className="text-[10px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
+              </button>
+            );
+          })}
+        </Card>
+        <div className="flex items-center justify-between mt-1 px-1">
+          {daContattare.length > 0 ? (
+            <p className="text-[11px] text-amber-600">{daContattare.length} da contattare questa settimana</p>
+          ) : <span />}
+          {contattate.length > 0 && (
+            <button onClick={() => setMostraFatte((v) => !v)} className="text-[11px] text-slate-400 underline">
+              {mostraFatte ? "Nascondi le contattate" : `Mostra le ${contattate.length} già contattate`}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Promemoria messaggio settimanale</p>
+      <Gruppo titolo="Bulb / in presenza" sottotitolo="domenica sera" elenco={bulb} />
+      <Gruppo titolo="Coaching online" sottotitolo="durante la settimana" elenco={online} />
+    </div>
+  );
+}
+
+function ChatCoach({ clients, onChanged }) {
+  const [aperta, setAperta] = useState(null);
+  const [ultimi, setUltimi] = useState({});
+  const [ricerca, setRicerca] = useState("");
+  const carica = async () => {
+    const { data } = await supabase.from("messaggi").select("client_id, mittente, testo, foto_path, letto, created_at").order("created_at", { ascending: false }).limit(1000);
+    const m = {};
+    (data || []).forEach((x) => {
+      if (!m[x.client_id]) m[x.client_id] = { ultimo: x, nuovi: 0 };
+      if (x.mittente === "cliente" && !x.letto) m[x.client_id].nuovi += 1;
+    });
+    setUltimi(m);
+  };
+  useEffect(() => { carica(); }, [aperta]);
+
+  if (aperta) {
+    const c = clients.find((x) => x.id === aperta);
+    return (
+      <div className="space-y-3">
+        <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutte le chat</button>
+        <p className="text-lg font-semibold text-slate-800">{c?.nome} {c?.cognome}</p>
+        <ChatMessaggi clientId={aperta} ruolo="coach" nomeCliente={c?.nome || ""} onLetti={() => onChanged?.()} />
+      </div>
+    );
+  }
+
+  const q = ricerca.trim().toLowerCase();
+  const lista = clients
+    .filter((c) => !q || `${c.nome} ${c.cognome}`.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const ua = ultimi[a.id]?.ultimo?.created_at || "";
+      const ub = ultimi[b.id]?.ultimo?.created_at || "";
+      if (ua !== ub) return ub.localeCompare(ua);
+      return `${a.nome} ${a.cognome}`.localeCompare(`${b.nome} ${b.cognome}`);
+    });
+  return (
+    <div className="space-y-3">
+      <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente..."
+        className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
+      <div className="space-y-2">
+        {lista.map((c) => {
+          const u = ultimi[c.id];
+          return (
+            <Card key={c.id} className="p-3">
+              <button onClick={() => setAperta(c.id)} className="w-full text-left flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                  <p className="text-slate-500 text-xs truncate">
+                    {u ? `${u.ultimo.mittente === "coach" ? "Tu: " : ""}${u.ultimo.testo || "📷 Foto"}` : "Nessun messaggio"}
+                  </p>
+                </div>
+                {u?.nuovi > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
+                <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+              </button>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Promemoria del giorno prima (scadenza pacchetto e check) — calcolati sui dati della cliente.
+function promemoriaCliente(c, oggi = formatDataLocale(new Date())) {
+  const domani = addGiorni(oggi, 1);
+  const fmt = (d) => d.split("-").reverse().join("/");
+  const voci = [];
+  if (c.data_scadenza && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto" && (c.data_scadenza === domani || c.data_scadenza === oggi)) {
+    voci.push({
+      marker: "promemoria_pacchetto", data: c.data_scadenza,
+      messaggio: `Ciao! 🫶🏻 Il tuo pacchetto scade il ${fmt(c.data_scadenza)}. Quando riesci, procedi pure con il saldo così proseguiamo il percorso senza interruzioni. Grazie mille, sei super! ✨`,
+    });
+  }
+  if (c.tipo_servizio !== "presenza" && c.prossimo_check && (c.prossimo_check === domani || c.prossimo_check === oggi)) {
+    voci.push({
+      marker: "promemoria_check", data: c.prossimo_check,
+      messaggio: `Ciao! 🫶🏻 Il tuo prossimo check è il ${fmt(c.prossimo_check)}. Ricordati di mandarmi misure e foto: mi servono per aggiornare al meglio il tuo percorso 💪🏻 Grazie! ✨`,
+    });
+  }
+  return voci;
+}
+async function generaPromemoriCliente(c) {
+  for (const v of promemoriaCliente(c)) {
+    const { data: esiste } = await supabase.from("notifiche").select("id").eq("client_id", c.id).eq("tipo", "nota").eq("proposta_luogo", v.marker).eq("proposta_data", v.data).limit(1).maybeSingle();
+    if (!esiste) {
+      const { data: nuova } = await supabase.from("notifiche").insert({ client_id: c.id, tipo: "nota", messaggio: v.messaggio, proposta_data: v.data, proposta_luogo: v.marker, stato: "inviata" }).select("id").single();
+      if (nuova?.id) inviaPush({ evento: "nota", notifica_id: nuova.id });
+    }
+  }
+}
+
+function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
+  const [msgs, setMsgs] = useState([]);
+  const [testo, setTesto] = useState("");
+  const [foto, setFoto] = useState(null);
+  const [invio, setInvio] = useState(false);
+  const [urls, setUrls] = useState({});
+  const [errore, setErrore] = useState("");
+  const [caricato, setCaricato] = useState(false);
+  const fineRef = React.useRef(null);
+  const altro = ruolo === "coach" ? "cliente" : "coach";
+
+  const carica = async () => {
+    const { data, error } = await supabase.from("messaggi").select("*").eq("client_id", clientId).order("created_at", { ascending: true });
+    if (error) { setErrore("La chat non è ancora attiva: serve completare l'attivazione nel database."); setCaricato(true); return; }
+    setErrore("");
+    setMsgs(data || []);
+    setCaricato(true);
+    if ((data || []).some((m) => m.mittente === altro && !m.letto)) {
+      await supabase.rpc("segna_messaggi_letti", { p_client_id: clientId });
+      onLetti?.();
+    }
+  };
+  useEffect(() => {
+    carica();
+    const t = setInterval(carica, 8000);
+    return () => clearInterval(t);
+  }, [clientId]);
+
+  useEffect(() => {
+    msgs.filter((m) => m.foto_path && !urls[m.foto_path]).forEach(async (m) => {
+      const { data } = await supabase.storage.from("progress-photos").createSignedUrl(m.foto_path, 3600);
+      if (data?.signedUrl) setUrls((u) => ({ ...u, [m.foto_path]: data.signedUrl }));
+    });
+  }, [msgs]);
+
+  useEffect(() => {
+    if (msgs.length && fineRef.current) fineRef.current.scrollIntoView({ block: "end" });
+  }, [msgs.length]);
+
+  const invia = async () => {
+    if (!testo.trim() && !foto) return;
+    setInvio(true);
+    setErrore("");
+    try {
+      let foto_path = null;
+      if (foto) {
+        const ext = (foto.name.split(".").pop() || "jpg").toLowerCase();
+        foto_path = `${clientId}/chat/${Date.now()}.${ext}`;
+        const { error: e1 } = await supabase.storage.from("progress-photos").upload(foto_path, foto);
+        if (e1) throw e1;
+      }
+      const { data: nuovoMsg, error } = await supabase.from("messaggi").insert({ client_id: clientId, mittente: ruolo, testo: testo.trim() || null, foto_path }).select("id").single();
+      if (error) throw error;
+      if (nuovoMsg?.id) inviaPush({ evento: "messaggio", messaggio_id: nuovoMsg.id });
+      setTesto("");
+      setFoto(null);
+      await carica();
+    } catch (e) {
+      setErrore("Messaggio non inviato: " + (e.message || "riprova"));
+    }
+    setInvio(false);
+  };
+
+  const orario = (iso) => {
+    const d = new Date(iso);
+    return `${d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })} ${d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+        {caricato && msgs.length === 0 && !errore && <Card className="p-4 text-center text-slate-400 text-sm">Nessun messaggio ancora. Scrivi il primo!</Card>}
+        {msgs.map((m) => {
+          const mio = m.mittente === ruolo;
+          return (
+            <div key={m.id} className={`flex ${mio ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${mio ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-700"}`}>
+                {m.foto_path && (urls[m.foto_path]
+                  ? <a href={urls[m.foto_path]} target="_blank" rel="noreferrer"><img src={urls[m.foto_path]} alt="" className="rounded-xl mb-1 max-h-60" /></a>
+                  : <p className="text-xs opacity-60 mb-1">Carico la foto...</p>)}
+                {m.testo && <p className="whitespace-pre-wrap break-words">{m.testo}</p>}
+                <p className={`text-[10px] mt-1 ${mio ? "text-slate-300" : "text-slate-400"}`}>{orario(m.created_at)}</p>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={fineRef} />
+      </div>
+      {errore && <p className="text-rose-500 text-xs px-1">{errore}</p>}
+      {foto && (
+        <div className="flex items-center justify-between bg-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600">
+          <span className="truncate">Foto: {foto.name}</span>
+          <button onClick={() => setFoto(null)} className="text-slate-400 ml-2"><X size={14} /></button>
+        </div>
+      )}
+      {ruolo === "coach" && <SelettoreMessaggiPronti nome={nomeCliente} onScegli={setTesto} />}
+      <div className="flex items-end gap-2">
+        <label className="flex-shrink-0 w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
+          <Camera size={18} />
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { setFoto(e.target.files?.[0] || null); e.target.value = ""; }} />
+        </label>
+        <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={1} placeholder="Scrivi un messaggio..."
+          className="flex-1 min-w-0 border border-slate-200 rounded-2xl px-3 py-2 text-sm resize-none" />
+        <button onClick={invia} disabled={invio || (!testo.trim() && !foto)}
+          className="flex-shrink-0 w-10 h-10 rounded-full bg-sky-500 text-white flex items-center justify-center disabled:opacity-40">
+          <Send size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StoricoNotifiche({ clients }) {
+  const [righe, setRighe] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+  const [quante, setQuante] = useState(20);
+  const [filtro, setFiltro] = useState("tutte");
+
+  const carica = async () => {
+    // Assicura che i promemoria del giorno prima risultino nello storico anche se la cliente non ha ancora aperto l'app
+    try { for (const c of clients) await generaPromemoriCliente(c); } catch (e) { /* non blocca */ }
+    const { data } = await supabase.from("notifiche").select("*").order("created_at", { ascending: false }).limit(500);
+    setRighe(data || []);
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const nomeCliente = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
+  const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota";
+  const badge = (n) => {
+    if (n.stato === "inviata") return { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" };
+    if (n.stato === "accettata") return { t: "Accettata", c: "bg-emerald-100 text-emerald-700" };
+    if (n.stato === "rifiutata") return { t: "Rifiutata", c: "bg-rose-100 text-rose-700" };
+    return { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+  };
+  const filtrate = righe.filter((n) => filtro === "tutte" || (filtro === "non_viste" ? n.stato === "inviata" : n.stato !== "inviata"));
+
+  if (caricando) return <Spinner />;
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico notifiche inviate alle clienti ({righe.length})</p>
+      <div className="flex gap-1.5 mb-2">
+        {[["tutte", "Tutte"], ["non_viste", "Non viste"], ["viste", "Viste"]].map(([k, l]) => (
+          <button key={k} onClick={() => { setFiltro(k); setQuante(20); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>{l}</button>
+        ))}
+      </div>
+      <div className="space-y-2">
+        {filtrate.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna notifica in questo elenco.</Card>}
+        {filtrate.slice(0, quante).map((n) => {
+          const b = badge(n);
+          return (
+            <Card key={n.id} className="p-3 space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-medium text-slate-700 text-sm">{nomeCliente(n.client_id)}</p>
+                <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 flex-shrink-0 ${b.c}`}>{b.t}</span>
+              </div>
+              <p className="text-slate-500 text-xs font-medium">{titolo(n)}</p>
+              {n.tipo === "proposta_lezione" && <p className="text-slate-600 text-xs">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>}
+              {n.messaggio && <p className="text-slate-600 text-xs">{n.messaggio}</p>}
+              <p className="text-slate-400 text-[11px]">Inviata il {new Date(n.created_at).toLocaleDateString("it-IT")} alle {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+            </Card>
+          );
+        })}
+        {filtrate.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
+      </div>
+    </div>
+  );
+}
+
+function CompleanniClienti({ clients }) {
+  const [mostraMancanti, setMostraMancanti] = useState(false);
+  const [quantiPassati, setQuantiPassati] = useState(10);
+  const oggi = new Date();
+  oggi.setHours(0, 0, 0, 0);
+  const anno = oggi.getFullYear();
+  const attive = clients.filter((c) => !c.archiviato);
+  const conData = attive.filter((c) => c.data_nascita).map((c) => {
+    const [y, m, d] = String(c.data_nascita).split("-").map(Number);
+    const questoAnno = new Date(anno, m - 1, d);
+    const prossimo = questoAnno < oggi ? new Date(anno + 1, m - 1, d) : questoAnno;
+    return { c, y, questoAnno, prossimo, giorni: Math.round((prossimo - oggi) / 86400000) };
+  });
+  const prossimi = conData.filter((x) => x.giorni <= 90).sort((a, b) => a.giorni - b.giorni);
+  const passati = conData.filter((x) => x.questoAnno < oggi).sort((a, b) => b.questoAnno - a.questoAnno);
+  const mancanti = attive.filter((c) => !c.data_nascita);
+  const nome = (c) => `${c.nome} ${c.cognome || ""}`.trim();
+  const dm = (dt) => `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
+  const quando = (g) => (g === 0 ? "Oggi 🎂" : g === 1 ? "Domani" : `tra ${g} giorni`);
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">🎂 Compleanni delle clienti</p>
+      <div className="space-y-2">
+        {prossimi.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun compleanno nei prossimi 90 giorni.</Card>}
+        {prossimi.map((x) => (
+          <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-amber-50/60 border-amber-200" : ""}`}>
+            <div className="min-w-0">
+              <p className="font-medium text-slate-700 text-sm">{nome(x.c)}</p>
+              <p className="text-slate-500 text-xs">Compie {x.prossimo.getFullYear() - x.y} anni · {dm(x.prossimo)}</p>
+            </div>
+            <span className="text-xs font-medium text-sky-700 bg-sky-50 rounded-full px-2 py-0.5 flex-shrink-0">{quando(x.giorni)}</span>
+          </Card>
+        ))}
+        {passati.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium mt-3 mb-1.5 px-1">Storico compleanni di quest'anno</p>
+            <div className="space-y-1.5">
+              {passati.slice(0, quantiPassati).map((x) => (
+                <Card key={x.c.id} className="p-3 flex items-center justify-between gap-3">
+                  <p className="text-slate-600 text-sm">🎂 {nome(x.c)} · {anno - x.y} anni</p>
+                  <p className="text-slate-400 text-[11px] flex-shrink-0">{dm(x.questoAnno)}/{anno}</p>
+                </Card>
+              ))}
+              {passati.length > quantiPassati && <button onClick={() => setQuantiPassati(quantiPassati + 10)} className="w-full text-sky-600 text-sm font-medium py-1">Mostra altri</button>}
+            </div>
+          </div>
+        )}
+        {mancanti.length > 0 && (
+          <div>
+            <button onClick={() => setMostraMancanti(!mostraMancanti)} className="text-sky-600 text-xs font-medium px-1">{mostraMancanti ? "Nascondi" : `Manca la data di nascita a ${mancanti.length} clienti`}</button>
+            {mostraMancanti && (
+              <Card className="p-3 mt-1.5">
+                <p className="text-slate-500 text-xs">{mancanti.map(nome).join(", ")}</p>
+                <p className="text-slate-400 text-[11px] mt-1">Aprendo la scheda di una cliente puoi aggiungere la data di nascita: comparirà qui e nel calendario.</p>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StoricoAzioniClienti({ clients }) {
+  const [righe, setRighe] = useState(null);
+  const [quante, setQuante] = useState(20);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("avvisi_attivita").select("client_id, tipo, giorno, created_at").order("created_at", { ascending: false }).limit(500);
+      setRighe(data || []);
+    })();
+  }, []);
+  const nome = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
+  if (righe === null) return null;
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico azioni delle clienti ({righe.length})</p>
+      <div className="space-y-2">
+        {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna azione registrata: qui vedrai quando le clienti registrano un allenamento o aggiornano il diario alimentare ✨</Card>}
+        {righe.slice(0, quante).map((r) => (
+          <Card key={r.client_id + r.tipo + r.giorno} className="p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-medium text-slate-700 text-sm">{nome(r.client_id)}</p>
+              <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+            </div>
+            <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+          </Card>
+        ))}
+        {righe.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
+      </div>
+    </div>
+  );
+}
+
+function ClientiDaRiattivare({ clients, onSelect }) {
+  const [ult, setUlt] = useState(null);
+  const [contatti, setContatti] = useState({});
+  const [aperto, setAperto] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc("ultima_attivita_clienti");
+      setUlt(Object.fromEntries((data || []).map((x) => [x.client_id, x.ultima])));
+      const { data: w } = await supabase.from("contatti_whatsapp").select("client_id, ultimo_contatto");
+      setContatti(Object.fromEntries((w || []).map((x) => [x.client_id, x.ultimo_contatto])));
+    })();
+  }, []);
+  if (!ult) return null;
+  const oggi = new Date(); oggi.setHours(12, 0, 0, 0);
+  const lista = clients
+    .filter((c) => !c.archiviato && (c.tipo_servizio !== "presenza" || c.log_visibile_cliente || c.kcal_attivo !== false))
+    .map((c) => {
+      const u = ult[c.id];
+      const giorni = u ? Math.floor((oggi - new Date(u + "T12:00:00")) / 86400000) : null;
+      return { c, giorni };
+    })
+    .filter((x) => x.giorni === null || x.giorni >= 7)
+    .sort((a, b) => (b.giorni ?? 9999) - (a.giorni ?? 9999));
+  if (lista.length === 0) return null;
+  const scrivi = async (c) => {
+    const adesso = new Date().toISOString();
+    const { error } = await supabase.from("contatti_whatsapp").upsert({ client_id: c.id, ultimo_contatto: adesso }, { onConflict: "client_id" });
+    if (!error) setContatti({ ...contatti, [c.id]: adesso });
+  };
+  const telefono = (t) => { let x = String(t || "").replace(/[^\d+]/g, ""); if (x.startsWith("+")) x = x.slice(1); else if (x.startsWith("00")) x = x.slice(2); else if (x.length === 10 && x.startsWith("3")) x = "39" + x; return x; };
+  return (
+    <div>
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">
+        <span>💤 Clienti da riattivare ({lista.length})</span><span>{aperto ? "▲" : "▼"}</span>
+      </button>
+      {aperto && (
+        <div className="space-y-2">
+          {lista.map(({ c, giorni }) => {
+            const tel = telefono(c.telefono);
+            const msg = encodeURIComponent(`Ciao ${c.nome}! 🫶🏻 Come va? Ti ho pensata: se hai bisogno di una mano a ripartire, io ci sono ✨`);
+            const wa = contatti[c.id] ? Math.floor((Date.now() - new Date(contatti[c.id]).getTime()) / 86400000) : null;
+            return (
+              <Card key={c.id} className="p-3 flex items-center gap-3">
+                <button onClick={() => onSelect?.(c.id)} className="flex-1 min-w-0 text-left">
+                  <p className="font-medium text-slate-700 text-sm truncate">{c.nome} {c.cognome}</p>
+                  <p className="text-slate-400 text-[11px]">{giorni === null ? "Nessuna attività registrata" : `Ultima attività ${giorni} giorni fa`}{wa !== null ? ` · scritto su WhatsApp ${wa === 0 ? "oggi" : wa + " giorni fa"}` : ""}</p>
+                </button>
+                {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-emerald-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
+  const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
+    const { data: au } = await supabase.from("notifiche").select("*, clients(nome, cognome)").eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%").order("created_at", { ascending: false });
+    setAutoNuove(au || []);
     const { data: r } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("data");
     setRichieste(r || []);
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
@@ -2598,14 +7588,80 @@ function CentroNotificheCoach({ clients, onSelect }) {
   };
   useEffect(() => { carica(); }, []);
 
-  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); carica(); };
-  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); carica(); };
-  const segnaRevisionato = async (id) => { await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id); carica(); };
+  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); await sincronizzaLezionePacchetto(id); carica(); };
+  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); carica(); };
+  const segnaRevisionato = async (id) => {
+    await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
+    try {
+      await conTimeout(supabase.rpc("sincronizza_stati_check"));
+    } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
+    carica();
+  };
+
+  const segnaAutoViste = async (ids) => {
+    await supabase.from("notifiche").update({ coach_vista: true }).in("id", ids);
+    await carica();
+    onAggiorna?.();
+  };
+  const titoloAuto = (m) => (m || "").startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : (m || "").startsWith("promemoria_check") ? "Promemoria: check in arrivo" : (m || "").startsWith("auto_check") ? "Check ricevuto ✨" : (m || "").startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : (m || "").startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : (m || "").startsWith("auto_traguardo_streak") ? "Costanza 🔥" : "Messaggio automatico";
 
   if (caricando) return <Spinner />;
 
   return (
     <div className="space-y-5">
+      {autoNuove.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2 px-1">
+            <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">Messaggi automatici inviati ({autoNuove.length})</p>
+            <button onClick={() => segnaAutoViste(autoNuove.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button>
+          </div>
+          <div className="space-y-2">
+            {autoNuove.map((n) => (
+              <Card key={n.id} className="p-3 space-y-1 bg-sky-50/60 border-sky-100">
+                <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
+                <p className="text-slate-500 text-xs font-medium">{titoloAuto(n.proposta_luogo)}</p>
+                <p className="text-slate-600 text-xs">{n.messaggio}</p>
+                <div className="flex items-center justify-between pt-1">
+                  <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+                  <button onClick={() => segnaAutoViste([n.id])} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+      {promemoriaDomani.length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Promemoria di domani ({promemoriaDomani.length})</p>
+          <div className="space-y-2">
+            {promemoriaDomani.map((v) => (
+              <Card key={v.cliente.id + v.marker} className="p-3">
+                <button onClick={() => onSelect(v.cliente.id)} className="w-full text-left">
+                  <p className="font-medium text-slate-700 text-sm">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="text-slate-500 text-xs">{v.marker === "promemoria_pacchetto" ? "Pacchetto in scadenza il " : "Check previsto il "}{v.data.split("-").reverse().join("/")}</p>
+                </button>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+      {nuoveDaCompletare.length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Nuove clienti registrate — da completare ({nuoveDaCompletare.length})</p>
+          <div className="space-y-2">
+            {nuoveDaCompletare.map((c) => (
+              <Card key={c.id} className="p-3 flex items-center gap-3 bg-amber-50/60 border-amber-200">
+                <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 text-left">
+                    <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                    <p className="text-slate-500 text-xs">Si è registrata da sola — manca ancora pacchetto e prezzo</p>
+                </button>
+                <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Richieste lezione/call ({richieste.length})</p>
         <div className="space-y-2">
@@ -2614,7 +7670,7 @@ function CentroNotificheCoach({ clients, onSelect }) {
             <Card key={r.id} className="p-3 space-y-2">
               <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
                 <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
-                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? ` — +${r.extra_euro}€` : ""}</p>
+                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
               </button>
               {proponiPer === r.id ? (
                 <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
@@ -2650,6 +7706,398 @@ function CentroNotificheCoach({ clients, onSelect }) {
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
         <InviaNotaForm clients={clients} onFatto={() => {}} />
       </div>
+
+      <CompleanniClienti clients={clients} />
+
+      <ClientiDaRiattivare clients={clients} onSelect={onSelect} />
+      <StoricoAzioniClienti clients={clients} />
+
+      <StoricoNotifiche clients={clients} />
+
+      <PromemoriaMessaggi clients={clients} />
+    </div>
+  );
+}
+
+async function leggiTutto(costruisci) {
+  // Legge tutte le righe a blocchi da 1000 (il database ne restituisce al massimo 1000 per volta)
+  const out = [];
+  for (let da = 0; ; da += 1000) {
+    const { data, error } = await costruisci().range(da, da + 999);
+    if (error) throw error;
+    out.push(...(data || []));
+    if ((data || []).length < 1000) break;
+  }
+  return out;
+}
+
+function caricaModuloExcel() {
+  return new Promise((ok, ko) => {
+    if (window.XLSX) return ok(window.XLSX);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    sc.onload = () => (window.XLSX ? ok(window.XLSX) : ko(new Error("modulo Excel non disponibile")));
+    sc.onerror = () => ko(new Error("Impossibile caricare il modulo Excel, controlla la connessione e riprova."));
+    document.head.appendChild(sc);
+  });
+}
+
+async function esportaExcelCompleto(clientId = null) {
+  const XLSX = await caricaModuloExcel();
+  const filtra = (q) => (clientId ? q.eq("client_id", clientId) : q);
+  const clienti = (await leggiTutto(() => (clientId ? supabase.from("clients").select("*").eq("id", clientId) : supabase.from("clients").select("*")).order("id")))
+    .sort((a, b) => `${a.nome} ${a.cognome || ""}`.localeCompare(`${b.nome} ${b.cognome || ""}`));
+  const checks = await leggiTutto(() => filtra(supabase.from("checkins").select("*")).order("data_check").order("id"));
+  const voci = await leggiTutto(() => filtra(supabase.from("training_entries").select("*, training_exercises(nome, training_days(nome))")).order("data").order("id"));
+
+  const mappa = {}; clienti.forEach((c) => { mappa[c.id] = c; });
+  const nome = (id) => (mappa[id] ? `${mappa[id].nome} ${mappa[id].cognome || ""}`.trim() : "—");
+  const dt = (s) => (s ? new Date(`${s}T12:00:00Z`) : "");
+  const num = (v) => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? "" : Number(v));
+  const ordNome = (a, b) => nome(a.client_id).localeCompare(nome(b.client_id));
+
+  const fogli = [];
+  fogli.push(["Clienti", [["Codice", "Nome", "Cognome", "Email", "Tipo servizio", "Piano", "Pacchetto lezioni", "Stato pacchetto", "Data inizio", "Data scadenza", "Altezza (cm)", "Peso iniziale (kg)", "Obiettivo"],
+    ...clienti.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, dt(c.data_inizio), dt(c.data_scadenza), num(c.altezza_cm), num(c.peso_kg), c.obiettivo_attuale || ""])]]);
+
+  const checkOrd = [...checks].sort((a, b) => ordNome(a, b) || String(a.data_check).localeCompare(String(b.data_check)));
+  fogli.push(["Check e misure", [["Cliente", "Data check", "Peso (kg)", "Spalle (cm)", "Petto (cm)", "Sopra ombelico (cm)", "Ombelico (cm)", "Sotto ombelico (cm)", "Glutei (cm)", "Coscia dx (cm)", "Braccio dx (cm)", "Collo (cm)", "Energia (1-5)", "Sonno (1-5)", "Aderenza cibo (1-5)", "Aderenza allenamento (1-5)", "Fase mestruale", "Stato", "Note cliente"],
+    ...checkOrd.map((c) => [nome(c.client_id), dt(c.data_check), num(c.peso_kg), num(c.spalle_cm), num(c.petto_cm), num(c.sopra_ombelico_cm), num(c.ombelico_cm), num(c.sotto_ombelico_cm), num(c.glutei_cm), num(c.coscia_dx_cm), num(c.braccio_dx_cm), num(c.collo_cm), num(c.energia), num(c.sonno), num(c.aderenza_cibo), num(c.aderenza_allenamento), c.fase_mestruale || "", c.stato, c.note_cliente || ""])]]);
+
+  // Progressi misure: primo check contro ultimo check, per cliente
+  const perCliente = {};
+  checkOrd.forEach((c) => { (perCliente[c.client_id] = perCliente[c.client_id] || []).push(c); });
+  const diff = (p, u, k) => (num(p[k]) !== "" && num(u[k]) !== "" ? Math.round((num(u[k]) - num(p[k])) * 10) / 10 : "");
+  const righeProg = Object.keys(perCliente).map((id) => {
+    const l = perCliente[id]; const p = l[0]; const u = l[l.length - 1];
+    return [nome(id), l.length, dt(p.data_check), dt(u.data_check), num(p.peso_kg), num(u.peso_kg), diff(p, u, "peso_kg"), diff(p, u, "petto_cm"), diff(p, u, "ombelico_cm"), diff(p, u, "glutei_cm"), diff(p, u, "coscia_dx_cm"), diff(p, u, "braccio_dx_cm")];
+  }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  fogli.push(["Progressi misure", [["Cliente", "N. check", "Primo check", "Ultimo check", "Peso iniziale (kg)", "Peso attuale (kg)", "Variazione peso (kg)", "Variazione petto (cm)", "Variazione ombelico (cm)", "Variazione glutei (cm)", "Variazione coscia dx (cm)", "Variazione braccio dx (cm)"], ...righeProg]]);
+
+  const vociOrd = [...voci].sort((a, b) => ordNome(a, b) || String(a.data).localeCompare(String(b.data)) || (a.numero_serie || 0) - (b.numero_serie || 0));
+  fogli.push(["Log carichi", [["Cliente", "Giorno scheda", "Esercizio", "Data", "N. serie", "Kg", "Ripetizioni", "Note"],
+    ...vociOrd.map((r) => [nome(r.client_id), r.training_exercises?.training_days?.nome || "", r.training_exercises?.nome || "", dt(r.data), num(r.numero_serie), num(r.kg), r.ripetizioni || "", r.note || ""])]]);
+
+  // Progressi carichi: per cliente ed esercizio, kg massimo della prima sessione contro quello dell'ultima
+  const gruppi = {};
+  vociOrd.forEach((r) => {
+    if (num(r.kg) === "") return;
+    const chiave = `${r.client_id}||${r.training_exercises?.nome || "?"}`;
+    const g = (gruppi[chiave] = gruppi[chiave] || { id: r.client_id, esercizio: r.training_exercises?.nome || "?", date: {} });
+    g.date[r.data] = Math.max(g.date[r.data] ?? 0, num(r.kg));
+  });
+  const righeCar = Object.values(gruppi).map((g) => {
+    const date = Object.keys(g.date).sort(); const p = date[0]; const u = date[date.length - 1];
+    const kp = g.date[p]; const ku = g.date[u]; const kmax = Math.max(...Object.values(g.date));
+    return [nome(g.id), g.esercizio, date.length, dt(p), kp, dt(u), ku, kmax, Math.round((ku - kp) * 10) / 10, kp > 0 ? Math.round(((ku - kp) / kp) * 1000) / 10 : ""];
+  }).sort((a, b) => String(a[0]).localeCompare(String(b[0])) || String(a[1]).localeCompare(String(b[1])));
+  fogli.push(["Progressi carichi", [["Cliente", "Esercizio", "N. sessioni", "Prima sessione", "Kg prima sessione (max serie)", "Ultima sessione", "Kg ultima sessione (max serie)", "Kg massimo", "Variazione (kg)", "Variazione (%)"], ...righeCar]]);
+
+  const wb = XLSX.utils.book_new();
+  fogli.forEach(([titolo, righe]) => {
+    const ws = XLSX.utils.aoa_to_sheet(righe, { cellDates: true });
+    Object.keys(ws).forEach((k) => { if (k[0] !== "!" && ws[k].t === "d") ws[k].z = "dd/mm/yyyy"; });
+    ws["!cols"] = righe[0].map((h, i) => ({ wch: Math.min(40, Math.max(String(h).length + 2, ...righe.slice(1, 60).map((r) => String(r[i] instanceof Date ? "00/00/0000" : (r[i] ?? "")).length + 2))) }));
+    ws["!freeze"] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, ws, titolo);
+  });
+  const etichetta = clientId ? nome(clientId).replace(/[^a-zA-Z0-9]+/g, "-") : "tutte-le-clienti";
+  XLSX.writeFile(wb, `dati-${etichetta}-${new Date().toISOString().slice(0, 10)}.xlsx`, { cellDates: true });
+  return { check: checks.length, carichi: voci.length };
+}
+
+function caricaModuloExcelJS() {
+  return new Promise((ok, ko) => {
+    if (window.ExcelJS) return ok(window.ExcelJS);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+    sc.onload = () => (window.ExcelJS ? ok(window.ExcelJS) : ko(new Error("modulo Excel non disponibile")));
+    sc.onerror = () => ko(new Error("Impossibile caricare il modulo Excel, controlla la connessione e riprova."));
+    document.head.appendChild(sc);
+  });
+}
+
+// Scarica una foto dallo storage e la rimpicciolisce (così il file Excel resta leggero)
+async function miniaturaFoto(path, lato = 380, perBlob = null) {
+  try {
+    const { data } = await supabase.storage.from("progress-photos").createSignedUrl(path, 600);
+    if (!data?.signedUrl) return null;
+    const blob = await (await fetch(data.signedUrl)).blob();
+    if (perBlob) perBlob(blob);
+    const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
+    const k = Math.min(1, lato / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * k)); const h = Math.max(1, Math.round(bmp.height * k));
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(bmp, 0, 0, w, h);
+    return { base64: cv.toDataURL("image/jpeg", 0.78), w, h };
+  } catch { return null; }
+}
+
+// File unico con tutto lo storico di una cliente: anagrafica, check con foto, programmi (attuale e archiviati), log allenamenti, lezioni, pagamenti, note
+async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}, opzioni = {}) {
+  const ExcelJS = await caricaModuloExcelJS();
+  const q = (t, ord = "id") => leggiTutto(() => supabase.from(t).select("*").eq("client_id", clientId).order(ord).order("id"));
+  avanzamento("Raccolgo i dati...");
+  const [{ data: cl }, checks, giorni, esercizi, voci, lezioni, pagamenti, note, nutrizione, feedback, schedeVecchie] = await Promise.all([
+    supabase.from("clients").select("*").eq("id", clientId).single(),
+    q("checkins", "data_check"), q("training_days", "ordine"), q("training_exercises", "ordine"), q("training_entries", "data"),
+    q("lezioni_svolte", "numero"), q("payments", "data_pagamento"), q("notes", "data"), q("nutrition_plans", "data_aggiornamento"), q("feedback_soggettivo", "data"),
+    q("schede", "creata_il"),
+  ]);
+  const nomeCl = `${cl.nome} ${cl.cognome || ""}`.trim();
+  const giornoPer = {}; giorni.forEach((g) => { giornoPer[g.id] = g; });
+  const esPer = {}; esercizi.forEach((e) => { esPer[e.id] = e; });
+  const etichetta = (g) => (g ? (g.scheda_archiviata ? `Archiviato ${g.scheda_archiviata}` : "Attuale") : "Senza giorno");
+  const dt = (s) => (s ? new Date(`${String(s).slice(0, 10)}T12:00:00Z`) : "");
+  const num = (v) => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? "" : Number(v));
+
+  const wb = new ExcelJS.Workbook();
+  const BLU = "FF3E5C76";
+  const foglio = (titolo, intestazioni, righe, larghezze) => {
+    const ws = wb.addWorksheet(titolo, { views: [{ state: "frozen", ySplit: 1 }] });
+    ws.addRow(intestazioni);
+    const h = ws.getRow(1); h.font = { bold: true, color: { argb: "FFFFFFFF" } }; h.alignment = { vertical: "middle", wrapText: true };
+    h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLU } }; h.height = 28;
+    righe.forEach((r) => ws.addRow(r));
+    ws.columns.forEach((c, i) => { c.width = larghezze?.[i] || 16; });
+    ws.eachRow((row, n) => { if (n > 1) row.alignment = { vertical: "top", wrapText: true }; row.eachCell((cell) => { if (cell.value instanceof Date) cell.numFmt = "dd/mm/yyyy"; }); });
+    return ws;
+  };
+
+  // 1. Anagrafica
+  const ana = [
+    ["Nome", nomeCl], ["Codice", cl.codice], ["Email", cl.email], ["Telefono", cl.telefono], ["Sesso", cl.sesso],
+    ["Data di nascita", dt(cl.data_nascita)], ["Altezza (cm)", num(cl.altezza_cm)], ["Peso iniziale (kg)", num(cl.peso_kg)], ["Città", cl.citta],
+    ["Tipo servizio", cl.tipo_servizio], ["Piano", cl.piano], ["Pacchetto lezioni", cl.pacchetto_lezioni], ["Data inizio", dt(cl.data_inizio)], ["Data scadenza", dt(cl.data_scadenza)],
+    ["Livello allenamento", cl.livello_allenamento], ["Fase", cl.fase_allenamento], ["Obiettivo attuale", cl.obiettivo_attuale],
+    ["Focus di crescita", (cl.focus_crescita || []).join(", ")], ["Salute", [(cl.problematiche_salute || []).join(", "), cl.problematiche_salute_note].filter(Boolean).join(" — ")],
+    ["Note particolari", cl.note_particolari], ["Esportato il", new Date()],
+  ];
+  foglio("Anagrafica", ["Dato", "Valore"], ana, [24, 70]);
+
+  // 2. Check con foto
+  const campiFoto = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale"], ["foto_posteriore_path", "Posteriore"], ["foto_extra_path", "Extra"]];
+  const wsC = foglio("Check e foto",
+    ["Data check", "Peso (kg)", "Spalle", "Petto", "Sopra ombelico", "Ombelico", "Sotto ombelico", "Glutei", "Coscia dx", "Braccio dx", "Collo", "Energia", "Sonno", "Aderenza cibo", "Aderenza allenamento", "Fase mestruale", "Stato", "Note cliente", "Nota foto coach", ...campiFoto.map((c) => c[1])],
+    checks.map((c) => [dt(c.data_check), num(c.peso_kg), num(c.spalle_cm), num(c.petto_cm), num(c.sopra_ombelico_cm), num(c.ombelico_cm), num(c.sotto_ombelico_cm), num(c.glutei_cm), num(c.coscia_dx_cm), num(c.braccio_dx_cm), num(c.collo_cm), num(c.energia), num(c.sonno), num(c.aderenza_cibo), num(c.aderenza_allenamento), c.fase_mestruale || "", c.stato || "", c.note_cliente || "", c.nota_foto_coach || ""]),
+    [12, 9, 8, 8, 10, 9, 10, 8, 9, 9, 8, 8, 8, 10, 12, 12, 12, 30, 30, 30, 30, 30, 30]);
+  const col0 = 19; // prima colonna foto (indice zero-based)
+  const totFoto = checks.reduce((n, c) => n + campiFoto.filter(([k]) => c[k]).length, 0);
+  let fatte = 0; let mancanti = 0;
+  for (let i = 0; i < checks.length; i++) {
+    const c = checks[i]; const riga = wsC.getRow(i + 2);
+    let altezza = 0;
+    for (let j = 0; j < campiFoto.length; j++) {
+      const p = c[campiFoto[j][0]]; if (!p) continue;
+      avanzamento(`Inserisco le foto ${fatte + 1} di ${totFoto}...`);
+      const m = await miniaturaFoto(p, 380, opzioni.perFoto ? (b) => opzioni.perFoto(c, campiFoto[j][1], p, b) : null); fatte++;
+      if (!m) { mancanti++; riga.getCell(col0 + j + 1).value = "(foto non scaricabile)"; continue; }
+      const id = wb.addImage({ base64: m.base64, extension: "jpeg" });
+      const larg = Math.round(m.w * 0.5); const alt = Math.round(m.h * 0.5);
+      wsC.addImage(id, { tl: { col: col0 + j + 0.05, row: i + 1 + 0.03 }, ext: { width: larg, height: alt } });
+      altezza = Math.max(altezza, alt);
+    }
+    if (altezza) riga.height = Math.round(altezza * 0.75) + 8;
+  }
+  wsC.columns.slice(col0, col0 + 4).forEach((c) => { c.width = 30; });
+
+  // 3. Programmi (attuale e archiviati)
+  const ordGiorni = [...giorni].sort((a, b) => (a.scheda_archiviata ? 1 : 0) - (b.scheda_archiviata ? 1 : 0) || String(a.scheda_archiviata || "").localeCompare(String(b.scheda_archiviata || ""), "it", { numeric: true }) || (a.ordine || 0) - (b.ordine || 0));
+  const righeProg = [];
+  ordGiorni.forEach((g) => esercizi.filter((e) => e.training_day_id === g.id).sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
+    .forEach((e) => righeProg.push([etichetta(g), g.nome, e.tipo || "forza", e.nome, e.serie ?? "", e.ripetizioni ?? "", e.note || "", e.esecuzione || ""])));
+  esercizi.filter((e) => !e.training_day_id).forEach((e) => righeProg.push(["Senza giorno", "", e.tipo || "forza", e.nome, e.serie ?? "", e.ripetizioni ?? "", e.note || "", e.esecuzione || ""]));
+  foglio("Programmi", ["Programma", "Giorno", "Tipo", "Esercizio", "Serie", "Ripetizioni", "Note", "Esecuzione"], righeProg, [16, 18, 12, 34, 8, 12, 30, 50]);
+
+  // 4. Log allenamenti
+  const righeLog = voci.map((v) => { const e = esPer[v.exercise_id]; const g = e ? giornoPer[e.training_day_id] : null; return { v, e, g }; })
+    .sort((a, b) => String(a.v.data).localeCompare(String(b.v.data)) || (a.g?.ordine || 0) - (b.g?.ordine || 0) || (a.e?.ordine || 0) - (b.e?.ordine || 0) || (a.v.numero_serie || 0) - (b.v.numero_serie || 0));
+  foglio("Log allenamenti", ["Data", "Programma", "Giorno", "Esercizio", "N. serie", "Kg", "Ripetizioni", "Note"],
+    righeLog.map(({ v, e, g }) => [dt(v.data), etichetta(g), g?.nome || "", e?.nome || "", num(v.numero_serie), num(v.kg), v.ripetizioni || "", v.note || ""]), [12, 16, 18, 34, 9, 8, 12, 30]);
+
+  // 5. Progressi carichi per esercizio
+  const gruppi = {};
+  righeLog.forEach(({ v, e }) => { if (num(v.kg) === "" || !e) return; const g = (gruppi[e.nome] = gruppi[e.nome] || {}); g[v.data] = Math.max(g[v.data] ?? 0, num(v.kg)); });
+  const righeCar = Object.entries(gruppi).map(([nomeEs, dateKg]) => {
+    const date = Object.keys(dateKg).sort(); const p = date[0]; const u = date[date.length - 1]; const kp = dateKg[p]; const ku = dateKg[u];
+    return [nomeEs, date.length, dt(p), kp, dt(u), ku, Math.max(...Object.values(dateKg)), Math.round((ku - kp) * 10) / 10, kp > 0 ? Math.round(((ku - kp) / kp) * 1000) / 10 : ""];
+  }).sort((a, b) => a[0].localeCompare(b[0], "it"));
+  foglio("Progressi carichi", ["Esercizio", "N. sessioni", "Prima sessione", "Kg prima (max serie)", "Ultima sessione", "Kg ultima (max serie)", "Kg massimo", "Variazione (kg)", "Variazione (%)"], righeCar, [34, 11, 14, 14, 14, 14, 12, 12, 12]);
+
+  // 6. Altri storici
+  if (lezioni.length) foglio("Lezioni", ["N.", "Fatta", "Data", "Ora", "Nota"], lezioni.map((l) => [l.numero, l.fatta ? "sì" : "no", dt(l.data), l.ora || "", l.nota || ""]), [8, 8, 12, 8, 50]);
+  if (pagamenti.length) foglio("Pagamenti", ["Data", "Tipo", "Importo (€)", "Metodo", "Stato", "Saldato (€)", "Note"], pagamenti.map((p) => [dt(p.data_pagamento), p.tipo_piano || "", num(p.importo), p.metodo_pagamento || "", p.stato || "", num(p.importo_saldato), p.note || ""]), [12, 24, 12, 14, 12, 12, 40]);
+  if (note.length) foglio("Note", ["Data", "Tipo", "Testo"], note.map((n) => [dt(n.data), n.tipo || "", n.testo || ""]), [12, 14, 90]);
+  if (nutrizione.length) foglio("Nutrizione", ["Data", "Kcal", "Proteine (g)", "Carboidrati (g)", "Grassi (g)"], nutrizione.map((n) => [dt(n.data_aggiornamento), num(n.kcal), num(n.proteine_g), num(n.carboidrati_g), num(n.grassi_g)]), [12, 10, 12, 14, 12]);
+  if (feedback.length) foglio("Feedback", ["Data", "Tag", "Nota"], feedback.map((f) => [dt(f.data), (f.tags || []).join(", "), f.nota_libera || ""]), [12, 30, 70]);
+  if (schedeVecchie.length) {
+    const righeV = [];
+    for (const s of schedeVecchie) {
+      const { data: gs } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", s.id).order("ordine");
+      for (const g of gs || []) {
+        const { data: es } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome)").eq("giorno_id", g.id).order("ordine");
+        (es || []).forEach((x) => righeV.push([dt(s.creata_il), s.stato || "", g.nome, x.esercizi_libreria?.nome || x.nome_libero || "", x.serie ?? "", x.ripetizioni ?? "", x.tecnica || ""]));
+      }
+    }
+    foglio("Schede precedenti", ["Creata il", "Stato", "Giorno", "Esercizio", "Serie", "Ripetizioni", "Tecnica"], righeV, [12, 12, 18, 34, 8, 12, 24]);
+  }
+
+  avanzamento("Preparo il file...");
+  const buf = await wb.xlsx.writeBuffer();
+  if (opzioni.restituisciBuffer) return { buf, nomeCl, check: checks.length, foto: fatte - mancanti, fotoMancanti: mancanti, serie: voci.length, esercizi: esercizi.length };
+  const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = document.createElement("a"); a.href = url;
+  a.download = `storico-completo-${nomeCl.replace(/[^a-zA-Z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return { check: checks.length, foto: fatte - mancanti, fotoMancanti: mancanti, serie: voci.length, esercizi: esercizi.length };
+}
+
+function caricaModuloZip() {
+  return new Promise((ok, ko) => {
+    if (window.JSZip) return ok(window.JSZip);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+    sc.onload = () => (window.JSZip ? ok(window.JSZip) : ko(new Error("modulo ZIP non disponibile")));
+    sc.onerror = () => ko(new Error("Impossibile caricare il modulo ZIP, controlla la connessione e riprova."));
+    document.head.appendChild(sc);
+  });
+}
+
+// Un unico file ZIP: dentro, una cartella per ogni cliente con lo storico completo (Excel) e le foto dei check in originale
+async function esportaCartelleClienti(clients, avanzamento = () => {}) {
+  const JSZip = await caricaModuloZip();
+  const zip = new JSZip();
+  const usati = {};
+  const pulisci = (t) => String(t || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const lista = [...clients].sort((a, b) => `${a.cognome || ""} ${a.nome}`.localeCompare(`${b.cognome || ""} ${b.nome}`, "it"));
+  let nFoto = 0; let nErrori = 0;
+  for (let i = 0; i < lista.length; i++) {
+    const c = lista[i];
+    let cartella = pulisci(`${c.nome} ${c.cognome || ""}`) || `Cliente ${c.id}`;
+    if (c.archiviato) cartella += " (archiviata)";
+    if (usati[cartella]) cartella += ` ${c.id}`; usati[cartella] = true;
+    const prefisso = `Cliente ${i + 1} di ${lista.length}: ${c.nome}`;
+    try {
+      const r = await esportaStoricoCompletoCliente(c.id, (t) => avanzamento(`${prefisso} — ${t}`), {
+        restituisciBuffer: true,
+        perFoto: (check, angolo, path, blob) => {
+          const ext = (path.split(".").pop() || "jpg").toLowerCase().slice(0, 4);
+          zip.file(`${cartella}/Foto check/${check.data_check}_${angolo}.${ext}`, blob);
+          nFoto++;
+        },
+      });
+      zip.file(`${cartella}/Storico completo.xlsx`, r.buf);
+      nErrori += r.fotoMancanti;
+    } catch (e) { nErrori++; zip.file(`${cartella}/ERRORE.txt`, `Non sono riuscita a esportare questa cliente: ${e?.message || e}`); }
+  }
+  avanzamento("Preparo il file ZIP (può servire un minuto)...");
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (m) => avanzamento(`Preparo il file ZIP... ${Math.round(m.percent)}%`));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = `cartelle-clienti-${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { clienti: lista.length, foto: nFoto, errori: nErrori };
+}
+
+function BottoneCartelleClienti({ clients, className = "" }) {
+  const [inCorso, setInCorso] = useState(false);
+  const [msg, setMsg] = useState("");
+  const vai = async () => {
+    setInCorso(true); setMsg("");
+    try {
+      const r = await esportaCartelleClienti(clients, setMsg);
+      setMsg(`Scaricato: ${r.clienti} cartelle e ${r.foto} foto.${r.errori ? ` Attenzione: ${r.errori} elementi non si sono potuti scaricare.` : ""}`);
+    } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
+    setInCorso(false);
+  };
+  return (
+    <div className={className}>
+      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : "⬇ Cartelle di tutte le clienti (ZIP con storico e foto)"}</button>
+      {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
+      {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
+    </div>
+  );
+}
+
+// ZIP con SOLO le foto: una cartella per cliente, foto in originale chiamate con data e posizione
+async function esportaSoloFoto(clients, avanzamento = () => {}) {
+  const JSZip = await caricaModuloZip();
+  const zip = new JSZip();
+  const usati = {};
+  const pulisci = (t) => String(t || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const campi = [["foto_frontale_path", "frontale"], ["foto_laterale_path", "laterale"], ["foto_posteriore_path", "posteriore"], ["foto_extra_path", "extra"]];
+  const lista = [...clients].sort((a, b) => `${a.cognome || ""} ${a.nome}`.localeCompare(`${b.cognome || ""} ${b.nome}`, "it"));
+  let nFoto = 0; let nErrori = 0;
+  for (let i = 0; i < lista.length; i++) {
+    const c = lista[i];
+    let cartella = pulisci(`${c.nome} ${c.cognome || ""}`) || `Cliente ${c.id}`;
+    if (c.archiviato) cartella += " (archiviata)";
+    if (usati[cartella]) cartella += ` ${c.id}`; usati[cartella] = true;
+    const { data: ck, error } = await supabase.from("checkins").select("*").eq("client_id", c.id).order("data_check", { ascending: true });
+    if (error) { nErrori++; continue; }
+    for (const chk of ck || []) {
+      for (const [k, nome] of campi) {
+        const path = chk[k]; if (!path) continue;
+        avanzamento(`Cliente ${i + 1} di ${lista.length}: ${c.nome} — foto ${nFoto + 1}...`);
+        try {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(path, 600);
+          if (!data?.signedUrl) throw new Error("no url");
+          const r = await fetch(data.signedUrl);
+          if (!r.ok) throw new Error("download");
+          const ext = (path.split(".").pop() || "jpg").toLowerCase().slice(0, 4);
+          zip.file(`${cartella}/${chk.data_check}_${nome}.${ext}`, await r.blob());
+          nFoto++;
+        } catch { nErrori++; }
+      }
+    }
+  }
+  avanzamento("Preparo il file ZIP (può servire un minuto)...");
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (m) => avanzamento(`Preparo il file ZIP... ${Math.round(m.percent)}%`));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = `foto-clienti-${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { clienti: lista.length, foto: nFoto, errori: nErrori };
+}
+
+function BottoneSoloFoto({ clients, className = "" }) {
+  const [inCorso, setInCorso] = useState(false);
+  const [msg, setMsg] = useState("");
+  const vai = async () => {
+    setInCorso(true); setMsg("");
+    try {
+      const r = await esportaSoloFoto(clients, setMsg);
+      setMsg(`Scaricato: ${r.foto} foto in ${r.clienti} cartelle.${r.errori ? ` Attenzione: ${r.errori} foto non si sono potute scaricare.` : ""}`);
+    } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
+    setInCorso(false);
+  };
+  return (
+    <div className={className}>
+      <button onClick={vai} disabled={inCorso} className="w-full border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le foto..." : "⬇ Solo foto delle clienti (ZIP, una cartella per cliente)"}</button>
+      {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
+      {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
+    </div>
+  );
+}
+
+function BottoneEsportaExcel({ clientId = null, label, className = "" }) {
+  const [inCorso, setInCorso] = useState(false);
+  const [msg, setMsg] = useState("");
+  const vai = async () => {
+    setInCorso(true); setMsg("");
+    try {
+      if (clientId) {
+        const r = await esportaStoricoCompletoCliente(clientId, setMsg);
+        setMsg(`Scaricato: ${r.check} check con ${r.foto} foto, ${r.esercizi} esercizi e ${r.serie} serie di carichi.${r.fotoMancanti ? ` ${r.fotoMancanti} foto non si sono potute scaricare.` : ""}`);
+      } else {
+        const r = await esportaExcelCompleto(clientId);
+        setMsg(`Scaricato: ${r.check} check e ${r.carichi} serie di carichi.`);
+      }
+    } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
+    setInCorso(false);
+  };
+  return (
+    <div className={className}>
+      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo il file Excel..." : label}</button>
+      {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
     </div>
   );
 }
@@ -2676,7 +8124,7 @@ async function esportaClientiCsv(clients) {
 }
 
 async function esportaCheckCsv() {
-  const { data } = await supabase.from("checkins").select("*, clients(nome, cognome, codice)").order("data_check");
+  const data = await leggiTutto(() => supabase.from("checkins").select("*, clients(nome, cognome, codice)").order("data_check").order("id"));
   const intestazione = ["Cliente", "Codice", "Data check", "Peso", "Petto", "Spalle", "Sopra ombelico", "Ombelico", "Sotto ombelico", "Coscia dx", "Braccio dx", "Collo", "Glutei", "Stato", "Note cliente"];
   const righe = (data || []).map((c) => [
     c.clients ? `${c.clients.nome} ${c.clients.cognome}` : "", c.clients?.codice, c.data_check, c.peso_kg, c.petto_cm, c.spalle_cm,
@@ -2686,37 +8134,1476 @@ async function esportaCheckCsv() {
 }
 
 async function esportaCarichiCsv() {
-  const { data } = await supabase.from("training_entries")
+  const data = await leggiTutto(() => supabase.from("training_entries")
     .select("*, training_exercises(nome, training_days(nome)), clients(nome, cognome, codice)")
-    .order("data");
-  const intestazione = ["Cliente", "Codice", "Giorno", "Esercizio", "Data", "Kg", "Serie", "Ripetizioni", "Note"];
+    .order("data").order("id"));
+  const intestazione = ["Cliente", "Codice", "Giorno", "Esercizio", "Data", "N. serie", "Kg", "Ripetizioni", "Note"];
   const righe = (data || []).map((r) => [
     r.clients ? `${r.clients.nome} ${r.clients.cognome}` : "", r.clients?.codice,
-    r.training_exercises?.training_days?.nome, r.training_exercises?.nome, r.data, r.kg, r.serie, r.ripetizioni, r.note,
+    r.training_exercises?.training_days?.nome, r.training_exercises?.nome, r.data, r.numero_serie, r.kg, r.ripetizioni, r.note,
   ]);
   scaricaCsv(`carichi_allenamento_${new Date().toISOString().slice(0, 10)}.csv`, [intestazione, ...righe]);
 }
 
-function AdminList({ clients, onSelect, onChanged }) {
+function esportaProspettoGuadagniCsv({ oggi, guadagnoMese, totaleNetto, totaleIncassato, totaleSpese, totaleDaSaldare, mesi, metodiOrdinati }) {
+  const righe = [
+    ["Prospetto guadagni", `Esportato il ${formatDataLocale(new Date())}`],
+    ["Nota", "Esclusi i pagamenti in contanti"],
+    [],
+    ["Riepilogo", ""],
+    ["Guadagno del mese (netto)", guadagnoMese.toFixed(2)],
+    [`Totale netto da inizio ${oggi.getFullYear()}`, totaleNetto.toFixed(2)],
+    ["Incassato", totaleIncassato.toFixed(2)],
+    ["Spese (affitto ecc.)", totaleSpese.toFixed(2)],
+    ["Da saldare", totaleDaSaldare.toFixed(2)],
+    [],
+    [`Guadagni mensili ${oggi.getFullYear()} (netto: incassi − spese)`, ""],
+    ...mesi.map((m) => [m.label, m.totale.toFixed(2)]),
+    [],
+    ["Per metodo di pagamento (saldato)", ""],
+    ...metodiOrdinati.map(([k, v]) => [labelMetodo(k) === k ? k : labelMetodo(k), v.toFixed(2)]),
+  ];
+  scaricaCsv(`prospetto-guadagni-${formatDataLocale(new Date())}.csv`, righe);
+}
+
+function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
+  const [aperto, setAperto] = useState(false);
+  const [modo, setModo] = useState("guadagno"); // "guadagno" | "spesa"
+  const [clientId, setClientId] = useState("");
+  const [tipoPiano, setTipoPiano] = useState("Mensile");
+  const [tipoLibero, setTipoLibero] = useState("");
+  const [dataPagamento, setDataPagamento] = useState(new Date().toISOString().slice(0, 10));
+  const [importo, setImporto] = useState("");
+  const [metodo, setMetodo] = useState("");
+  const [stato, setStato] = useState("saldato");
+  const [nota, setNota] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const clientiOrdinati = [...clients].sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
+  const aggiornaScadenza = modo === "guadagno" && ["Mensile", "Trimestrale", "Semestrale"].includes(tipoPiano);
+
+  const reset = () => {
+    setClientId(""); setTipoPiano("Mensile"); setTipoLibero(""); setImporto(""); setMetodo(""); setStato("saldato"); setNota("");
+    setDataPagamento(new Date().toISOString().slice(0, 10));
+  };
+
+  const apri = (m) => { reset(); setModo(m); setAperto(true); setErrore(""); };
+
+  const salva = async () => {
+    setErrore("");
+    if (modo === "guadagno" && !clientId) { setErrore("Seleziona un cliente."); return; }
+    if (importo === "" || isNaN(Number(importo)) || Number(importo) <= 0) { setErrore("Inserisci un importo valido."); return; }
+    setSalvando(true);
+
+    if (modo === "spesa") {
+      // Le uscite (affitto, attrezzatura, ecc.) non sono legate a nessuna cliente: importo negativo
+      // cosi' entra direttamente nel calcolo del netto (incassi + spese) senza altra logica.
+      const { error } = await supabase.from("payments").insert({
+        client_id: null,
+        data_pagamento: dataPagamento,
+        tipo_piano: "Spesa",
+        importo: -Math.abs(Number(importo)),
+        metodo_pagamento: null,
+        stato: "spesa",
+        note: nota || null,
+      });
+      setSalvando(false);
+      if (error) { setErrore("Errore nel salvataggio, riprova."); return; }
+      reset();
+      setAperto(false);
+      onSalvato();
+      return;
+    }
+
+    const cliente = clients.find((c) => c.id === clientId);
+    const etichettaTipo = tipoPiano === "Altro" ? (tipoLibero || "Pagamento") : tipoPiano;
+    const { error } = await supabase.from("payments").insert({
+      client_id: clientId,
+      data_pagamento: dataPagamento,
+      tipo_piano: etichettaTipo,
+      importo: Number(importo),
+      metodo_pagamento: metodo || null,
+      stato,
+      note: nota || null,
+    });
+    if (error) { setSalvando(false); setErrore("Errore nel salvataggio, riprova."); return; }
+    // Mensile/Trimestrale/Semestrale: la scadenza del pacchetto si aggiorna in automatico, coerente col tipo — mai una data "a caso"
+    if (aggiornaScadenza && cliente) {
+      if (!cliente.data_inizio) {
+        await supabase.from("clients").update({ data_inizio: dataPagamento }).eq("id", clientId);
+      }
+      // Ricalcola dallo storico reale dei pagamenti, non dalla data reale di salvataggio:
+      // cosi' un pagamento inserito in ritardo o di correzione non "salta" mesi a vuoto.
+      await ricalcolaEAggiornaScadenza(clientId);
+    }
+    setSalvando(false);
+    reset();
+    setAperto(false);
+    onSalvato();
+    onClientiCambiati?.();
+  };
+
+  if (!aperto) {
+    return (
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => apri("guadagno")} className="flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
+          <Plus size={16} /> Nuovo pagamento
+        </button>
+        <button onClick={() => apri("spesa")} className="flex items-center justify-center gap-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl py-2.5 text-sm font-medium">
+          <Plus size={16} /> Nuova spesa
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center gap-2 bg-slate-100 rounded-xl p-1">
+        <button onClick={() => setModo("guadagno")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "guadagno" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
+          + Guadagno
+        </button>
+        <button onClick={() => setModo("spesa")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "spesa" ? "bg-white text-rose-600 shadow-sm" : "text-slate-500"}`}>
+          − Spesa
+        </button>
+      </div>
+      <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> {modo === "spesa" ? "Nuova spesa" : "Nuovo pagamento"}</p>
+
+      {modo === "spesa" ? (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500">Data</label>
+              <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Importo (€)</label>
+              <input type="number" step="0.01" min="0" value={importo} onChange={(e) => setImporto(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 50" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Descrizione</label>
+            <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. affitto palestra, attrezzatura..." />
+          </div>
+        </>
+      ) : (
+        <>
+          <div>
+            <label className="text-xs text-slate-500">Cliente</label>
+            <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="">Seleziona cliente…</option>
+              {clientiOrdinati.map((c) => <option key={c.id} value={c.id}>{c.nome} {c.cognome}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-slate-500">Data pagamento</label>
+              <InputData value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Importo (€)</label>
+              <input type="number" step="0.01" value={importo} onChange={(e) => setImporto(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 35" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Metodo</label>
+              <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="">—</option>
+                {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Stato</label>
+              <select value={stato} onChange={(e) => setStato(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                <option value="saldato">Saldato</option>
+                <option value="da_saldare">Da saldare</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Tipo</label>
+            <select value={tipoPiano} onChange={(e) => setTipoPiano(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              <option value="Mensile">Mensile (+1 mese di scadenza)</option>
+              <option value="Trimestrale">Trimestrale (+3 mesi di scadenza)</option>
+              <option value="Semestrale">Semestrale (+6 mesi di scadenza)</option>
+              <option value="Occasionale">Occasionale (non tocca la scadenza)</option>
+              <option value="A lezione">A lezione (non tocca la scadenza)</option>
+              <option value="Variabile">Variabile (non tocca la scadenza)</option>
+              <option value="Pacchetto lezioni Bulb">Pacchetto lezioni Bulb (non tocca la scadenza)</option>
+              <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
+              <option value="Altro">Altro (non tocca la scadenza)</option>
+            </select>
+            {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
+          </div>
+          {tipoPiano === "Altro" && (
+            <div>
+              <label className="text-xs text-slate-500">Specifica tipo</label>
+              <input value={tipoLibero} onChange={(e) => setTipoLibero(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. Coaching online, saldo pacchetto..." />
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-slate-500">Nota (facoltativa)</label>
+            <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. saldo pacchetto..." />
+          </div>
+        </>
+      )}
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={() => { setAperto(false); setErrore(""); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
+        <button onClick={salva} disabled={salvando} className={`flex-1 text-white rounded-xl py-2 text-sm font-medium ${modo === "spesa" ? "bg-rose-600" : "bg-slate-800"}`}>
+          {salvando ? "Salvo..." : modo === "spesa" ? "Salva spesa" : "Salva"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function RicevutaModal({ pagamento, onClose }) {
+  const numero = pagamento.id.slice(0, 8).toUpperCase();
+  const dataFmt = pagamento.data_pagamento ? pagamento.data_pagamento.split("-").reverse().join("/") : "—";
+  const nomeCliente = pagamento.clients ? `${pagamento.clients.nome} ${pagamento.clients.cognome || ""}`.trim() : "—";
+  // Se il pagamento è ancora "da saldare" con un acconto parziale, la ricevuta certifica solo
+  // quell'acconto (quello che è stato davvero incassato oggi), non l'intero importo pattuito.
+  const giaSaldato = Number(pagamento.importo_saldato) || 0;
+  const inAcconto = pagamento.stato === "da_saldare" && giaSaldato > 0;
+  const importoDaMostrare = inAcconto ? giaSaldato : Number(pagamento.importo);
+
+  // Renderizzata fuori dall'albero React (direttamente in <body>, non dentro #root) tramite
+  // un portale: così in stampa basta nascondere #root per intero, senza lasciarsi dietro
+  // tutto il resto della pagina (grafici, liste, ecc.) ancora presente nel flusso — anche se
+  // invisibile — che altrimenti genera pagine bianche prima della ricevuta e la spezza a metà.
+  return createPortal(
+    <div className="ricevuta-overlay fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:bg-white print:p-0">
+      <style>{`
+        @media print {
+          html, body { height: auto !important; }
+          #root { display: none !important; }
+          .ricevuta-overlay { position: static !important; display: block !important; height: auto !important; background: white !important; }
+          .ricevuta-stampa { position: static !important; width: 100% !important; max-width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+      <div className="ricevuta-stampa bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <div className="flex justify-between items-start mb-5">
+          <div>
+            <p className="text-slate-800 font-semibold text-lg">Coaching by Morgana</p>
+            <p className="text-slate-400 text-xs">Morgana Tarquino — Personal Trainer</p>
+          </div>
+          <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={18} /></button>
+        </div>
+        <p className="text-center text-slate-500 text-xs uppercase tracking-wide mb-1">Ricevuta di pagamento</p>
+        <p className="text-center text-slate-400 text-xs mb-5">N. {numero} · {dataFmt}</p>
+        <div className="space-y-2 border-t border-b border-slate-100 py-4 mb-4">
+          <div className="flex justify-between text-sm"><span className="text-slate-400">Cliente</span><span className="text-slate-700 font-medium">{nomeCliente}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-slate-400">Descrizione</span><span className="text-slate-700 font-medium text-right">{pagamento.tipo_piano || "—"}</span></div>
+          {pagamento.note && <div className="flex justify-between text-sm"><span className="text-slate-400">Nota</span><span className="text-slate-700 text-right">{pagamento.note}</span></div>}
+          {pagamento.metodo_pagamento && <div className="flex justify-between text-sm"><span className="text-slate-400">Metodo</span><span className="text-slate-700 font-medium">{labelMetodo(pagamento.metodo_pagamento)}</span></div>}
+        </div>
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-slate-500 text-sm font-medium">{inAcconto ? "Acconto pagato" : "Importo pagato"}</span>
+          <span className="text-slate-800 text-2xl font-semibold">{importoDaMostrare.toFixed(2)}€</span>
+        </div>
+        {inAcconto && (
+          <p className="text-center text-slate-400 text-xs mb-5">Su un totale di {Number(pagamento.importo).toFixed(2)}€ — restano {(Number(pagamento.importo) - giaSaldato).toFixed(2)}€ da saldare</p>
+        )}
+        {!inAcconto && <div className="mb-5" />}
+        <p className="text-center text-slate-300 text-[10px] mb-5">Documento riepilogativo non fiscale — dati base</p>
+        <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF</button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) {
+  const [ricevutaAperta, setRicevutaAperta] = useState(false);
+  // Copia locale così, dopo aver registrato un acconto, il dettaglio mostra subito il residuo
+  // aggiornato senza dover chiudere e riaprire il modale.
+  const [pag, setPag] = useState(pagamento);
+  const [acconto, setAcconto] = useState("");
+  const [salvandoAcconto, setSalvandoAcconto] = useState(false);
+  const [erroreAcconto, setErroreAcconto] = useState("");
+  const [modifica, setModifica] = useState(false);
+  const [f, setF] = useState({});
+  const [salvandoMod, setSalvandoMod] = useState(false);
+  const [erroreMod, setErroreMod] = useState("");
+  const nomeCliente = pag.clients ? `${pag.clients.nome} ${pag.clients.cognome || ""}`.trim() : "—";
+
+  const giaSaldato = Number(pag.importo_saldato) || 0;
+  const residuo = pag.importo != null ? Number(pag.importo) - giaSaldato : null;
+
+  const registraAcconto = async () => {
+    setErroreAcconto("");
+    const valore = Number(acconto);
+    if (!acconto || isNaN(valore) || valore <= 0) { setErroreAcconto("Inserisci un importo valido."); return; }
+    setSalvandoAcconto(true);
+    const nuovoSaldato = Math.min(giaSaldato + valore, Number(pag.importo));
+    const completato = nuovoSaldato >= Number(pag.importo) - 0.005; // tolleranza arrotondamento
+    const aggiornamento = completato
+      ? { importo_saldato: Number(pag.importo), stato: "saldato" }
+      : { importo_saldato: nuovoSaldato };
+    const { error } = await supabase.from("payments").update(aggiornamento).eq("id", pag.id);
+    if (!error && completato && MESI_PER_TIPO_PAGAMENTO[pag.tipo_piano] && pag.client_id) await ricalcolaEAggiornaScadenza(pag.client_id);
+    setSalvandoAcconto(false);
+    if (error) { setErroreAcconto("Errore nel salvataggio, riprova."); return; }
+    setPag({ ...pag, ...aggiornamento });
+    setAcconto("");
+    onSalvato?.();
+  };
+
+  const apriModifica = () => {
+    const spesa = pag.stato === "spesa";
+    setF({
+      data: pag.data_pagamento || "",
+      importo: pag.importo == null ? "" : String(spesa ? Math.abs(Number(pag.importo)) : Number(pag.importo)),
+      metodo: pag.metodo_pagamento || "", stato: pag.stato || "saldato", tipo: pag.tipo_piano || "", nota: pag.note || "",
+    });
+    setErroreMod("");
+    setModifica(true);
+  };
+  const salvaModifiche = async () => {
+    setErroreMod("");
+    const spesa = pag.stato === "spesa";
+    const imp = f.importo === "" ? null : Number(f.importo);
+    if (imp !== null && isNaN(imp)) { setErroreMod("L'importo non è valido."); return; }
+    if (!f.data) { setErroreMod("Manca la data."); return; }
+    const upd = spesa
+      ? { data_pagamento: f.data, importo: imp === null ? null : -Math.abs(imp), note: f.nota || null }
+      : { data_pagamento: f.data, importo: imp, metodo_pagamento: f.metodo || null, stato: f.stato, tipo_piano: f.tipo || pag.tipo_piano, note: f.nota || null };
+    setSalvandoMod(true);
+    const { error } = await supabase.from("payments").update(upd).eq("id", pag.id);
+    // Se cambia qualcosa che riguarda un pacchetto a cadenza fissa, la scadenza si riallinea allo storico
+    if (!error && !spesa && pag.client_id && (MESI_PER_TIPO_PAGAMENTO[pag.tipo_piano] || MESI_PER_TIPO_PAGAMENTO[upd.tipo_piano])) await ricalcolaEAggiornaScadenza(pag.client_id);
+    setSalvandoMod(false);
+    if (error) { setErroreMod("Non sono riuscita a salvare, riprova."); return; }
+    setPag({ ...pag, ...upd });
+    setModifica(false);
+    onSalvato?.();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-40 flex items-end sm:items-center justify-center">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-sm p-5 space-y-3">
+        <div className="flex justify-between items-start">
+          <p className="text-sm font-medium text-slate-700 flex items-center gap-2"><CreditCard size={16} /> Dettaglio pagamento</p>
+          <button onClick={onClose} className="text-slate-300 hover:text-slate-500"><X size={18} /></button>
+        </div>
+        {modifica ? (
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">Data</label>
+                <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} className="mt-1" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Importo (€)</label>
+                <input type="number" inputMode="decimal" step="any" value={f.importo} onChange={(e) => setF({ ...f, importo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+              </div>
+              {pag.stato !== "spesa" && (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-500">Metodo</label>
+                    <select value={f.metodo} onChange={(e) => setF({ ...f, metodo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                      <option value="">— da indicare</option>
+                      {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">Stato</label>
+                    <select value={f.stato} onChange={(e) => setF({ ...f, stato: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                      <option value="saldato">Saldato</option>
+                      <option value="da_saldare">Da saldare</option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+            {pag.stato !== "spesa" && (
+              <div>
+                <label className="text-xs text-slate-500">Tipo</label>
+                <input list="tipi-pagamento" value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+                <datalist id="tipi-pagamento">
+                  {["Mensile", "Trimestrale", "Semestrale", "Occasionale", "A lezione", "Variabile", "Pacchetto lezioni Bulb", "Lezione singola Bulb", "Altro"].map((t) => <option key={t} value={t} />)}
+                </datalist>
+              </div>
+            )}
+            <div>
+              <label className="text-xs text-slate-500">{pag.stato === "spesa" ? "Descrizione" : "Nota"}</label>
+              <input value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+            </div>
+            {erroreMod && <p className="text-rose-500 text-xs">{erroreMod}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => setModifica(false)} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
+              <button onClick={salvaModifiche} disabled={salvandoMod} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium disabled:opacity-50">{salvandoMod ? "Salvo..." : "Salva modifiche"}</button>
+            </div>
+          </div>
+        ) : (
+        <div className="space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-slate-400">Cliente</span><span className="text-slate-700 font-medium">{nomeCliente}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Data</span><span className="text-slate-700">{pag.data_pagamento}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Tipo</span><span className="text-slate-700">{pag.tipo_piano || "—"}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Importo totale</span><span className="text-slate-800 font-semibold">{pag.importo != null ? `${Number(pag.importo).toFixed(2)}€` : "—"}</span></div>
+          {pag.stato === "da_saldare" && giaSaldato > 0 && (
+            <>
+              <div className="flex justify-between"><span className="text-slate-400">Già saldato</span><span className="text-emerald-600 font-medium">{giaSaldato.toFixed(2)}€</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Ancora da saldare</span><span className="text-amber-600 font-medium">{residuo.toFixed(2)}€</span></div>
+            </>
+          )}
+          <div className="flex justify-between"><span className="text-slate-400">Metodo</span>{pag.metodo_pagamento ? <span className="text-slate-700">{labelMetodo(pag.metodo_pagamento)}</span> : <span className="text-amber-600 font-medium">da indicare</span>}</div>
+          <div className="flex justify-between"><span className="text-slate-400">Stato</span><span className="text-slate-700 capitalize">{pag.stato === "spesa" ? "Spesa" : pag.stato === "saldato" ? "Saldato" : "Da saldare"}</span></div>
+          {pag.note && <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">Nota</span><span className="text-slate-700 text-right">{pag.note}</span></div>}
+        </div>
+        )}
+
+        {!modifica && (
+          <button onClick={apriModifica} className="w-full border border-slate-200 text-slate-600 rounded-xl py-2 text-sm font-medium">✏️ Modifica pagamento</button>
+        )}
+
+        {!modifica && pag.stato === "da_saldare" && pag.importo != null && (
+          <div className="border-t border-slate-100 pt-3 space-y-2">
+            <p className="text-xs font-medium text-slate-600">Registra un acconto ricevuto (es. contanti a rate)</p>
+            <div className="flex gap-2">
+              <input type="number" step="0.01" value={acconto} onChange={(e) => setAcconto(e.target.value)} placeholder={`es. ${Math.min(residuo, 20).toFixed(0)}`}
+                className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+              <button onClick={registraAcconto} disabled={salvandoAcconto} className="bg-emerald-600 text-white text-sm font-medium rounded-lg px-4 disabled:opacity-50">
+                {salvandoAcconto ? "..." : "Registra"}
+              </button>
+            </div>
+            {erroreAcconto && <p className="text-rose-500 text-xs">{erroreAcconto}</p>}
+            <p className="text-[11px] text-slate-400">L'importo totale resta {Number(pag.importo).toFixed(2)}€ — qui aggiorni solo quanto è già stato incassato, e "da saldare" si ricalcola da solo.</p>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-2">
+          {pag.client_id && (
+            <button onClick={() => { onClose(); onSelectCliente(pag.client_id); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Vai al cliente</button>
+          )}
+          {pag.importo != null && pag.stato !== "spesa" && (
+            <button onClick={() => setRicevutaAperta(true)} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium flex items-center justify-center gap-1.5"><FileText size={14} /> Genera ricevuta</button>
+          )}
+        </div>
+      </div>
+      {ricevutaAperta && <RicevutaModal pagamento={pag} onClose={() => setRicevutaAperta(false)} />}
+    </div>
+  );
+}
+
+function ImportoMancante({ p, onSalvato }) {
+  const [valore, setValore] = useState("");
+  const [salvando, setSalvando] = useState(false);
+
+  const salva = async () => {
+    if (valore === "" || isNaN(Number(valore))) return;
+    setSalvando(true);
+    await supabase.from("payments").update({ importo: Number(valore) }).eq("id", p.id);
+    setSalvando(false);
+    onSalvato();
+  };
+
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="€"
+        className="w-16 border border-amber-300 rounded-lg px-1.5 py-1 text-xs" />
+      <button onClick={salva} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={16} /></button>
+    </div>
+  );
+}
+
+function MetodoMancante({ p, onSalvato }) {
+  const [salvando, setSalvando] = useState(false);
+  const imposta = async (v) => {
+    if (!v) return;
+    setSalvando(true);
+    await supabase.from("payments").update({ metodo_pagamento: v }).eq("id", p.id);
+    setSalvando(false);
+    onSalvato();
+  };
+  return (
+    <select defaultValue="" disabled={salvando} onChange={(e) => imposta(e.target.value)} className="border border-amber-300 rounded-lg px-2 py-1 text-xs bg-white flex-shrink-0">
+      <option value="">Metodo…</option>
+      {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+    </select>
+  );
+}
+
+const categoriaPagamento = (p) => {
+  if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) return "Coaching online";
+  const t = `${p.tipo_piano || ""} ${p.note || ""}`.toLowerCase();
+  if (/lezion|pacchetto|prova|presenza|bulb/.test(t)) return "Lezioni in presenza";
+  if (/mensile|trimestrale|semestrale|online|coaching/.test(t)) return "Coaching online";
+  return "Altro";
+};
+const METODI_ELETTRONICI_STAT = ["satispay", "hype", "sella", "bonifico"];
+
+// Righe di incasso reali (saldati + acconti) e spese, con importo sempre positivo
+function righeContabili(pagamenti) {
+  const out = [];
+  pagamenti.forEach((p) => {
+    if (p.importo == null) return;
+    if (p.stato === "spesa") out.push({ tipo: "spesa", d: p.data_pagamento, imp: Math.abs(Number(p.importo)), p });
+    else if (p.stato === "saldato" && Number(p.importo) > 0) out.push({ tipo: "incasso", d: p.data_pagamento, imp: Number(p.importo), p });
+    else if (p.stato === "da_saldare" && Number(p.importo_saldato) > 0) out.push({ tipo: "incasso", d: p.data_pagamento, imp: Number(p.importo_saldato), p });
+  });
+  return out;
+}
+
+async function esportaRiepilogoCommercialista(meseChiave) {
+  const XLSX = await caricaModuloExcel();
+  const pagamenti = await leggiTutto(() => supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento").order("id"));
+  const righe = righeContabili(pagamenti).filter((r) => (r.d || "").slice(0, 7) === meseChiave);
+  const nomeOrd = (r) => (r.p.clients ? `${r.p.clients.nome} ${r.p.clients.cognome || ""}`.trim() : "").toLowerCase();
+  // Incassi del mese ordinati per cliente e poi per data: i pagamenti della stessa persona restano vicini
+  const incassi = righe.filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti") // i contanti non vanno al commercialista
+    .sort((x, y) => nomeOrd(x).localeCompare(nomeOrd(y)) || (x.d || "").localeCompare(y.d || ""));
+  const spese = righe.filter((r) => r.tipo === "spesa");
+  const tot = (l) => Math.round(l.reduce((s, r) => s + r.imp, 0) * 100) / 100;
+  const dt = (s) => (s ? new Date(`${s}T12:00:00`) : "");
+  const nomeC = (p) => (p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "");
+  const [anno, mese] = meseChiave.split("-").map(Number);
+  const titoloMese = new Date(anno, mese - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" });
+
+  const perMetodo = {};
+  incassi.forEach((r) => { const k = labelMetodo(r.p.metodo_pagamento) || "non specificato"; perMetodo[k] = (perMetodo[k] || 0) + r.imp; });
+  const perCategoria = {};
+  incassi.forEach((r) => { const k = categoriaPagamento(r.p); perCategoria[k] = (perCategoria[k] || 0) + r.imp; });
+  const elettronici = tot(incassi.filter((r) => METODI_ELETTRONICI_STAT.includes(r.p.metodo_pagamento)));
+
+  // Storico per cliente: tutti i pagamenti (senza contanti) dall'inizio dell'anno fino al mese scelto,
+  // raggruppati per cliente, così si vedono i rinnovi uno sotto l'altro con il totale di ciascuna.
+  const storico = righeContabili(pagamenti).filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti"
+    && (r.d || "").slice(0, 4) === String(anno) && (r.d || "").slice(0, 7) <= meseChiave)
+    .sort((x, y) => nomeOrd(x).localeCompare(nomeOrd(y)) || (x.d || "").localeCompare(y.d || ""));
+  const gruppi = [];
+  storico.forEach((r) => {
+    const k = r.p.client_id || nomeOrd(r);
+    let g = gruppi[gruppi.length - 1];
+    if (!g || g.k !== k) { g = { k, nome: nomeC(r.p) || "(senza cliente)", righe: [] }; gruppi.push(g); }
+    g.righe.push(r);
+  });
+  const righeStorico = [["Cliente", "Data", "Descrizione", "Metodo", "Importo (€)", "N. pagamento", "Nel mese scelto"]];
+  gruppi.forEach((g) => {
+    g.righe.forEach((r, i) => righeStorico.push([g.nome, dt(r.d), r.p.tipo_piano || "", labelMetodo(r.p.metodo_pagamento), r.imp, i + 1, (r.d || "").slice(0, 7) === meseChiave ? "sì" : ""]));
+    righeStorico.push([`Totale ${g.nome}`, "", "", "", tot(g.righe), `${g.righe.length} pagament${g.righe.length === 1 ? "o" : "i"}`, ""]);
+    righeStorico.push(["", "", "", "", "", "", ""]);
+  });
+  if (gruppi.length === 0) righeStorico.push(["Nessun pagamento", "", "", "", "", "", ""]);
+
+  const fogli = [
+    ["Riepilogo", [
+      [`Riepilogo ${titoloMese}`, ""],
+      ["Totale incassi (€)", tot(incassi)],
+      ["Totale spese (€)", tot(spese)],
+      ["Utile netto (€)", Math.round((tot(incassi) - tot(spese)) * 100) / 100],
+      ["", ""],
+      ["Pagamenti elettronici (€)", elettronici],
+      ["Nota", "Esclusi i pagamenti in contanti"],
+      ["", ""],
+      ["Incassi per metodo", ""],
+      ...Object.entries(perMetodo).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+      ["", ""],
+      ["Incassi per tipo di servizio", ""],
+      ...Object.entries(perCategoria).map(([k, v]) => [k, Math.round(v * 100) / 100]),
+    ]],
+    ["Incassi", [["Data", "Cliente", "Descrizione", "Metodo", "Importo (€)", "Note"], ...incassi.map((r) => [dt(r.d), nomeC(r.p), r.p.tipo_piano || "", labelMetodo(r.p.metodo_pagamento), r.imp, r.p.note || ""]), ["", "", "", "Totale", tot(incassi), ""]]],
+    ["Storico per cliente", righeStorico],
+    ["Spese", [["Data", "Descrizione", "Importo (€)", "Note"], ...spese.map((r) => [dt(r.d), r.p.tipo_piano || "Spesa", r.imp, r.p.note || ""]), ["", "Totale", tot(spese), ""]]],
+  ];
+  const wb = XLSX.utils.book_new();
+  fogli.forEach(([titolo, rows]) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
+    Object.keys(ws).forEach((k) => { if (k[0] !== "!" && ws[k].t === "d") ws[k].z = "dd/mm/yyyy"; });
+    ws["!cols"] = rows[0].map((h, i) => ({ wch: Math.min(40, Math.max(String(h).length + 2, ...rows.slice(1, 80).map((r) => String(r[i] instanceof Date ? "00/00/0000" : (r[i] ?? "")).length + 2), 14)) }));
+    XLSX.utils.book_append_sheet(wb, ws, titolo);
+  });
+  XLSX.writeFile(wb, `riepilogo-commercialista-${meseChiave}.xlsx`, { cellDates: true });
+  return { incassi: incassi.length, spese: spese.length, senzaMetodo: incassi.filter((r) => !r.p.metodo_pagamento).length };
+}
+
+function StatisticheCoach({ clients }) {
+  const oggi = new Date();
+  const chiaveDi = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const mesiLista = Array.from({ length: 12 }, (_, i) => chiaveDi(new Date(oggi.getFullYear(), oggi.getMonth() - i, 1)));
+  const [mese, setMese] = useState(mesiLista[0]);
+  const [dati, setDati] = useState(null);
+  const [esportando, setEsportando] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const pagamenti = await leggiTutto(() => supabase.from("payments").select("*").order("id"));
+        const pacchetti = await leggiTutto(() => supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, stato, creato_il, completato_il").order("id"));
+        setDati({ pagamenti, pacchetti });
+      } catch (e) { setDati({ pagamenti: [], pacchetti: [] }); }
+    })();
+  }, []);
+
+  if (!dati) return <Spinner />;
+  const eur = (n) => `${(Math.round(n * 100) / 100).toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} €`;
+  const nelMese = (d) => (d || "").slice(0, 7) === mese;
+  const righe = righeContabili(dati.pagamenti);
+  const incassiMese = righe.filter((r) => r.tipo === "incasso" && nelMese(r.d));
+  const speseMese = righe.filter((r) => r.tipo === "spesa" && nelMese(r.d));
+  const somma = (l) => l.reduce((s, r) => s + r.imp, 0);
+  const totInc = somma(incassiMese), totSpese = somma(speseMese);
+
+  const perCat = {};
+  incassiMese.forEach((r) => { const k = categoriaPagamento(r.p); perCat[k] = (perCat[k] || 0) + r.imp; });
+  const catOrd = Object.entries(perCat).sort((a, b) => b[1] - a[1]);
+  const elettronici = somma(incassiMese.filter((r) => METODI_ELETTRONICI_STAT.includes(r.p.metodo_pagamento)));
+  const contanti = somma(incassiMese.filter((r) => r.p.metodo_pagamento === "contanti"));
+
+  // Rinnovi coaching online: pagamenti a cadenza fissa la cui copertura finisce nel mese scelto
+  const fissi = dati.pagamenti.filter((p) => MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.stato === "saldato" && p.data_pagamento);
+  let attesiOnline = 0, rinnovatiOnline = 0;
+  fissi.forEach((p) => {
+    const fine = addMesi(p.data_pagamento, MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]);
+    if (!nelMese(fine)) return;
+    attesiOnline += 1;
+    if (dati.pagamenti.some((q) => q.client_id === p.client_id && q.id !== p.id && MESI_PER_TIPO_PAGAMENTO[q.tipo_piano] && q.data_pagamento > p.data_pagamento && q.data_pagamento <= addGiorni(fine, 20))) rinnovatiOnline += 1;
+  });
+  // Rinnovi pacchetti lezioni: pacchetti completati nel mese, seguiti da un nuovo pacchetto
+  const completati = dati.pacchetti.filter((pk) => nelMese(pk.completato_il));
+  const rinnovatiLez = completati.filter((pk) => dati.pacchetti.some((q) => q.client_id === pk.client_id && q.id !== pk.id && (q.creato_il || "") >= (pk.creato_il || "") && q.id > pk.id)).length;
+  const attesiTot = attesiOnline + completati.length;
+  const rinnovatiTot = rinnovatiOnline + rinnovatiLez;
+  const retention = attesiTot > 0 ? Math.round((rinnovatiTot / attesiTot) * 100) : null;
+
+  const attive = clients.filter((c) => !c.archiviato);
+  const nOnline = attive.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length;
+  const nBulb = attive.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length;
+  const labelMese = (k) => { const [a, m] = k.split("-").map(Number); return new Date(a, m - 1, 1).toLocaleDateString("it-IT", { month: "long", year: "numeric" }); };
+
+  const esporta = async () => {
+    setEsportando(true); setMsg("");
+    try { const r = await esportaRiepilogoCommercialista(mese); setMsg(`Scaricato: ${r.incassi} incassi e ${r.spese} spese.${r.senzaMetodo ? ` Attenzione: ${r.senzaMetodo} incassi non hanno il metodo indicato (li trovi in Guadagni, "Metodo di pagamento mancante").` : ""}`); }
+    catch (e) { setMsg("Esportazione non riuscita: " + (e.message || "riprova")); }
+    setEsportando(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <select value={mese} onChange={(e) => { setMese(e.target.value); setMsg(""); }} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm bg-white capitalize">
+        {mesiLista.map((k) => <option key={k} value={k}>{labelMese(k)}</option>)}
+      </select>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Card className="p-4"><p className="text-xs text-slate-500">Incassato</p><p className="text-xl font-semibold text-slate-800 mt-1">{eur(totInc)}</p></Card>
+        <Card className="p-4"><p className="text-xs text-slate-500">Utile netto</p><p className="text-xl font-semibold text-slate-800 mt-1">{eur(totInc - totSpese)}</p><p className="text-[11px] text-slate-400 mt-0.5">spese {eur(totSpese)}</p></Card>
+      </div>
+
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Incassi per tipo di servizio</p>
+        {catOrd.length === 0 && <p className="text-slate-400 text-sm">Nessun incasso in questo mese.</p>}
+        {catOrd.map(([k, v]) => (
+          <div key={k}>
+            <div className="flex justify-between text-sm"><span className="text-slate-700">{k}</span><span className="font-medium text-slate-800">{eur(v)}</span></div>
+            <div className="h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden"><div className="h-full bg-sky-500 rounded-full" style={{ width: `${totInc ? Math.round((v / totInc) * 100) : 0}%` }} /></div>
+          </div>
+        ))}
+        {totInc > 0 && <p className="text-[11px] text-slate-400 pt-1">Elettronici {eur(elettronici)} · Contanti {eur(contanti)}</p>}
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi e fidelizzazione</p>
+        {attesiTot === 0 ? <p className="text-slate-400 text-sm">Nessun rinnovo previsto in questo mese.</p> : (
+          <>
+            <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-emerald-600 ml-2">{retention}%</span>}</p>
+            <p className="text-xs text-slate-500">Coaching online: {rinnovatiOnline} su {attesiOnline} · Pacchetti lezioni: {rinnovatiLez} su {completati.length}</p>
+          </>
+        )}
+        <p className="text-xs text-slate-500 pt-1">Clienti attive: {attive.length} (online {nOnline} · Bulb {nBulb})</p>
+      </Card>
+
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
+        <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, più un foglio con i pagamenti raggruppati per cliente (rinnovi vicini). Senza i pagamenti in contanti.</p>
+        <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : `⬇ Scarica riepilogo ${labelMese(mese)}`}</button>
+        {msg && <p className="text-xs text-slate-500">{msg}</p>}
+      </Card>
+    </div>
+  );
+}
+
+function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
+  const [pagamenti, setPagamenti] = useState([]);
+  const [billing, setBilling] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+  const [filtro, setFiltro] = useState("tutti");
+  const [pagamentoAperto, setPagamentoAperto] = useState(null);
+  const [pacchettiAttivi, setPacchettiAttivi] = useState([]);
+  const [lezioniPacchetti, setLezioniPacchetti] = useState([]);
+
+  const carica = async () => {
+    const { data: pg } = await supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento", { ascending: false });
+    setPagamenti(pg || []);
+    const { data: bl } = await supabase.from("client_billing").select("*");
+    setBilling(bl || []);
+    try {
+      setPacchettiAttivi(await leggiTutto(() => supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, stato").eq("stato", "attivo").order("id")));
+      setLezioniPacchetti(await leggiTutto(() => supabase.from("lezioni_svolte").select("pacchetto_id, client_id, numero, data").not("pacchetto_id", "is", null).order("id")));
+    } catch (e) { /* senza questi dati restano solo i rinnovi online */ }
+    setCaricando(false);
+  };
+  useEffect(() => { carica(); }, []);
+
+  if (caricando) return <Spinner />;
+
+  const oggi = new Date();
+  const meseChiave = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; // usa la data locale, non toISOString (che converte in UTC e sfasa il mese)
+  const meseCorrente = meseChiave(oggi);
+  const conImporto = pagamenti.filter((p) => p.importo != null);
+  const incassi = conImporto.filter((p) => p.stato === "saldato");
+  const spese = conImporto.filter((p) => p.stato === "spesa");
+  const daSaldare = conImporto.filter((p) => p.stato === "da_saldare");
+  // Gli acconti già incassati su un pagamento "da saldare" (pagamenti a rate in contanti) contano
+  // comunque come soldi in cassa, anche se il pagamento nel suo complesso non è ancora saldato —
+  // qui li trattiamo come righe nette a sé (stessa data del pagamento originale) così entrano
+  // negli stessi totali/grafico mensile degli incassi saldati, senza toccare la scadenza del
+  // pacchetto (che si basa solo su tipo_piano e data, non sull'importo).
+  const accontiSaldare = daSaldare.filter((p) => Number(p.importo_saldato) > 0)
+    .map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo_saldato) }));
+  const nettoRows = [
+    ...incassi.map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo) })),
+    ...spese.map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo) })),
+    ...accontiSaldare,
+  ];
+  const totaleIncassato = incassi.reduce((s, p) => s + Number(p.importo), 0) + accontiSaldare.reduce((s, p) => s + p.importo, 0);
+  const totaleSpese = spese.reduce((s, p) => s + Number(p.importo), 0);
+  const totaleNetto = totaleIncassato + totaleSpese;
+  const totaleDaSaldare = daSaldare.reduce((s, p) => s + (Number(p.importo) - Number(p.importo_saldato || 0)), 0);
+  const guadagnoMese = nettoRows.filter((p) => (p.data_pagamento || "").slice(0, 7) === meseCorrente).reduce((s, p) => s + Number(p.importo), 0);
+
+  // Guadagni mensili — dal primo mese con dati ad oggi (incassi al netto delle spese)
+  const primaChiaveDati = nettoRows.reduce((min, p) => {
+    const c = (p.data_pagamento || "").slice(0, 7);
+    return c && (!min || c < min) ? c : min;
+  }, null);
+  const meseInizio = primaChiaveDati && primaChiaveDati < `${oggi.getFullYear()}-01` ? primaChiaveDati : `${oggi.getFullYear()}-01`;
+  const [annoInizio, mInizio] = meseInizio.split("-").map(Number);
+  const mesi = [];
+  {
+    let d = new Date(annoInizio, mInizio - 1, 1);
+    const fine = new Date(oggi.getFullYear(), oggi.getMonth(), 1);
+    while (d <= fine) {
+      mesi.push({ chiave: meseChiave(d), label: d.toLocaleDateString("it-IT", { month: "short", year: annoInizio !== oggi.getFullYear() ? "2-digit" : undefined }), totale: 0 });
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
+  }
+  nettoRows.forEach((p) => {
+    const chiave = (p.data_pagamento || "").slice(0, 7);
+    const m = mesi.find((x) => x.chiave === chiave);
+    if (m) m.totale += Number(p.importo);
+  });
+
+  // Per metodo di pagamento (solo incassi saldati, le spese non hanno un metodo)
+  const perMetodo = {};
+  incassi.forEach((p) => {
+    const k = p.metodo_pagamento || "non specificato";
+    perMetodo[k] = (perMetodo[k] || 0) + Number(p.importo);
+  });
+  const metodiOrdinati = Object.entries(perMetodo).sort((a, b) => b[1] - a[1]);
+
+  // Versione "senza contanti" per il file da esportare: stessi conti di sopra, ma ignorando
+  // i pagamenti (e gli acconti) pagati in contanti. Le spese restano, perché non hanno un metodo.
+  const nonContanti = (p) => p.metodo_pagamento !== "contanti";
+  const nettoRowsSC = [
+    ...incassi.filter(nonContanti).map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo) })),
+    ...spese.map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo) })),
+    ...daSaldare.filter((p) => nonContanti(p) && Number(p.importo_saldato) > 0).map((p) => ({ data_pagamento: p.data_pagamento, importo: Number(p.importo_saldato) })),
+  ];
+  const sommaSC = (l) => l.reduce((x, r) => x + Number(r.importo), 0);
+  const totaleIncassatoSC = sommaSC(nettoRowsSC.filter((r) => r.importo > 0));
+  const totaleNettoSC = sommaSC(nettoRowsSC);
+  const guadagnoMeseSC = sommaSC(nettoRowsSC.filter((r) => (r.data_pagamento || "").slice(0, 7) === meseCorrente));
+  const mesiSC = mesi.map((m) => ({ ...m, totale: sommaSC(nettoRowsSC.filter((r) => (r.data_pagamento || "").slice(0, 7) === m.chiave)) }));
+  const metodiOrdinatiSC = metodiOrdinati.filter(([k]) => k !== "contanti");
+  const totaleDaSaldareSC = daSaldare.filter(nonContanti).reduce((x, p) => x + (Number(p.importo) - Number(p.importo_saldato || 0)), 0);
+
+  // Incassi (saldati o acconti) a cui manca il metodo di pagamento: vanno completati
+  const senzaMetodo = [
+    ...incassi.map((p) => ({ p, imp: Number(p.importo) })),
+    ...daSaldare.filter((p) => Number(p.importo_saldato) > 0).map((p) => ({ p, imp: Number(p.importo_saldato) })),
+  ].filter((r) => !r.p.metodo_pagamento && r.imp > 0);
+  const totaleSenzaMetodo = senzaMetodo.reduce((x, r) => x + r.imp, 0);
+
+  // Rinnovi imminenti — clienti con pacchetto attivo/in scadenza ordinati per data_scadenza
+  const billingByClient = {};
+  billing.forEach((b) => { billingByClient[b.client_id] = b; });
+  // Solo pacchetti a cadenza fissa hanno una data di rinnovo coerente da mostrare — Occasionale/A lezione/Altro non hanno una scadenza prevedibile
+  const rinnovi = clients
+    .filter((c) => c.data_scadenza && c.stato_pacchetto !== "scaduto" && c.stato_pacchetto !== "gratuito" && ["Mensile", "Trimestrale", "Semestrale"].includes(c.piano))
+    .sort((a, b) => (a.data_scadenza || "").localeCompare(b.data_scadenza || ""))
+    .slice(0, 8);
+
+  // Rinnovi previsti nel mese corrente (entrano in automatico nel "Da saldare"):
+  // - online (mensile/trimestrale/semestrale) con scadenza in questo mese e nessun pagamento già registrato nel mese;
+  // - pacchetti lezioni attivi che si completano in questo mese (o già completati e proseguiti con lezioni extra).
+  const TIPI_ONLINE = ["Mensile", "Trimestrale", "Semestrale"];
+  const nelMese = (d) => (d || "").slice(0, 7) === meseCorrente;
+  const pagMese = (id, pred) => pagamenti.some((p) => p.client_id === id && nelMese(p.data_pagamento) && pred(p));
+  const ultimoImporto = (id, pred) => { // pagamenti è già ordinato dal più recente
+    const l = pagamenti.filter((p) => p.client_id === id && p.stato !== "spesa" && Number(p.importo) > 0 && pred(p));
+    return l.length ? Number(l[0].importo) : null;
+  };
+  const previsti = [];
+  clients.forEach((c) => {
+    if (c.archiviato || c.stato_pacchetto === "gratuito") return;
+    if (pagMese(c.id, (p) => p.stato === "da_saldare")) return; // già presente tra i da saldare
+    const bs = billingByClient[c.id];
+    if (bs?.frequenza_pagamento === "a_lezione" && Number(bs.importo_ricorrente) > 0) {
+      // Paga a lezione: lezioni a settimana ricavate dalle ultime 4 settimane, per le settimane che restano nel mese
+      const oggiStr = formatDataLocale(oggi);
+      const da = addGiorni(oggiStr, -28);
+      const nUltime = lezioniPacchetti.filter((l) => l.client_id === c.id && l.data > da && l.data <= oggiStr).length;
+      const aSett = Math.round((nUltime / 4) * 2) / 2;
+      const giorniMese = new Date(oggi.getFullYear(), oggi.getMonth() + 1, 0).getDate();
+      const settimaneRim = Math.max(0, Math.round((giorniMese - oggi.getDate() + 1) / 7));
+      const prezzo = Number(bs.importo_ricorrente);
+      if (aSett > 0 && settimaneRim > 0) previsti.push({ chiave: `${c.id}-lez`, cliente: c, titolo: `${String(aSett).replace(".", ",")} lezioni a settimana × ${settimaneRim} settiman${settimaneRim === 1 ? "a" : "e"} × ${prezzo.toFixed(0)}€`, data: null, importo: aSett * settimaneRim * prezzo });
+      return;
+    }
+    if (nelMese(c.data_scadenza) && TIPI_ONLINE.includes(c.piano) && !pagMese(c.id, (p) => TIPI_ONLINE.includes(p.tipo_piano))) {
+      const b = billingByClient[c.id];
+      const imp = b?.importo_ricorrente != null && Number(b.importo_ricorrente) > 0 ? Number(b.importo_ricorrente) : ultimoImporto(c.id, (p) => p.tipo_piano === c.piano);
+      previsti.push({ chiave: `${c.id}-online`, cliente: c, titolo: `Rinnovo ${c.piano.toLowerCase()}${c.stato_pacchetto === "scaduto" ? " (pacchetto scaduto)" : ""}`, data: c.data_scadenza, importo: imp });
+    }
+    pacchettiAttivi.filter((pk) => pk.client_id === c.id).forEach((pk) => {
+      const N = Number(pk.numero_lezioni);
+      if (!N) return;
+      const righe = lezioniPacchetti.filter((l) => l.pacchetto_id === pk.id);
+      const dataN = righe.find((l) => Number(l.numero) === N)?.data;
+      const extraNelMese = righe.some((l) => Number(l.numero) > N && nelMese(l.data));
+      if (!(nelMese(dataN) || extraNelMese)) return;
+      const re = new RegExp(`(^|\\D)${N}\\s*lezion`, "i");
+      previsti.push({ chiave: `${pk.id}-pk`, cliente: c, titolo: `Nuovo pacchetto ${N} lezioni`, data: dataN, importo: ultimoImporto(c.id, (p) => re.test(p.note || "")) });
+    });
+  });
+  const totalePrevisti = previsti.reduce((s, v) => s + (v.importo || 0), 0);
+  const totaleDaSaldareConPrevisti = totaleDaSaldare + totalePrevisti;
+
+  // Previsione entrate del mese: già incassato + da saldare registrato + rinnovi previsti (al netto delle spese del mese)
+  const incassatoMese = nettoRows.filter((p) => nelMese(p.data_pagamento) && Number(p.importo) > 0).reduce((s, p) => s + Number(p.importo), 0);
+  const speseMese = spese.filter((p) => nelMese(p.data_pagamento)).reduce((s, p) => s + Number(p.importo), 0); // valore negativo
+  const previsioneEntrate = incassatoMese + totaleDaSaldare + totalePrevisti;
+
+  // Elettronici (tutti i metodi insieme) contro contanti, sugli incassi reali (saldati + acconti)
+  const METODI_ELETTRONICI = ["satispay", "hype", "sella", "bonifico"];
+  const righeMetodo = [
+    ...incassi.map((p) => ({ m: p.metodo_pagamento, imp: Number(p.importo), d: p.data_pagamento })),
+    ...daSaldare.filter((p) => Number(p.importo_saldato) > 0).map((p) => ({ m: p.metodo_pagamento, imp: Number(p.importo_saldato), d: p.data_pagamento })),
+  ].filter((r) => r.imp > 0);
+  const raggruppaMetodi = (righe) => {
+    const out = { elettronici: { tot: 0, n: 0 }, contanti: { tot: 0, n: 0 }, altro: { tot: 0, n: 0 } };
+    righe.forEach((r) => {
+      const k = r.m === "contanti" ? "contanti" : METODI_ELETTRONICI.includes(r.m) ? "elettronici" : "altro";
+      out[k].tot += r.imp; out[k].n += 1;
+    });
+    return out;
+  };
+  const metodiMese = raggruppaMetodi(righeMetodo.filter((r) => nelMese(r.d)));
+  const metodiTotali = raggruppaMetodi(righeMetodo);
+
+  const pagamentiVisibili = filtro === "tutti" ? pagamenti : pagamenti.filter((p) => p.stato === filtro);
+
+  const cambiaStato = async (p) => {
+    if (p.stato === "spesa") return; // le spese non si alternano tra saldato/da saldare
+    await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
+    carica();
+  };
+  const elimina = async (p) => {
+    if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
+    await supabase.from("payments").delete().eq("id", p.id);
+    // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
+    if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
+      await ricalcolaEAggiornaScadenza(p.client_id);
+      onClientiCambiati?.();
+    }
+    carica();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Guadagno del mese (netto)</p>
+          <p className="text-lg font-semibold text-slate-800 mt-0.5">{guadagnoMese.toFixed(2)}€</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Totale netto da inizio anno</p>
+          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleNetto.toFixed(2)}€</p>
+        </Card>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Incassato</p>
+          <p className="text-base font-semibold text-slate-700 mt-0.5">{totaleIncassato.toFixed(2)}€</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Spese (affitto ecc.)</p>
+          <p className="text-base font-semibold text-rose-600 mt-0.5">{totaleSpese.toFixed(2)}€</p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-[11px] text-slate-400">Da saldare</p>
+          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldareConPrevisti.toFixed(2)}€</p>
+          {totalePrevisti > 0 && <p className="text-[10px] text-slate-400 leading-tight">di cui {totalePrevisti.toFixed(2)}€ rinnovi previsti</p>}
+        </Card>
+      </div>
+      {previsti.length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi previsti questo mese</p>
+            <span className="text-xs font-semibold text-amber-600">{totalePrevisti.toFixed(2)}€</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {previsti.map((v) => (
+              <button key={v.chiave} onClick={() => onSelect(v.cliente.id)} className="w-full flex items-center justify-between py-2 text-left gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700 font-medium truncate">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="text-xs text-slate-400">{v.titolo}{v.data ? ` · ${v.data.split("-").reverse().join("/")}` : ""}</p>
+                </div>
+                {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-amber-600 flex-shrink-0">importo da definire</span>}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">Calcolati in automatico da scadenze e pacchetti. Spariscono appena registri il pagamento.</p>
+        </Card>
+      )}
+      <Card className="p-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Previsione entrate di {oggi.toLocaleDateString("it-IT", { month: "long" })}</p>
+        <div className="space-y-1.5 text-sm">
+          <div className="flex justify-between"><span className="text-slate-500">Già incassato nel mese</span><span className="font-medium text-slate-700">{incassatoMese.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Da saldare (già registrati)</span><span className="font-medium text-slate-700">{totaleDaSaldare.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Rinnovi previsti</span><span className="font-medium text-slate-700">{totalePrevisti.toFixed(2)}€</span></div>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Entrate previste</span><span className="font-semibold text-emerald-600">{previsioneEntrate.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Spese del mese</span><span className="font-medium text-rose-600">{speseMese.toFixed(2)}€</span></div>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Previsione netta</span><span className="font-semibold text-slate-800">{(previsioneEntrate + speseMese).toFixed(2)}€</span></div>
+        </div>
+        {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-amber-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
+      </Card>
+
+      {senzaMetodo.length > 0 && (
+        <Card className="p-4 border border-amber-200 bg-amber-50/40">
+          <div className="flex items-baseline justify-between mb-1">
+            <p className="text-xs uppercase tracking-wide text-amber-700 font-medium">Metodo di pagamento mancante</p>
+            <span className="text-xs font-semibold text-amber-700">{totaleSenzaMetodo.toFixed(2)}€</span>
+          </div>
+          <p className="text-[11px] text-slate-500 mb-2">{senzaMetodo.length} pagament{senzaMetodo.length === 1 ? "o" : "i"} senza metodo. Scegli il metodo qui e si salva subito: poi le statistiche e il file si aggiornano da soli.</p>
+          <div className="divide-y divide-amber-100">
+            {senzaMetodo.map(({ p, imp }) => (
+              <div key={p.id} className="flex items-center gap-2 py-2">
+                <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
+                  <p className="text-sm text-slate-700 font-medium truncate">{p.clients ? `${p.clients.nome} ${p.clients.cognome || ""}` : "—"}</p>
+                  <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano} · {imp.toFixed(2)}€</p>
+                </button>
+                <MetodoMancante p={p} onSalvato={carica} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card className="p-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Elettronici e contanti (incassi)</p>
+        <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 gap-y-1.5 text-sm items-baseline">
+          <span></span><span className="text-[11px] text-slate-400 text-right">Questo mese</span><span className="text-[11px] text-slate-400 text-right">Totale</span>
+          {[["elettronici", "Elettronici"], ["contanti", "Contanti"], ["altro", "Altro / non indicato"]].map(([k, l]) => (
+            (metodiTotali[k].n > 0) && (
+              <React.Fragment key={k}>
+                <span className="text-slate-600">{l}</span>
+                <span className="text-right text-slate-700 font-medium">{metodiMese[k].tot.toFixed(2)}€ <span className="text-slate-400 font-normal text-[11px]">({metodiMese[k].n})</span></span>
+                <span className="text-right text-slate-700 font-medium">{metodiTotali[k].tot.toFixed(2)}€ <span className="text-slate-400 font-normal text-[11px]">({metodiTotali[k].n})</span></span>
+              </React.Fragment>
+            )
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-400 mt-2">Elettronici = Satispay, Hype, Sella e bonifico insieme. Tra parentesi il numero di pagamenti.</p>
+      </Card>
+
+      <button
+        onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese: guadagnoMeseSC, totaleNetto: totaleNettoSC, totaleIncassato: totaleIncassatoSC, totaleSpese, totaleDaSaldare: totaleDaSaldareSC + totalePrevisti, mesi: mesiSC, metodiOrdinati: metodiOrdinatiSC })}
+        className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
+        ⬇ Scarica prospetto guadagni (CSV, senza contanti)
+      </button>
+
+      <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} onClientiCambiati={onClientiCambiati} />
+
+      <Card className="p-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Guadagni mensili {oggi.getFullYear()} (netto: incassi − spese)</p>
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={mesi}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
+            <YAxis tick={{ fontSize: 11, fill: "#64748b" }} width={35} />
+            <Tooltip formatter={(v) => `${v.toFixed(2)}€`} />
+            <Bar dataKey="totale" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+          {mesi.map((m) => (
+            <div key={m.chiave} className="flex justify-between text-xs">
+              <span className="text-slate-500 capitalize">{new Date(m.chiave + "-01").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</span>
+              <span className={`font-medium ${m.totale < 0 ? "text-rose-600" : "text-slate-700"}`}>{m.totale.toFixed(2)}€</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {metodiOrdinati.length > 0 && (
+        <Card className="p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Per metodo di pagamento (saldato)</p>
+          <div className="space-y-1.5">
+            {metodiOrdinati.map(([k, v]) => (
+              <div key={k} className="flex justify-between text-sm">
+                <span className="text-slate-600 capitalize">{labelMetodo(k) === k ? k : labelMetodo(k)}</span>
+                <span className="text-slate-700 font-medium">{v.toFixed(2)}€</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {rinnovi.length > 0 && (
+        <Card className="p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Prossimi rinnovi (pagamenti programmati)</p>
+          <div className="divide-y divide-slate-100">
+            {rinnovi.map((c) => {
+              const b = billingByClient[c.id];
+              return (
+                <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-2 text-left">
+                  <div className="min-w-0">
+                    <p className="text-sm text-slate-700 font-medium truncate">{c.nome} {c.cognome}</p>
+                    <p className="text-xs text-slate-400">
+                      {b?.importo_ricorrente != null ? `${Number(b.importo_ricorrente).toFixed(2)}€` : "Importo non impostato"}
+                      {b?.frequenza_pagamento ? ` · ${labelFrequenza(b.frequenza_pagamento)}` : ""}
+                      {b?.metodo_pagamento_abituale ? ` · ${labelMetodo(b.metodo_pagamento_abituale)}` : ""}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-medium flex-shrink-0 ${c.stato_pacchetto === "in scadenza" ? "text-amber-600" : "text-slate-400"}`}>{c.data_scadenza?.split("-").reverse().join("/")}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      <div>
+        <div className="flex gap-2 mb-2 px-1">
+          {[["tutti", "Tutti"], ["saldato", "Saldati"], ["da_saldare", "Da saldare"], ["spesa", "Spese"]].map(([k, l]) => (
+            <button key={k} onClick={() => setFiltro(k)} className={`px-3 py-1 rounded-full text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>{l}</button>
+          ))}
+        </div>
+        <Card className="p-1 divide-y divide-slate-100">
+          {pagamentiVisibili.length === 0 && <p className="text-center text-slate-400 text-sm py-4">Nessun pagamento.</p>}
+          {pagamentiVisibili.map((p) => (
+            <div key={p.id} className="flex items-center gap-2 px-3 py-2.5">
+              <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
+                <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
+                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" ? <span className="text-amber-600"> · metodo mancante</span> : "")}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
+                {p.stato === "da_saldare" && Number(p.importo_saldato) > 0 && (
+                  <p className="text-[11px] text-emerald-600">Acconto ricevuto: {Number(p.importo_saldato).toFixed(2)}€</p>
+                )}
+              </button>
+              {p.importo != null ? (
+                p.stato === "da_saldare" && Number(p.importo_saldato) > 0 ? (
+                  <span className="text-sm font-medium flex-shrink-0 text-amber-600">{(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€ <span className="text-slate-300 font-normal">/ {Number(p.importo).toFixed(2)}€</span></span>
+                ) : (
+                  <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{Number(p.importo).toFixed(2)}€</span>
+                )
+              ) : (
+                <ImportoMancante p={p} onSalvato={carica} />
+              )}
+              {p.stato && (
+                p.stato === "spesa" ? (
+                  <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-rose-100 text-rose-700">Spesa</span>
+                ) : (
+                  <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                    {p.stato === "saldato" ? "Saldato" : "Da saldare"}
+                  </button>
+                )
+              )}
+              <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
+            </div>
+          ))}
+        </Card>
+      </div>
+
+      {pagamentoAperto && (
+        <PagamentoDettaglio pagamento={pagamentoAperto} onClose={() => setPagamentoAperto(null)} onSelectCliente={onSelect} onSalvato={carica} />
+      )}
+    </div>
+  );
+}
+
+function GrigliaCompletezza({ clients, onSelect }) {
+  const [nutrizione, setNutrizione] = useState({});
+  const [allenamento, setAllenamento] = useState({});
+  const [caricando, setCaricando] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      // Un'unica query per tutti i clienti per ciascuna tabella, poi si riduce in memoria alla
+      // data più recente per client_id — molto più leggero di una query per cliente.
+      const { data: nu } = await supabase.from("nutrition_plans").select("client_id, data_aggiornamento");
+      const nuMap = {};
+      (nu || []).forEach((r) => {
+        if (!r.client_id) return;
+        if (!nuMap[r.client_id] || (r.data_aggiornamento || "") > nuMap[r.client_id]) nuMap[r.client_id] = r.data_aggiornamento;
+      });
+      setNutrizione(nuMap);
+
+      const { data: te } = await supabase.from("training_entries").select("client_id, data");
+      const teMap = {};
+      (te || []).forEach((r) => {
+        if (!r.client_id) return;
+        if (!teMap[r.client_id] || (r.data || "") > teMap[r.client_id]) teMap[r.client_id] = r.data;
+      });
+      setAllenamento(teMap);
+
+      setCaricando(false);
+    })();
+  }, []);
+
+  if (caricando) return <Spinner />;
+
+  const oggi = formatDataLocale(new Date());
+  const giorniDa = (d) => (d ? Math.round((new Date(oggi + "T00:00:00") - new Date(d + "T00:00:00")) / 86400000) : null);
+  // Positivo = giorni ancora mancanti (data futura), negativo = giorni di ritardo (data passata).
+  const giorniA = (d) => (d ? Math.round((new Date(d + "T00:00:00") - new Date(oggi + "T00:00:00")) / 86400000) : null);
+  const formattaDataBreve = (d) => (d ? d.split("-").reverse().join("/") : null);
+
+  const Pallino = ({ stato }) => {
+    // stato: true = presente, false = mancante, null = non applicabile a questo cliente
+    if (stato === null) return <span className="text-slate-300 text-xs">n/d</span>;
+    return <span className={stato ? "text-emerald-500" : "text-rose-400"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
+  };
+
+  // Solo clienti online/ibrido: i clienti BULB (in presenza) non seguono scadenze a cadenza
+  // fissa né check periodici nello stesso modo, quindi non hanno senso in questa griglia.
+  const righe = [...clients]
+    .filter((c) => c.tipo_servizio !== "presenza")
+    .sort((a, b) => `${a.nome}${a.cognome || ""}`.localeCompare(`${b.nome}${b.cognome || ""}`));
+
+  return (
+    <Card className="p-0 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-slate-50 text-slate-500 text-left">
+              <th className="sticky left-0 bg-slate-50 px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
+              <th className="px-2 py-2 font-medium text-center">Scadenza</th>
+              <th className="px-2 py-2 font-medium text-center">Scheda</th>
+              <th className="px-2 py-2 font-medium text-center">Log allen.</th>
+              <th className="px-2 py-2 font-medium text-center">Nutrizione</th>
+              <th className="px-2 py-2 font-medium text-center">Prossimo check</th>
+            </tr>
+          </thead>
+          <tbody>
+            {righe.map((c) => {
+              const cadenzaFissa = ["Mensile", "Trimestrale", "Semestrale"].includes(c.piano);
+              const schedaStato = !!(c.link_scheda || c.scheda_pdf_path);
+              const logData = allenamento[c.id];
+              const nutData = nutrizione[c.id];
+              const giorniMancantiCheck = giorniA(c.prossimo_check);
+              return (
+                <tr key={c.id} onClick={() => onSelect(c.id)} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer">
+                  <td className="sticky left-0 bg-white px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{c.nome} {c.cognome}</td>
+                  <td className="px-2 py-2 text-center">
+                    {!cadenzaFissa ? (
+                      <span className="text-slate-300 text-xs">n/d</span>
+                    ) : c.data_scadenza ? (
+                      <span className="text-slate-600 whitespace-nowrap">{formattaDataBreve(c.data_scadenza)}</span>
+                    ) : (
+                      <span className="text-rose-400">○ mancante</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-center"><Pallino stato={schedaStato} /></td>
+                  <td className="px-2 py-2 text-center">
+                    <Pallino stato={!!logData} />
+                    {logData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(logData)}g fa</div>}
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    <Pallino stato={!!nutData} />
+                    {nutData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(nutData)}g fa</div>}
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    {c.prossimo_check ? (
+                      <>
+                        <span className={`font-medium whitespace-nowrap ${giorniMancantiCheck < 0 ? "text-rose-500" : giorniMancantiCheck <= 3 ? "text-amber-500" : "text-slate-600"}`}>
+                          {giorniMancantiCheck < 0 ? `${Math.abs(giorniMancantiCheck)}g di ritardo` : giorniMancantiCheck === 0 ? "oggi" : `tra ${giorniMancantiCheck}g`}
+                        </span>
+                        <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(c.prossimo_check)}</div>
+                      </>
+                    ) : (
+                      <span className="text-slate-300 text-xs">n/d</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {righe.length === 0 && (
+              <tr><td colSpan={6} className="text-center text-slate-400 py-6">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-3 text-[11px] text-slate-400 px-3 py-2 border-t border-slate-100">
+        <span className="flex items-center gap-1 text-emerald-500">● presente</span>
+        <span className="flex items-center gap-1 text-rose-400">○ mancante</span>
+        <span>n/d = non si applica (pacchetto senza scadenza fissa)</span>
+      </div>
+    </Card>
+  );
+}
+
+function CandidatureCoach({ onClientiCambiati }) {
+  const [candidature, setCandidature] = useState([]);
+  const [caricato, setCaricato] = useState(false);
+  const [mostraArchivio, setMostraArchivio] = useState(false);
+  const [inLavorazione, setInLavorazione] = useState(null);
+
+  const carica = async () => {
+    const { data } = await supabase.from("candidature").select("*").order("created_at", { ascending: false });
+    setCandidature(data || []);
+    setCaricato(true);
+  };
+  useEffect(() => { carica(); }, []);
+
+  const aggiornaStato = async (id, stato) => {
+    await supabase.from("candidature").update({ stato }).eq("id", id);
+    carica();
+  };
+
+  const calcolaEta = (dataNascita) => {
+    if (!dataNascita) return null;
+    const oggi = new Date();
+    const nascita = new Date(dataNascita);
+    let eta = oggi.getFullYear() - nascita.getFullYear();
+    const m = oggi.getMonth() - nascita.getMonth();
+    if (m < 0 || (m === 0 && oggi.getDate() < nascita.getDate())) eta--;
+    return eta;
+  };
+  const etichettaCondizione = (value) => (value === "altro" ? "Altro" : CONDIZIONI_SALUTE.find((c) => c.value === value)?.label || value);
+  const ETICHETTE_SERVIZIO = { online: "Online", presenza: "In presenza", ibrido: "Ibrido" };
+  const ETICHETTE_OBIETTIVO = { definizione: "Definizione", mantenimento: "Ricomposizione corporea", massa: "Aumento massa" };
+  const ETICHETTE_LIVELLO = { base: "Alle prime armi", intermedia: "Intermedia", avanzata: "Avanzata" };
+  const ETICHETTE_ATTIVITA = { sedentario: "Sedentaria", intermedio: "Moderatamente attiva", attivo: "Molto attiva" };
+
+  const visibili = candidature.filter((c) =>
+    mostraArchivio ? (c.stato === "archiviata" || c.stato === "convertita") : (c.stato === "nuova" || c.stato === "contattata")
+  );
+
+  if (!caricato) return <p className="text-slate-400 text-sm px-1">Carico...</p>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-sm font-medium text-slate-700">{mostraArchivio ? "Archivio candidature" : "Nuove candidature"}</p>
+        <button onClick={() => setMostraArchivio(!mostraArchivio)} className="text-xs text-slate-500 underline">
+          {mostraArchivio ? "Torna alle attive" : "Vedi archivio"}
+        </button>
+      </div>
+
+      {visibili.length === 0 && (
+        <Card className="p-4 text-center text-slate-400 text-sm">Nessuna candidatura {mostraArchivio ? "in archivio" : "da vedere per ora"}.</Card>
+      )}
+
+      {visibili.map((c) => (
+        <Card key={c.id} className="p-4 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-medium text-slate-800">{c.nome} {c.cognome}</p>
+              <p className="text-xs text-slate-500">
+                {calcolaEta(c.data_nascita) ? `${calcolaEta(c.data_nascita)} anni · ` : ""}
+                {ETICHETTE_SERVIZIO[c.tipo_servizio] || c.tipo_servizio}
+                {c.sede_abituale ? ` · ${c.sede_abituale}` : ""}
+              </p>
+            </div>
+            {c.stato === "contattata" && <Badge className="bg-sky-50 text-sky-600">Contattata</Badge>}
+            {c.stato === "convertita" && <Badge className="bg-emerald-50 text-emerald-600">Diventata cliente</Badge>}
+            {c.stato === "archiviata" && <Badge className="bg-slate-100 text-slate-500">Archiviata</Badge>}
+          </div>
+
+          <div className="text-sm text-slate-600 space-y-0.5">
+            <p>
+              <a href={`mailto:${c.email}`} className="text-sky-600">{c.email}</a>
+              {c.telefono ? " · " : ""}
+              {c.telefono && <a href={`tel:${c.telefono}`} className="text-sky-600">{c.telefono}</a>}
+            </p>
+            {c.obiettivo_attuale && <p>Obiettivo: {ETICHETTE_OBIETTIVO[c.obiettivo_attuale] || c.obiettivo_attuale}</p>}
+            {c.livello_allenamento && <p>Livello: {ETICHETTE_LIVELLO[c.livello_allenamento] || c.livello_allenamento}</p>}
+            {c.livello_attivita && <p>Attività quotidiana: {ETICHETTE_ATTIVITA[c.livello_attivita] || c.livello_attivita}</p>}
+            {(c.altezza_cm || c.peso_kg) && (
+              <p>{c.altezza_cm ? `${c.altezza_cm} cm` : ""}{c.altezza_cm && c.peso_kg ? " · " : ""}{c.peso_kg ? `${c.peso_kg} kg` : ""}</p>
+            )}
+            {c.citta && <p>Città: {c.citta}</p>}
+            {c.tipo_lavoro && <p>Lavoro: {c.tipo_lavoro}</p>}
+            {c.problematiche_salute?.length > 0 && (
+              <p className="text-amber-700">⚠ {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
+            )}
+            {c.note && <p className="italic text-slate-500">"{c.note}"</p>}
+            <p className="text-[11px] text-slate-400">Candidatura del {new Date(c.created_at).toLocaleDateString("it-IT")}</p>
+          </div>
+
+          {!mostraArchivio && inLavorazione !== c.id && (
+            <div className="flex gap-2 pt-1">
+              <button onClick={() => setInLavorazione(c.id)} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-xs font-medium">Trasforma in cliente</button>
+              {c.stato === "nuova" && (
+                <button onClick={() => aggiornaStato(c.id, "contattata")} className="px-3 rounded-xl border border-slate-200 text-xs text-slate-600">Contattata</button>
+              )}
+              <button onClick={() => aggiornaStato(c.id, "archiviata")} className="px-3 rounded-xl border border-slate-200 text-xs text-slate-500">Archivia</button>
+            </div>
+          )}
+
+          {inLavorazione === c.id && (
+            <AccettaCandidaturaForm
+              candidatura={c}
+              onAnnulla={() => setInLavorazione(null)}
+              onCreato={() => { setInLavorazione(null); carica(); onClientiCambiati?.(); }}
+            />
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
+  const [f, setF] = useState({
+    codice: "", tipo_servizio: candidatura.tipo_servizio || "online", pacchetto_lezioni: "", piano: "",
+    data_inizio: new Date().toISOString().slice(0, 10), data_scadenza: "", stato_pacchetto: "attivo", link_scheda: "",
+  });
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+
+  const campo = (label, key, type = "text") => (
+    <div>
+      <label className="text-xs text-slate-500">{label}</label>
+      <input type={type} value={f[key]} onChange={(e) => setF({ ...f, [key]: e.target.value })}
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
+    </div>
+  );
+
+  const salva = async () => {
+    if (!f.codice.trim()) { setErrore("Il codice è obbligatorio."); return; }
+    setSalvando(true);
+    setErrore("");
+    const payload = {
+      codice: f.codice.trim(), nome: candidatura.nome, cognome: candidatura.cognome || null,
+      email: candidatura.email || null, telefono: candidatura.telefono || null,
+      tipo_servizio: f.tipo_servizio, pacchetto_lezioni: f.pacchetto_lezioni || null, piano: f.piano || null,
+      data_inizio: f.data_inizio || null, data_scadenza: f.data_scadenza || null, stato_pacchetto: f.stato_pacchetto,
+      link_scheda: f.link_scheda || null,
+      data_nascita: candidatura.data_nascita || null, sesso: candidatura.sesso || null,
+      altezza_cm: candidatura.altezza_cm || null, peso_kg: candidatura.peso_kg || null,
+      citta: candidatura.citta || null, tipo_lavoro: candidatura.tipo_lavoro || null,
+      livello_attivita: candidatura.livello_attivita || null, livello_allenamento: candidatura.livello_allenamento || null,
+      obiettivo_attuale: candidatura.obiettivo_attuale || null, sede_abituale: candidatura.sede_abituale || null,
+      problematiche_salute: candidatura.problematiche_salute || null,
+      problematiche_salute_note: candidatura.problematiche_salute_note || null,
+      note_particolari: candidatura.note || null,
+    };
+    const { error } = await supabase.from("clients").insert(payload);
+    if (error) { setSalvando(false); setErrore("Errore: " + error.message); return; }
+    await supabase.from("candidature").update({ stato: "convertita" }).eq("id", candidatura.id);
+    setSalvando(false);
+    onCreato();
+  };
+
+  return (
+    <div className="space-y-3 pt-2 border-t border-slate-100">
+      <p className="text-xs text-slate-500">Completa solo i dati commerciali — il resto arriva già dalla candidatura.</p>
+      <div>
+        <label className="text-xs text-slate-500">Tipo di servizio</label>
+        <select value={f.tipo_servizio} onChange={(e) => setF({ ...f, tipo_servizio: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="online">ONLINE (coaching a distanza)</option>
+          <option value="presenza">BULB (lezioni 1:1 in presenza)</option>
+          <option value="ibrido">IBRIDO (online + BULB)</option>
+        </select>
+      </div>
+      {(f.tipo_servizio === "presenza" || f.tipo_servizio === "ibrido") && (
+        <div>
+          <label className="text-xs text-slate-500">Pacchetto lezioni</label>
+          <select value={f.pacchetto_lezioni} onChange={(e) => setF({ ...f, pacchetto_lezioni: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            <option value="">— (lo imposti dopo)</option>
+            <option value="1">1 lezione</option>
+            <option value="4">4 lezioni (1 al mese)</option>
+            <option value="8">8 lezioni (2 al mese)</option>
+            <option value="24">24 lezioni (6 mesi, 1 a settimana)</option>
+            <option value="48">48 lezioni (6 mesi, 2 a settimana)</option>
+          </select>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        {campo("Codice (es. c10)", "codice")}
+        {(f.tipo_servizio === "online" || f.tipo_servizio === "ibrido") && campo("Piano", "piano")}
+        {campo("Data inizio", "data_inizio", "date")}
+        {campo("Data scadenza", "data_scadenza", "date")}
+      </div>
+      {(f.tipo_servizio === "online" || f.tipo_servizio === "ibrido") && campo("Link scheda", "link_scheda")}
+      <div>
+        <label className="text-xs text-slate-500">Stato pacchetto</label>
+        <select value={f.stato_pacchetto} onChange={(e) => setF({ ...f, stato_pacchetto: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+          <option value="attivo">attivo</option>
+          <option value="in scadenza">in scadenza</option>
+          <option value="scaduto">scaduto</option>
+          <option value="in attivazione">in attivazione</option>
+          <option value="gratuito">gratuito</option>
+        </select>
+      </div>
+      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
-  const [vista, setVista] = useState("lista");
+  const [vistaLista, setVistaLista] = useState("schede");
+  const [ordinamento, setOrdinamento] = useState("check");
   const [nonLetteCoach, setNonLetteCoach] = useState(0);
+  const [chatNonLette, setChatNonLette] = useState(0);
+  const [candidatureNuove, setCandidatureNuove] = useState(0);
+  const [sfideDaFare, setSfideDaFare] = useState(0);
 
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
-    setNonLetteCoach((r || 0) + (c || 0));
+    const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+    const { count: a } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%");
+    setChatNonLette(m || 0);
+    setNonLetteCoach((r || 0) + (c || 0) + (a || 0));
+    try { setSfideDaFare(await contaSfideCoach()); } catch (e) { /* non blocca mai il caricamento */ }
   };
-  useEffect(() => { caricaNonLetteCoach(); }, [vista]);
+  const caricaCandidatureNuove = async () => {
+    const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
+    setCandidatureNuove(count || 0);
+  };
+  useEffect(() => { caricaNonLetteCoach(); caricaCandidatureNuove(); }, [vista]);
 
-  const inScadenza = clients.filter((c) => c.stato_pacchetto === "in scadenza");
-  const daFare = clients.filter((c) => c.stato_check === "da_compilare");
-  const scaduti = clients.filter((c) => c.stato_pacchetto === "scaduto");
+  // I clienti archiviati (percorso non attivo) restano fuori da liste, calendario, promemoria e
+  // rinnovi finché non vengono riattivati — ma restano recuperabili con "Mostra archiviati".
+  const clientiAttivi = clients.filter((c) => !c.archiviato);
+  const clientiArchiviati = clients.filter((c) => c.archiviato);
+
+  // Clienti che si sono registrate da sole e a cui manca ancora il pacchetto/prezzo: compaiono
+  // qui finché non vengono completate dalla scheda cliente (impostando il piano).
+  const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano && !c.notifica_vista);
+
+  const promemoriaDomani = clientiAttivi.flatMap((c) => promemoriaCliente(c).map((v) => ({ ...v, cliente: c })));
+  const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
+  const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
+  const scaduti = clientiAttivi.filter((c) => c.stato_pacchetto === "scaduto");
 
   const spostaOrdine = async (clienteId, direzione) => {
-    const ordinati = [...clients].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+    const ordinati = [...clients].filter((c) => !c.archiviato).sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
     const idx = ordinati.findIndex((c) => c.id === clienteId);
     const altroIdx = idx + direzione;
     if (altroIdx < 0 || altroIdx >= ordinati.length) return;
@@ -2726,7 +9613,13 @@ function AdminList({ clients, onSelect, onChanged }) {
     onChanged();
   };
 
-  let visibili = [...clients].sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
+  const baseVisibili = filtro === "archiviati" ? clientiArchiviati : clientiAttivi;
+  const chiaveData = (d) => d || "9999-12-31";
+  let visibili = [...baseVisibili].sort((a, b) => {
+    if (ordinamento === "check") return chiaveData(a.prossimo_check).localeCompare(chiaveData(b.prossimo_check));
+    if (ordinamento === "scadenza") return chiaveData(a.data_scadenza).localeCompare(chiaveData(b.data_scadenza));
+    return (a.ordine ?? 9999) - (b.ordine ?? 9999);
+  });
   if (ricerca.trim()) {
     const q = ricerca.trim().toLowerCase();
     visibili = visibili.filter((c) => `${c.nome} ${c.cognome} ${c.codice}`.toLowerCase().includes(q));
@@ -2737,7 +9630,15 @@ function AdminList({ clients, onSelect, onChanged }) {
   if (filtro === "online") visibili = visibili.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido");
   if (filtro === "presenza") visibili = visibili.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido");
 
-  const riordinabile = !ricerca.trim() && filtro === "tutti";
+  const riordinabile = !ricerca.trim() && filtro === "tutti" && ordinamento === "manuale";
+  const fmtData = (d) => (d ? d.split("-").reverse().join("/") : "—");
+  const statoScad = (d) => {
+    if (!d) return { classe: "", testo: "" };
+    const g = Math.round((new Date(d + "T00:00:00") - new Date(new Date().toISOString().slice(0, 10) + "T00:00:00")) / 86400000);
+    if (g < 0) return { classe: "text-rose-500 font-medium", testo: " (scaduto da " + Math.abs(g) + "g)" };
+    if (g <= 7) return { classe: "text-amber-500 font-medium", testo: g === 0 ? " (oggi)" : " (tra " + g + "g)" };
+    return { classe: "text-slate-600", testo: " (tra " + g + "g)" };
+  };
 
   const filtriBtn = (key, label, count, colore) => (
     <button onClick={() => setFiltro(filtro === key ? "tutti" : key)}
@@ -2760,25 +9661,48 @@ function AdminList({ clients, onSelect, onChanged }) {
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
-        <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
-        <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
-      </div>
-
-      <div className="flex gap-2">
-        <button onClick={() => setVista("lista")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
-        <button onClick={() => setVista("calendario")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
-        <button onClick={() => setVista("notifiche")} className={`relative flex-1 py-2 rounded-xl text-sm font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+      <div className="grid grid-cols-3 gap-1.5">
+        <button onClick={() => setVista("oggi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "oggi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Oggi</button>
+        <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
+        <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
+        <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
           Notifiche
-          {nonLetteCoach > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach}</span>
+          {(nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length) > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length}</span>
+          )}
+        </button>
+        <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
+        <button onClick={() => setVista("candidature")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "candidature" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Candidature
+          {candidatureNuove > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{candidatureNuove}</span>
+          )}
+        </button>
+        <button onClick={() => setVista("chat")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "chat" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Chat
+          {chatNonLette > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{chatNonLette}</span>
+          )}
+        </button>
+        <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
+        <button onClick={() => setVista("esercizi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Esercizi</button>
+        <button onClick={() => setVista("sfide")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "sfide" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+          Sfide
+          {sfideDaFare > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{sfideDaFare}</span>
           )}
         </button>
       </div>
 
-      {vista === "calendario" && <CalendarioAgenda clients={clients} onSelect={onSelect} />}
-      {vista === "notifiche" && <CentroNotificheCoach clients={clients} onSelect={onSelect} />}
+      {vista === "esercizi" && <LibreriaEserciziCoach />}
+      {vista === "sfide" && <SfideCoach clients={clientiAttivi} onCambiato={caricaNonLetteCoach} />}
+      {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
+      {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
+      {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} onAggiorna={caricaNonLetteCoach} />}
+      {vista === "statistiche" && <StatisticheCoach clients={clientiAttivi} />}
+      {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
+      {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
+      {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
       {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
@@ -2792,19 +9716,37 @@ function AdminList({ clients, onSelect, onChanged }) {
       <div className="flex gap-2">
         <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
-          ONLINE ({clients.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
+          ONLINE ({clientiAttivi.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
         </button>
         <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
-          BULB ({clients.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
+          BULB ({clientiAttivi.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
         </button>
       </div>
       {filtro !== "tutti" && (
         <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
       )}
+      {clientiArchiviati.length > 0 && (
+        <button onClick={() => setFiltro(filtro === "archiviati" ? "tutti" : "archiviati")} className="text-slate-400 text-xs font-medium">
+          {filtro === "archiviati" ? "← Torna ai clienti attivi" : `🗄 Mostra archiviati (${clientiArchiviati.length})`}
+        </button>
+      )}
 
       <div>
-        <p className="text-sm font-medium text-slate-700 px-1 mb-2">Clienti ({visibili.length})</p>
+        <div className="flex items-center justify-between px-1 mb-2">
+          <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
+          <select value={ordinamento} onChange={(e) => setOrdinamento(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white">
+            <option value="check">Ordine: prossimo check</option>
+            <option value="scadenza">Ordine: scadenza pacchetto</option>
+            <option value="manuale">Ordine: manuale</option>
+          </select>
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5">
+            <button onClick={() => setVistaLista("schede")} className={`px-2.5 py-1 rounded-md text-xs font-medium ${vistaLista === "schede" ? "bg-white text-slate-700 shadow-sm" : "text-slate-500"}`}>Schede</button>
+            <button onClick={() => setVistaLista("griglia")} className={`px-2.5 py-1 rounded-md text-xs font-medium ${vistaLista === "griglia" ? "bg-white text-slate-700 shadow-sm" : "text-slate-500"}`}>Griglia dati</button>
+          </div>
+        </div>
+        {vistaLista === "griglia" && <GrigliaCompletezza clients={visibili} onSelect={onSelect} />}
+        {vistaLista === "schede" && (
         <div className="space-y-2">
           {visibili.map((c) => (
             <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50 border-rose-100" : ""}`}>
@@ -2817,16 +9759,19 @@ function AdminList({ clients, onSelect, onChanged }) {
               <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-slate-700 truncate">{c.nome} {c.cognome}</p>
+                    <p className="font-medium text-slate-700 ">{c.nome} {c.cognome}</p>
                     <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
                       {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
+                    {c.archiviato && <Badge className="flex-shrink-0 bg-slate-200 text-slate-500">ARCHIVIATO</Badge>}
                   </div>
-                  <p className="text-slate-500 text-xs mt-0.5 truncate">
-                    {c.tipo_servizio === "presenza"
-                      ? `${c.piano || "—"} · ${c.pacchetto_lezioni ? c.pacchetto_lezioni + " lezioni" : "pacchetto non impostato"}`
-                      : `${c.piano || "—"} · Prossimo check: ${c.prossimo_check || "—"}`}
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    {c.piano || "—"}{c.tipo_servizio === "presenza" ? " · " + (c.pacchetto_lezioni ? c.pacchetto_lezioni + " lezioni" : "pacchetto non impostato") : ""}
                   </p>
+                  {c.tipo_servizio !== "presenza" && (
+                    <p className="text-xs mt-0.5 text-slate-500">Ultimo check: {fmtData(c.ultimo_check)} · Prossimo: <span className={statoScad(c.prossimo_check).classe}>{fmtData(c.prossimo_check)}{statoScad(c.prossimo_check).testo}</span></p>
+                  )}
+                  <p className="text-xs mt-0.5 text-slate-500">Scadenza pacchetto: <span className={statoScad(c.data_scadenza).classe}>{fmtData(c.data_scadenza)}{statoScad(c.data_scadenza).testo}</span></p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <StatoBadge stato={c.stato_check} />
@@ -2839,19 +9784,78 @@ function AdminList({ clients, onSelect, onChanged }) {
             <Card className="p-8 text-center text-slate-400">Nessun cliente corrisponde alla ricerca/filtro.</Card>
           )}
         </div>
+        )}
       </div>
       </>
       )}
+
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Esportazioni e backup</p>
+        <div className="grid grid-cols-2 gap-2">
+          <BottoneCartelleClienti clients={clients} className="col-span-2" />
+          <BottoneSoloFoto clients={clients} className="col-span-2" />
+          <BottoneEsportaExcel label="⬇ Esporta tutto in Excel (carichi, progressi, check)" className="col-span-2" />
+          <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
+          <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
+          <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
+          <button onClick={onBackup} disabled={backupInCorso} className="col-span-2 border border-slate-200 bg-white text-slate-500 text-xs font-medium rounded-lg py-2 disabled:opacity-50">
+            {backupInCorso ? "Esporto..." : "📦 Backup completo"}
+          </button>
+        </div>
+      </div>
+
+      <div className="pt-2 border-t border-slate-100 space-y-2">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Il tuo account</p>
+        <AttivaNotifichePush ruolo="coach" />
+        <CambiaPasswordPropria />
+      </div>
     </div>
   );
 }
 
-function AdminApp() {
+function conTimeout(promise, ms = 4000) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+}
+
+function scaricaFile(nomeFile, contenuto, tipo) {
+  const blob = new Blob([contenuto], { type: tipo });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nomeFile;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function esportaBackupCompleto(setInCorso) {
+  setInCorso(true);
+  const tabelle = [
+    "clients", "checkins", "notes", "nutrition_plans", "training_days", "training_exercises", "training_entries",
+    "lezioni_svolte", "calendar_events", "notifiche", "payments", "client_billing", "esercizi_libreria", "esercizi_alias",
+    "schede", "scheda_giorni", "scheda_esercizi", "feedback_soggettivo", "promemoria_messaggi",
+  ];
+  const risultato = { esportato_il: new Date().toISOString() };
+  for (const t of tabelle) {
+    const { data, error } = await supabase.from(t).select("*");
+    risultato[t] = error ? { errore: error.message } : data;
+  }
+  scaricaFile(`backup-completo-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(risultato, null, 2), "application/json");
+  setInCorso(false);
+}
+
+function AdminApp({ onVistaCliente }) {
   const [clients, setClients] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
+  const [backupInCorso, setBackupInCorso] = useState(false);
+  const [vista, setVista] = useState("oggi"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
 
   const carica = async () => {
+    try {
+      await conTimeout(supabase.rpc("sincronizza_stati_check"));
+    } catch (e) { /* non blocca mai il caricamento anche in caso di errore */ }
     const { data } = await supabase.from("clients").select("*").order("ordine", { ascending: true, nullsFirst: false });
     setClients(data || []);
     setCaricando(false);
@@ -2864,13 +9868,17 @@ function AdminApp() {
     <PullToRefresh onRefresh={carica}>
     <div className="min-h-screen bg-slate-50">
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
-        <span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span>
-        <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
+        <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
+        <div className="flex items-center gap-4">
+          {onVistaCliente && <button onClick={onVistaCliente} className="text-sky-600 text-xs font-medium">Vista cliente</button>}
+          <button onClick={() => supabase.auth.signOut()} className="text-slate-400 flex items-center gap-1 text-xs"><LogOut size={14} /> Esci</button>
+        </div>
       </div>
       {selectedId ? (
         <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
       ) : (
-        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} />
+        <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} vista={vista} setVista={setVista}
+          backupInCorso={backupInCorso} onBackup={() => esportaBackupCompleto(setBackupInCorso)} />
       )}
     </div>
     </PullToRefresh>
@@ -2889,8 +9897,8 @@ function ImpostaPassword({ onFatto }) {
   const salva = async (e) => {
     e.preventDefault();
     setErrore("");
-    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri."); return; }
-    if (password !== conferma) { setErrore("Le due password non coincidono."); return; }
+    if (password.length < 6) { setErrore("La password deve avere almeno 6 caratteri 🫶🏻"); return; }
+    if (password !== conferma) { setErrore("Le due password non coincidono, ricontrolla con calma 🫶🏻"); return; }
     setSalvando(true);
     const { error } = await supabase.auth.updateUser({ password });
     setSalvando(false);
@@ -2903,7 +9911,7 @@ function ImpostaPassword({ onFatto }) {
     <div className="min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-slate-700 mx-auto mb-4 flex items-center justify-center"><Dumbbell className="text-sky-300" size={26} /></div>
+          <img src="/logo.png" alt="MorGainz" className="h-28 w-auto mx-auto mb-4 rounded-3xl bg-white p-3" />
           <h1 className="text-white text-xl font-semibold">Benvenuta!</h1>
           <p className="text-slate-400 text-sm mt-1">Crea una password per accedere da qui in poi con email e password.</p>
         </div>
@@ -2927,6 +9935,17 @@ export default function App() {
   const [ruolo, setRuolo] = useState(null); // "admin" | "client" | null
   const [devImpostarePassword, setDevImpostarePassword] = useState(false);
   const [erroreLink, setErroreLink] = useState("");
+  // Il coach può guardare l'app come cliente (profilo Morgana) senza uscire; ricordo la scelta finché la scheda resta aperta
+  const [vistaCliente, setVistaCliente] = useState(() => { try { return sessionStorage.getItem("vistaCliente") === "1"; } catch (e) { return false; } });
+  const impostaVistaCliente = (v) => { setVistaCliente(v); try { sessionStorage.setItem("vistaCliente", v ? "1" : "0"); } catch (e) { /* ignora */ } };
+
+  // Toglie il pallino rosso dall'icona quando apri l'app
+  useEffect(() => {
+    const pulisci = () => { try { if (document.visibilityState === "visible" && navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) { /* ignora */ } };
+    pulisci();
+    document.addEventListener("visibilitychange", pulisci);
+    return () => document.removeEventListener("visibilitychange", pulisci);
+  }, []);
 
   // Gestiamo noi stessi il link ricevuto via email (invito o reset password),
   // senza affidarci al rilevamento automatico della libreria (che può perdere il segnale).
@@ -2977,5 +9996,16 @@ export default function App() {
   if (devImpostarePassword) return <ImpostaPassword onFatto={() => setDevImpostarePassword(false)} />;
   if (ruolo === null) return <Spinner />;
 
-  return ruolo === "admin" ? <AdminApp /> : <ClientApp session={session} />;
+  if (ruolo === "admin") {
+    if (vistaCliente) {
+      return (
+        <>
+          <ClientApp session={session} />
+          <button onClick={() => impostaVistaCliente(false)} className="fixed bottom-24 right-3 z-50 bg-slate-800 text-white text-xs font-medium rounded-full px-4 py-2 shadow-lg">← Torna a Coach</button>
+        </>
+      );
+    }
+    return <AdminApp onVistaCliente={() => impostaVistaCliente(true)} />;
+  }
+  return <ClientApp session={session} />;
 }
