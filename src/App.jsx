@@ -6947,8 +6947,6 @@ function OggiCoach({ clients, onSelect, vai }) {
         ))}
       </Card>
 
-      <DaCompletareClienti clients={clients} onSelect={onSelect} />
-
       {nuoveClienti.length > 0 && (
         <Card className="p-4 space-y-1">
           <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Nuove clienti: scheda da creare</p>
@@ -7000,6 +6998,8 @@ function OggiCoach({ clients, onSelect, vai }) {
       </Card>
 
       <EserciziMancantiClienti clients={clients} onSelect={onSelect} />
+
+      <DaCompletareClienti clients={clients} onSelect={onSelect} />
     </div>
   );
 }
