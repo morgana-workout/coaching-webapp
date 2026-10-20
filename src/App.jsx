@@ -5797,7 +5797,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
         <div className="flex items-center gap-2">
-          <button onClick={() => esportaDatiCliente(client, setEsportazioneInCorso)} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
+          <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
             {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
           </button>
           <StatoBadge stato={client.stato_check} />
@@ -6093,7 +6093,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta i dati di questa cliente (Excel)" />}
+      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta tutto lo storico di questa cliente (Excel con foto)" />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
 
       {tab === "allenamento" && (
@@ -7771,14 +7771,163 @@ async function esportaExcelCompleto(clientId = null) {
   return { check: checks.length, carichi: voci.length };
 }
 
+function caricaModuloExcelJS() {
+  return new Promise((ok, ko) => {
+    if (window.ExcelJS) return ok(window.ExcelJS);
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+    sc.onload = () => (window.ExcelJS ? ok(window.ExcelJS) : ko(new Error("modulo Excel non disponibile")));
+    sc.onerror = () => ko(new Error("Impossibile caricare il modulo Excel, controlla la connessione e riprova."));
+    document.head.appendChild(sc);
+  });
+}
+
+// Scarica una foto dallo storage e la rimpicciolisce (così il file Excel resta leggero)
+async function miniaturaFoto(path, lato = 380) {
+  try {
+    const { data } = await supabase.storage.from("progress-photos").createSignedUrl(path, 600);
+    if (!data?.signedUrl) return null;
+    const blob = await (await fetch(data.signedUrl)).blob();
+    const bmp = await createImageBitmap(blob, { imageOrientation: "from-image" });
+    const k = Math.min(1, lato / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * k)); const h = Math.max(1, Math.round(bmp.height * k));
+    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(bmp, 0, 0, w, h);
+    return { base64: cv.toDataURL("image/jpeg", 0.78), w, h };
+  } catch { return null; }
+}
+
+// File unico con tutto lo storico di una cliente: anagrafica, check con foto, programmi (attuale e archiviati), log allenamenti, lezioni, pagamenti, note
+async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}) {
+  const ExcelJS = await caricaModuloExcelJS();
+  const q = (t, ord = "id") => leggiTutto(() => supabase.from(t).select("*").eq("client_id", clientId).order(ord).order("id"));
+  avanzamento("Raccolgo i dati...");
+  const [{ data: cl }, checks, giorni, esercizi, voci, lezioni, pagamenti, note, nutrizione, feedback, schedeVecchie] = await Promise.all([
+    supabase.from("clients").select("*").eq("id", clientId).single(),
+    q("checkins", "data_check"), q("training_days", "ordine"), q("training_exercises", "ordine"), q("training_entries", "data"),
+    q("lezioni_svolte", "numero"), q("payments", "data_pagamento"), q("notes", "data"), q("nutrition_plans", "data_aggiornamento"), q("feedback_soggettivo", "data"),
+    q("schede", "creata_il"),
+  ]);
+  const nomeCl = `${cl.nome} ${cl.cognome || ""}`.trim();
+  const giornoPer = {}; giorni.forEach((g) => { giornoPer[g.id] = g; });
+  const esPer = {}; esercizi.forEach((e) => { esPer[e.id] = e; });
+  const etichetta = (g) => (g ? (g.scheda_archiviata ? `Archiviato ${g.scheda_archiviata}` : "Attuale") : "Senza giorno");
+  const dt = (s) => (s ? new Date(`${String(s).slice(0, 10)}T12:00:00Z`) : "");
+  const num = (v) => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? "" : Number(v));
+
+  const wb = new ExcelJS.Workbook();
+  const BLU = "FF3E5C76";
+  const foglio = (titolo, intestazioni, righe, larghezze) => {
+    const ws = wb.addWorksheet(titolo, { views: [{ state: "frozen", ySplit: 1 }] });
+    ws.addRow(intestazioni);
+    const h = ws.getRow(1); h.font = { bold: true, color: { argb: "FFFFFFFF" } }; h.alignment = { vertical: "middle", wrapText: true };
+    h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLU } }; h.height = 28;
+    righe.forEach((r) => ws.addRow(r));
+    ws.columns.forEach((c, i) => { c.width = larghezze?.[i] || 16; });
+    ws.eachRow((row, n) => { if (n > 1) row.alignment = { vertical: "top", wrapText: true }; row.eachCell((cell) => { if (cell.value instanceof Date) cell.numFmt = "dd/mm/yyyy"; }); });
+    return ws;
+  };
+
+  // 1. Anagrafica
+  const ana = [
+    ["Nome", nomeCl], ["Codice", cl.codice], ["Email", cl.email], ["Telefono", cl.telefono], ["Sesso", cl.sesso],
+    ["Data di nascita", dt(cl.data_nascita)], ["Altezza (cm)", num(cl.altezza_cm)], ["Peso iniziale (kg)", num(cl.peso_kg)], ["Città", cl.citta],
+    ["Tipo servizio", cl.tipo_servizio], ["Piano", cl.piano], ["Pacchetto lezioni", cl.pacchetto_lezioni], ["Data inizio", dt(cl.data_inizio)], ["Data scadenza", dt(cl.data_scadenza)],
+    ["Livello allenamento", cl.livello_allenamento], ["Fase", cl.fase_allenamento], ["Obiettivo attuale", cl.obiettivo_attuale],
+    ["Focus di crescita", (cl.focus_crescita || []).join(", ")], ["Salute", [(cl.problematiche_salute || []).join(", "), cl.problematiche_salute_note].filter(Boolean).join(" — ")],
+    ["Note particolari", cl.note_particolari], ["Esportato il", new Date()],
+  ];
+  foglio("Anagrafica", ["Dato", "Valore"], ana, [24, 70]);
+
+  // 2. Check con foto
+  const campiFoto = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale"], ["foto_posteriore_path", "Posteriore"], ["foto_extra_path", "Extra"]];
+  const wsC = foglio("Check e foto",
+    ["Data check", "Peso (kg)", "Spalle", "Petto", "Sopra ombelico", "Ombelico", "Sotto ombelico", "Glutei", "Coscia dx", "Braccio dx", "Collo", "Energia", "Sonno", "Aderenza cibo", "Aderenza allenamento", "Fase mestruale", "Stato", "Note cliente", "Nota foto coach", ...campiFoto.map((c) => c[1])],
+    checks.map((c) => [dt(c.data_check), num(c.peso_kg), num(c.spalle_cm), num(c.petto_cm), num(c.sopra_ombelico_cm), num(c.ombelico_cm), num(c.sotto_ombelico_cm), num(c.glutei_cm), num(c.coscia_dx_cm), num(c.braccio_dx_cm), num(c.collo_cm), num(c.energia), num(c.sonno), num(c.aderenza_cibo), num(c.aderenza_allenamento), c.fase_mestruale || "", c.stato || "", c.note_cliente || "", c.nota_foto_coach || ""]),
+    [12, 9, 8, 8, 10, 9, 10, 8, 9, 9, 8, 8, 8, 10, 12, 12, 12, 30, 30, 30, 30, 30, 30]);
+  const col0 = 19; // prima colonna foto (indice zero-based)
+  const totFoto = checks.reduce((n, c) => n + campiFoto.filter(([k]) => c[k]).length, 0);
+  let fatte = 0; let mancanti = 0;
+  for (let i = 0; i < checks.length; i++) {
+    const c = checks[i]; const riga = wsC.getRow(i + 2);
+    let altezza = 0;
+    for (let j = 0; j < campiFoto.length; j++) {
+      const p = c[campiFoto[j][0]]; if (!p) continue;
+      avanzamento(`Inserisco le foto ${fatte + 1} di ${totFoto}...`);
+      const m = await miniaturaFoto(p); fatte++;
+      if (!m) { mancanti++; riga.getCell(col0 + j + 1).value = "(foto non scaricabile)"; continue; }
+      const id = wb.addImage({ base64: m.base64, extension: "jpeg" });
+      const larg = Math.round(m.w * 0.5); const alt = Math.round(m.h * 0.5);
+      wsC.addImage(id, { tl: { col: col0 + j + 0.05, row: i + 1 + 0.03 }, ext: { width: larg, height: alt } });
+      altezza = Math.max(altezza, alt);
+    }
+    if (altezza) riga.height = Math.round(altezza * 0.75) + 8;
+  }
+  wsC.columns.slice(col0, col0 + 4).forEach((c) => { c.width = 30; });
+
+  // 3. Programmi (attuale e archiviati)
+  const ordGiorni = [...giorni].sort((a, b) => (a.scheda_archiviata ? 1 : 0) - (b.scheda_archiviata ? 1 : 0) || String(a.scheda_archiviata || "").localeCompare(String(b.scheda_archiviata || ""), "it", { numeric: true }) || (a.ordine || 0) - (b.ordine || 0));
+  const righeProg = [];
+  ordGiorni.forEach((g) => esercizi.filter((e) => e.training_day_id === g.id).sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
+    .forEach((e) => righeProg.push([etichetta(g), g.nome, e.tipo || "forza", e.nome, e.serie ?? "", e.ripetizioni ?? "", e.note || "", e.esecuzione || ""])));
+  esercizi.filter((e) => !e.training_day_id).forEach((e) => righeProg.push(["Senza giorno", "", e.tipo || "forza", e.nome, e.serie ?? "", e.ripetizioni ?? "", e.note || "", e.esecuzione || ""]));
+  foglio("Programmi", ["Programma", "Giorno", "Tipo", "Esercizio", "Serie", "Ripetizioni", "Note", "Esecuzione"], righeProg, [16, 18, 12, 34, 8, 12, 30, 50]);
+
+  // 4. Log allenamenti
+  const righeLog = voci.map((v) => { const e = esPer[v.exercise_id]; const g = e ? giornoPer[e.training_day_id] : null; return { v, e, g }; })
+    .sort((a, b) => String(a.v.data).localeCompare(String(b.v.data)) || (a.g?.ordine || 0) - (b.g?.ordine || 0) || (a.e?.ordine || 0) - (b.e?.ordine || 0) || (a.v.numero_serie || 0) - (b.v.numero_serie || 0));
+  foglio("Log allenamenti", ["Data", "Programma", "Giorno", "Esercizio", "N. serie", "Kg", "Ripetizioni", "Note"],
+    righeLog.map(({ v, e, g }) => [dt(v.data), etichetta(g), g?.nome || "", e?.nome || "", num(v.numero_serie), num(v.kg), v.ripetizioni || "", v.note || ""]), [12, 16, 18, 34, 9, 8, 12, 30]);
+
+  // 5. Progressi carichi per esercizio
+  const gruppi = {};
+  righeLog.forEach(({ v, e }) => { if (num(v.kg) === "" || !e) return; const g = (gruppi[e.nome] = gruppi[e.nome] || {}); g[v.data] = Math.max(g[v.data] ?? 0, num(v.kg)); });
+  const righeCar = Object.entries(gruppi).map(([nomeEs, dateKg]) => {
+    const date = Object.keys(dateKg).sort(); const p = date[0]; const u = date[date.length - 1]; const kp = dateKg[p]; const ku = dateKg[u];
+    return [nomeEs, date.length, dt(p), kp, dt(u), ku, Math.max(...Object.values(dateKg)), Math.round((ku - kp) * 10) / 10, kp > 0 ? Math.round(((ku - kp) / kp) * 1000) / 10 : ""];
+  }).sort((a, b) => a[0].localeCompare(b[0], "it"));
+  foglio("Progressi carichi", ["Esercizio", "N. sessioni", "Prima sessione", "Kg prima (max serie)", "Ultima sessione", "Kg ultima (max serie)", "Kg massimo", "Variazione (kg)", "Variazione (%)"], righeCar, [34, 11, 14, 14, 14, 14, 12, 12, 12]);
+
+  // 6. Altri storici
+  if (lezioni.length) foglio("Lezioni", ["N.", "Fatta", "Data", "Ora", "Nota"], lezioni.map((l) => [l.numero, l.fatta ? "sì" : "no", dt(l.data), l.ora || "", l.nota || ""]), [8, 8, 12, 8, 50]);
+  if (pagamenti.length) foglio("Pagamenti", ["Data", "Tipo", "Importo (€)", "Metodo", "Stato", "Saldato (€)", "Note"], pagamenti.map((p) => [dt(p.data_pagamento), p.tipo_piano || "", num(p.importo), p.metodo_pagamento || "", p.stato || "", num(p.importo_saldato), p.note || ""]), [12, 24, 12, 14, 12, 12, 40]);
+  if (note.length) foglio("Note", ["Data", "Tipo", "Testo"], note.map((n) => [dt(n.data), n.tipo || "", n.testo || ""]), [12, 14, 90]);
+  if (nutrizione.length) foglio("Nutrizione", ["Data", "Kcal", "Proteine (g)", "Carboidrati (g)", "Grassi (g)"], nutrizione.map((n) => [dt(n.data_aggiornamento), num(n.kcal), num(n.proteine_g), num(n.carboidrati_g), num(n.grassi_g)]), [12, 10, 12, 14, 12]);
+  if (feedback.length) foglio("Feedback", ["Data", "Tag", "Nota"], feedback.map((f) => [dt(f.data), (f.tags || []).join(", "), f.nota_libera || ""]), [12, 30, 70]);
+  if (schedeVecchie.length) {
+    const righeV = [];
+    for (const s of schedeVecchie) {
+      const { data: gs } = await supabase.from("scheda_giorni").select("*").eq("scheda_id", s.id).order("ordine");
+      for (const g of gs || []) {
+        const { data: es } = await supabase.from("scheda_esercizi").select("*, esercizi_libreria(nome)").eq("giorno_id", g.id).order("ordine");
+        (es || []).forEach((x) => righeV.push([dt(s.creata_il), s.stato || "", g.nome, x.esercizi_libreria?.nome || x.nome_libero || "", x.serie ?? "", x.ripetizioni ?? "", x.tecnica || ""]));
+      }
+    }
+    foglio("Schede precedenti", ["Creata il", "Stato", "Giorno", "Esercizio", "Serie", "Ripetizioni", "Tecnica"], righeV, [12, 12, 18, 34, 8, 12, 24]);
+  }
+
+  avanzamento("Preparo il file...");
+  const buf = await wb.xlsx.writeBuffer();
+  const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = document.createElement("a"); a.href = url;
+  a.download = `storico-completo-${nomeCl.replace(/[^a-zA-Z0-9]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return { check: checks.length, foto: fatte - mancanti, fotoMancanti: mancanti, serie: voci.length, esercizi: esercizi.length };
+}
+
 function BottoneEsportaExcel({ clientId = null, label, className = "" }) {
   const [inCorso, setInCorso] = useState(false);
   const [msg, setMsg] = useState("");
   const vai = async () => {
     setInCorso(true); setMsg("");
     try {
-      const r = await esportaExcelCompleto(clientId);
-      setMsg(`Scaricato: ${r.check} check e ${r.carichi} serie di carichi.`);
+      if (clientId) {
+        const r = await esportaStoricoCompletoCliente(clientId, setMsg);
+        setMsg(`Scaricato: ${r.check} check con ${r.foto} foto, ${r.esercizi} esercizi e ${r.serie} serie di carichi.${r.fotoMancanti ? ` ${r.fotoMancanti} foto non si sono potute scaricare.` : ""}`);
+      } else {
+        const r = await esportaExcelCompleto(clientId);
+        setMsg(`Scaricato: ${r.check} check e ${r.carichi} serie di carichi.`);
+      }
     } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
     setInCorso(false);
   };
