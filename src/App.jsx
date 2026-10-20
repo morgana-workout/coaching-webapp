@@ -7151,11 +7151,10 @@ function PromemoriaMessaggi({ clients }) {
   };
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Promemoria messaggio settimanale</p>
+    <Sezione id="promemoria_settimanale" titolo="Promemoria messaggio settimanale"><div className="space-y-4">
       <Gruppo titolo="Bulb / in presenza" sottotitolo="domenica sera" elenco={bulb} />
       <Gruppo titolo="Coaching online" sottotitolo="durante la settimana" elenco={online} />
-    </div>
+    </div></Sezione>
   );
 }
 
@@ -7389,8 +7388,7 @@ function StoricoNotifiche({ clients }) {
 
   if (caricando) return <Spinner />;
   return (
-    <div>
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico notifiche inviate alle clienti ({righe.length})</p>
+    <Sezione id="storico_notifiche" titolo="Storico notifiche inviate alle clienti" conteggio={righe.length}>
       <div className="flex gap-1.5 mb-2">
         {[["tutte", "Tutte"], ["non_viste", "Non viste"], ["viste", "Viste"]].map(([k, l]) => (
           <button key={k} onClick={() => { setFiltro(k); setQuante(20); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>{l}</button>
@@ -7415,7 +7413,7 @@ function StoricoNotifiche({ clients }) {
         })}
         {filtrate.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
       </div>
-    </div>
+    </Sezione>
   );
 }
 
@@ -7439,8 +7437,7 @@ function CompleanniClienti({ clients }) {
   const dm = (dt) => `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}`;
   const quando = (g) => (g === 0 ? "Oggi 🎂" : g === 1 ? "Domani" : `tra ${g} giorni`);
   return (
-    <div>
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">🎂 Compleanni delle clienti</p>
+    <Sezione id="compleanni" titolo="🎂 Compleanni delle clienti">
       <div className="space-y-2">
         {prossimi.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun compleanno nei prossimi 90 giorni.</Card>}
         {prossimi.map((x) => (
@@ -7478,7 +7475,7 @@ function CompleanniClienti({ clients }) {
           </div>
         )}
       </div>
-    </div>
+    </Sezione>
   );
 }
 
@@ -7494,8 +7491,7 @@ function StoricoAzioniClienti({ clients }) {
   const nome = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
   if (righe === null) return null;
   return (
-    <div>
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Storico azioni delle clienti ({righe.length})</p>
+    <Sezione id="storico_azioni" titolo="Storico azioni delle clienti" conteggio={righe.length}>
       <div className="space-y-2">
         {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna azione registrata: qui vedrai quando le clienti registrano un allenamento o aggiornano il diario alimentare ✨</Card>}
         {righe.slice(0, quante).map((r) => (
@@ -7509,7 +7505,7 @@ function StoricoAzioniClienti({ clients }) {
         ))}
         {righe.length > quante && <button onClick={() => setQuante(quante + 20)} className="w-full text-sky-600 text-sm font-medium py-2">Mostra altre</button>}
       </div>
-    </div>
+    </Sezione>
   );
 }
 
@@ -7544,11 +7540,8 @@ function ClientiDaRiattivare({ clients, onSelect }) {
   };
   const telefono = (t) => { let x = String(t || "").replace(/[^\d+]/g, ""); if (x.startsWith("+")) x = x.slice(1); else if (x.startsWith("00")) x = x.slice(2); else if (x.length === 10 && x.startsWith("3")) x = "39" + x; return x; };
   return (
-    <div>
-      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">
-        <span>💤 Clienti da riattivare ({lista.length})</span><span>{aperto ? "▲" : "▼"}</span>
-      </button>
-      {aperto && (
+    <Sezione id="da_riattivare" titolo="💤 Clienti da riattivare" conteggio={lista.length}>
+      {true && (
         <div className="space-y-2">
           {lista.map(({ c, giorni }) => {
             const tel = telefono(c.telefono);
@@ -7566,9 +7559,38 @@ function ClientiDaRiattivare({ clients, onSelect }) {
           })}
         </div>
       )}
+    </Sezione>
+  );
+}
+
+/* Sezione che si apre e si chiude con un tocco (ricorda se l'ultima volta l'avevi lasciata aperta) */
+function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false, ricorda = true, evidenzia = false, destra = null, children }) {
+  const chiave = `sezione_aperta_${id}`;
+  const [aperto, setAperto] = useState(() => {
+    if (!ricorda) return aperta;
+    try { const v = localStorage.getItem(chiave); return v === null ? aperta : v === "1"; } catch { return aperta; }
+  });
+  const cambia = () => {
+    const n = !aperto; setAperto(n);
+    if (ricorda) { try { localStorage.setItem(chiave, n ? "1" : "0"); } catch { /* ignora */ } }
+  };
+  const colori = { slate: "text-slate-600", amber: "text-amber-700", sky: "text-sky-700" };
+  const acceso = evidenzia && conteggio > 0;
+  return (
+    <div>
+      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl pr-3">
+        <button onClick={cambia} aria-expanded={aperto} className="flex-1 min-w-0 flex items-center gap-2 px-3 py-3 text-left">
+          <ChevronRight size={16} className={`flex-shrink-0 text-slate-400 transition-transform ${aperto ? "rotate-90" : ""}`} />
+          <span className={`text-xs uppercase tracking-wide font-medium truncate ${colori[tono] || colori.slate}`}>{titolo}</span>
+          {conteggio !== null && <span className={`flex-shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5 ${acceso ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{conteggio}</span>}
+        </button>
+        {aperto && destra}
+      </div>
+      {aperto && <div className="mt-2">{children}</div>}
     </div>
   );
 }
+
 
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
@@ -7610,11 +7632,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
   return (
     <div className="space-y-5">
       {autoNuove.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-2 px-1">
-            <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">Messaggi automatici inviati ({autoNuove.length})</p>
-            <button onClick={() => segnaAutoViste(autoNuove.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button>
-          </div>
+        <Sezione id="auto_inviati" titolo="Messaggi automatici inviati" conteggio={autoNuove.length} aperta={autoNuove.length>0} ricorda={false}  tono="sky" evidenzia destra={<button onClick={() => segnaAutoViste(autoNuove.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button>}>
           <div className="space-y-2">
             {autoNuove.map((n) => (
               <Card key={n.id} className="p-3 space-y-1 bg-sky-50/60 border-sky-100">
@@ -7628,11 +7646,10 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
               </Card>
             ))}
           </div>
-        </div>
+        </Sezione>
       )}
       {promemoriaDomani.length > 0 && (
-        <div>
-          <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Promemoria di domani ({promemoriaDomani.length})</p>
+        <Sezione id="promemoria_domani" titolo="Promemoria di domani" conteggio={promemoriaDomani.length} aperta={promemoriaDomani.length>0} ricorda={false}  tono="amber" evidenzia>
           <div className="space-y-2">
             {promemoriaDomani.map((v) => (
               <Card key={v.cliente.id + v.marker} className="p-3">
@@ -7643,11 +7660,10 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
               </Card>
             ))}
           </div>
-        </div>
+        </Sezione>
       )}
       {nuoveDaCompletare.length > 0 && (
-        <div>
-          <p className="text-xs uppercase tracking-wide text-amber-600 font-medium mb-2 px-1">Nuove clienti registrate — da completare ({nuoveDaCompletare.length})</p>
+        <Sezione id="nuove_clienti" titolo="Nuove clienti da completare" conteggio={nuoveDaCompletare.length} aperta={nuoveDaCompletare.length>0} ricorda={false}  tono="amber" evidenzia>
           <div className="space-y-2">
             {nuoveDaCompletare.map((c) => (
               <Card key={c.id} className="p-3 flex items-center gap-3 bg-amber-50/60 border-amber-200">
@@ -7659,11 +7675,10 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
               </Card>
             ))}
           </div>
-        </div>
+        </Sezione>
       )}
 
-      <div>
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Richieste lezione/call ({richieste.length})</p>
+      <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length} aperta={richieste.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
           {richieste.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
           {richieste.map((r) => (
@@ -7684,10 +7699,9 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
             </Card>
           ))}
         </div>
-      </div>
+      </Sezione>
 
-      <div>
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Check da rivedere ({checkDaRivedere.length})</p>
+      <Sezione id="check_rivedere" titolo="Check da rivedere" conteggio={checkDaRivedere.length} aperta={checkDaRivedere.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
           {checkDaRivedere.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun check da rivedere.</Card>}
           {checkDaRivedere.map((c) => (
@@ -7700,12 +7714,11 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
             </Card>
           ))}
         </div>
-      </div>
+      </Sezione>
 
-      <div>
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Invia una nota</p>
+      <Sezione id="invia_nota" titolo="Invia una nota">
         <InviaNotaForm clients={clients} onFatto={() => {}} />
-      </div>
+      </Sezione>
 
       <CompleanniClienti clients={clients} />
 
@@ -8012,6 +8025,66 @@ function BottoneCartelleClienti({ clients, className = "" }) {
   return (
     <div className={className}>
       <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : "⬇ Cartelle di tutte le clienti (ZIP con storico e foto)"}</button>
+      {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
+      {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
+    </div>
+  );
+}
+
+// ZIP con SOLO le foto: una cartella per cliente, foto in originale chiamate con data e posizione
+async function esportaSoloFoto(clients, avanzamento = () => {}) {
+  const JSZip = await caricaModuloZip();
+  const zip = new JSZip();
+  const usati = {};
+  const pulisci = (t) => String(t || "").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const campi = [["foto_frontale_path", "frontale"], ["foto_laterale_path", "laterale"], ["foto_posteriore_path", "posteriore"], ["foto_extra_path", "extra"]];
+  const lista = [...clients].sort((a, b) => `${a.cognome || ""} ${a.nome}`.localeCompare(`${b.cognome || ""} ${b.nome}`, "it"));
+  let nFoto = 0; let nErrori = 0;
+  for (let i = 0; i < lista.length; i++) {
+    const c = lista[i];
+    let cartella = pulisci(`${c.nome} ${c.cognome || ""}`) || `Cliente ${c.id}`;
+    if (c.archiviato) cartella += " (archiviata)";
+    if (usati[cartella]) cartella += ` ${c.id}`; usati[cartella] = true;
+    const { data: ck, error } = await supabase.from("checkins").select("*").eq("client_id", c.id).order("data_check", { ascending: true });
+    if (error) { nErrori++; continue; }
+    for (const chk of ck || []) {
+      for (const [k, nome] of campi) {
+        const path = chk[k]; if (!path) continue;
+        avanzamento(`Cliente ${i + 1} di ${lista.length}: ${c.nome} — foto ${nFoto + 1}...`);
+        try {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(path, 600);
+          if (!data?.signedUrl) throw new Error("no url");
+          const r = await fetch(data.signedUrl);
+          if (!r.ok) throw new Error("download");
+          const ext = (path.split(".").pop() || "jpg").toLowerCase().slice(0, 4);
+          zip.file(`${cartella}/${chk.data_check}_${nome}.${ext}`, await r.blob());
+          nFoto++;
+        } catch { nErrori++; }
+      }
+    }
+  }
+  avanzamento("Preparo il file ZIP (può servire un minuto)...");
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (m) => avanzamento(`Preparo il file ZIP... ${Math.round(m.percent)}%`));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = `foto-clienti-${new Date().toISOString().slice(0, 10)}.zip`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return { clienti: lista.length, foto: nFoto, errori: nErrori };
+}
+
+function BottoneSoloFoto({ clients, className = "" }) {
+  const [inCorso, setInCorso] = useState(false);
+  const [msg, setMsg] = useState("");
+  const vai = async () => {
+    setInCorso(true); setMsg("");
+    try {
+      const r = await esportaSoloFoto(clients, setMsg);
+      setMsg(`Scaricato: ${r.foto} foto in ${r.clienti} cartelle.${r.errori ? ` Attenzione: ${r.errori} foto non si sono potute scaricare.` : ""}`);
+    } catch (e) { setMsg(e?.message || "Errore durante l'esportazione, riprova."); }
+    setInCorso(false);
+  };
+  return (
+    <div className={className}>
+      <button onClick={vai} disabled={inCorso} className="w-full border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le foto..." : "⬇ Solo foto delle clienti (ZIP, una cartella per cliente)"}</button>
       {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
       {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
     </div>
@@ -9729,10 +9802,11 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       </>
       )}
 
-      <div className="pt-2 border-t border-slate-100 space-y-2">
-        <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Esportazioni e backup</p>
+      <div className="pt-2 border-t border-slate-100">
+        <Sezione id="esportazioni" titolo="Esportazioni e backup">
         <div className="grid grid-cols-2 gap-2">
           <BottoneCartelleClienti clients={clients} className="col-span-2" />
+          <BottoneSoloFoto clients={clients} className="col-span-2" />
           <BottoneEsportaExcel label="⬇ Esporta tutto in Excel (carichi, progressi, check)" className="col-span-2" />
           <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
           <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
@@ -9741,12 +9815,14 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
             {backupInCorso ? "Esporto..." : "📦 Backup completo"}
           </button>
         </div>
+        </Sezione>
       </div>
 
-      <div className="pt-2 border-t border-slate-100 space-y-2">
-        <p className="text-[11px] uppercase tracking-wide text-slate-400 px-1">Il tuo account</p>
+      <div className="pt-2 border-t border-slate-100">
+        <Sezione id="account" titolo="Il tuo account"><div className="space-y-2">
         <AttivaNotifichePush ruolo="coach" />
         <CambiaPasswordPropria />
+      </div></Sezione>
       </div>
     </div>
   );
