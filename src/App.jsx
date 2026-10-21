@@ -8739,6 +8739,85 @@ const categoriaPagamento = (p) => {
 const METODI_ELETTRONICI_STAT = ["satispay", "hype", "sella", "bonifico"];
 
 // Righe di incasso reali (saldati + acconti) e spese, con importo sempre positivo
+// Fidelizzazione dall'inizio: per ogni cliente ricostruisce i mesi in cui è stata attiva (online: copertura 1/3/6 mesi dei
+// pagamenti; Bulb: pacchetti e lezioni) e i rinnovi fatti. Un rinnovo è contato una volta per cliente e per mese.
+function calcolaFidelizzazione(pagamenti, pacchetti, clients, oggiStr) {
+  const meseOggi = oggiStr.slice(0, 7);
+  const mese = (d) => (d || "").slice(0, 7);
+  const succ = (k, n = 1) => { const [a, m] = k.split("-").map(Number); const d = new Date(a, m - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const intervallo = (da, a) => { const out = []; for (let k = da, i = 0; k <= a && i < 600; k = succ(k), i++) out.push(k); return out; };
+  const info = {};
+  const get = (cid) => (info[cid] = info[cid] || { onl: new Set(), bulb: new Set(), evOnl: new Set(), evBulb: new Set() });
+  const piano = (cid) => (clients.find((c) => c.id === cid) || {}).piano;
+
+  // Coaching online
+  const perCli = {};
+  pagamenti.filter((p) => p.client_id && p.stato === "saldato" && p.data_pagamento).forEach((p) => {
+    let m = mesiDelPagamento(p, piano(p.client_id));
+    if (!m && /coaching online/i.test(p.tipo_piano || "")) m = 1; // storico senza durata scritta: conto 1 mese
+    if (m > 0) (perCli[p.client_id] = perCli[p.client_id] || []).push({ d: p.data_pagamento, m });
+  });
+  Object.entries(perCli).forEach(([cid, l]) => {
+    l.sort((a, b) => a.d.localeCompare(b.d));
+    const x = get(cid); let fine = null;
+    l.forEach((q) => {
+      let base = q.d; if (fine && fine > base) base = fine;
+      fine = addMesi(base, q.m);
+      intervallo(mese(base), mese(addGiorni(fine, -1))).forEach((k) => x.onl.add(k));
+      x.evOnl.add(mese(q.d));
+    });
+  });
+
+  // Bulb: pacchetti registrati + pagamenti di pacchetti (se non già coperti da un pacchetto registrato)
+  const isPacchettoPag = (p) => (/bulb/i.test(p.tipo_piano || "") && /pacchetto/i.test(p.tipo_piano || "")) || (/1:1/.test(p.tipo_piano || "") && /\d+\s*lezion/i.test(p.note || ""));
+  pagamenti.filter((p) => p.client_id && p.stato !== "spesa" && p.data_pagamento && (/bulb/i.test(p.tipo_piano || "") || /1:1/.test(p.tipo_piano || ""))).forEach((p) => get(p.client_id).bulb.add(mese(p.data_pagamento)));
+  pacchetti.filter((pk) => pk.client_id && pk.creato_il).forEach((pk) => {
+    const x = get(pk.client_id);
+    const fine = pk.completato_il ? mese(pk.completato_il) : meseOggi;
+    intervallo(mese(pk.creato_il), fine < mese(pk.creato_il) ? mese(pk.creato_il) : fine).forEach((k) => x.bulb.add(k));
+    x.evBulb.add(mese(pk.creato_il));
+  });
+  const giorniTra = (a, b) => Math.abs((new Date(`${a}T12:00:00`) - new Date(`${b}T12:00:00`)) / 86400000);
+  pagamenti.filter((p) => p.client_id && p.stato !== "spesa" && p.data_pagamento && isPacchettoPag(p)).forEach((p) => {
+    const coperto = pacchetti.some((pk) => pk.client_id === p.client_id && pk.creato_il && giorniTra(pk.creato_il.slice(0, 10), p.data_pagamento) <= 20);
+    if (!coperto) get(p.client_id).evBulb.add(mese(p.data_pagamento));
+  });
+
+  // Mesi dall'inizio ad oggi
+  let primo = meseOggi;
+  Object.values(info).forEach((x) => [...x.onl, ...x.bulb].forEach((k) => { if (k < primo) primo = k; }));
+  const mesi = intervallo(primo, meseOggi);
+  const righe = mesi.map((k) => {
+    let onl = 0, bulb = 0, tot = 0, rinnOnl = 0, rinnBulb = 0;
+    Object.values(info).forEach((x) => {
+      const a = x.onl.has(k), b = x.bulb.has(k);
+      if (a) onl++; if (b) bulb++; if (a || b) tot++;
+      const primoOnl = [...x.evOnl].sort()[0], primoBulb = [...x.evBulb].sort()[0];
+      if (x.evOnl.has(k) && k !== primoOnl) rinnOnl++;
+      if (x.evBulb.has(k) && k !== primoBulb) rinnBulb++;
+    });
+    return { k, onl, bulb, tot, rinn: rinnOnl + rinnBulb };
+  });
+  const media = (campo) => (righe.length ? Math.round((righe.reduce((s, r) => s + r[campo], 0) / righe.length) * 10) / 10 : 0);
+
+  // Clienti con almeno un rinnovo
+  const lista = [];
+  let sommaDurate = 0, nConDurata = 0;
+  Object.entries(info).forEach(([cid, x]) => {
+    const attivi = [...x.onl, ...x.bulb].filter((k) => k <= meseOggi).sort();
+    if (!attivi.length) return;
+    const durata = intervallo(attivi[0], attivi[attivi.length - 1]).length;
+    sommaDurate += durata; nConDurata += 1;
+    const rO = Math.max(0, x.evOnl.size - 1), rB = Math.max(0, x.evBulb.size - 1);
+    if (rO + rB === 0) return;
+    const c = clients.find((q) => q.id === cid);
+    lista.push({ cid, nome: c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente", archiviata: !!(c && c.archiviato), rO, rB, durata, da: attivi[0], a: attivi[attivi.length - 1], inCorso: attivi[attivi.length - 1] >= meseOggi });
+  });
+  lista.sort((p, q) => (q.rO + q.rB) - (p.rO + p.rB) || q.durata - p.durata);
+  const durataMediaRinnovate = lista.length ? Math.round((lista.reduce((s, l) => s + l.durata, 0) / lista.length) * 10) / 10 : 0;
+  return { righe, mediaOnl: media("onl"), mediaBulb: media("bulb"), mediaTot: media("tot"), lista, durataMediaRinnovate, durataMediaTutte: nConDurata ? Math.round((sommaDurate / nConDurata) * 10) / 10 : 0, nClientiTotali: nConDurata };
+}
+
 function righeContabili(pagamenti) {
   const out = [];
   pagamenti.forEach((p) => {
@@ -8891,6 +8970,8 @@ function StatisticheCoach({ clients }) {
     (prima ? rinnBulbSet : nuoveBulbSet).add(e.cid);
   });
   const rinnFatti = rinnOnlineSet.size + rinnBulbSet.size;
+  const fid = calcolaFidelizzazione(dati.pagamenti, dati.pacchetti, clients, formatDataLocale(new Date()));
+  const labMese = (k) => { const [a, m] = k.split('-').map(Number); return new Date(a, m - 1, 1).toLocaleDateString('it-IT', { month: 'short', year: '2-digit' }); };
 
   const attive = clients.filter((c) => !c.archiviato);
   const nOnline = attive.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length;
@@ -8940,6 +9021,52 @@ function StatisticheCoach({ clients }) {
         )}
         <p className="text-xs text-slate-500 pt-1">Clienti attive: {attive.length} (online {nOnline} · Bulb {nBulb})</p>
       </Card>
+      <Sezione id="fidelizzazione" titolo="Fidelizzazione dall'inizio" tono="slate">
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-lg font-semibold text-slate-800">{fid.mediaTot}</p><p className="text-[10px] text-slate-500 leading-tight">clienti al mese (media)</p></div>
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-lg font-semibold text-slate-800">{fid.mediaOnl}</p><p className="text-[10px] text-slate-500 leading-tight">online al mese (media)</p></div>
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-lg font-semibold text-slate-800">{fid.mediaBulb}</p><p className="text-[10px] text-slate-500 leading-tight">Bulb al mese (media)</p></div>
+          </div>
+          <p className="text-xs text-slate-500">{fid.lista.length} clienti su {fid.nClientiTotali} hanno rinnovato almeno una volta. Restano con te in media {String(fid.durataMediaTutte).replace(".", ",")} mesi (chi ha rinnovato: {String(fid.durataMediaRinnovate).replace(".", ",")} mesi).</p>
+          {fid.righe.length > 1 && (
+            <div style={{ width: "100%", height: 170 }}>
+              <ResponsiveContainer>
+                <LineChart data={fid.righe.map((r) => ({ ...r, lab: labMese(r.k) }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="lab" tick={{ fontSize: 10 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 10 }} width={28} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="tot" name="Totale" stroke="#334155" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="onl" name="Online" stroke="#4F8FD0" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="bulb" name="Bulb" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-slate-400 text-left"><th className="py-1 font-medium">Mese</th><th className="font-medium text-right">Online</th><th className="font-medium text-right">Bulb</th><th className="font-medium text-right">Totale</th><th className="font-medium text-right">Rinnovi</th></tr></thead>
+              <tbody>{fid.righe.slice().reverse().map((r) => (
+                <tr key={r.k} className="border-t border-slate-100 text-slate-700"><td className="py-1">{labMese(r.k)}</td><td className="text-right">{r.onl}</td><td className="text-right">{r.bulb}</td><td className="text-right font-medium">{r.tot}</td><td className="text-right">{r.rinn}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Clienti che hanno rinnovato</p>
+            {fid.lista.length === 0 ? <p className="text-slate-400 text-sm">Ancora nessun rinnovo registrato.</p> : fid.lista.map((l) => (
+              <div key={l.cid} className="flex items-start justify-between gap-2 border-t border-slate-100 py-1.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700 font-medium">{l.nome}{l.archiviata ? " (archiviata)" : ""}</p>
+                  <p className="text-[11px] text-slate-500">{labMese(l.da)} → {l.inCorso ? "oggi" : labMese(l.a)} · {l.durata} {l.durata === 1 ? "mese" : "mesi"} con te</p>
+                </div>
+                <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700 flex-shrink-0">{l.rO + l.rB} {l.rO + l.rB === 1 ? "rinnovo" : "rinnovi"}{l.rO > 0 && l.rB > 0 ? ` (${l.rO} online, ${l.rB} Bulb)` : l.rB > 0 ? " Bulb" : " online"}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400">Online: un cliente è attivo per tutta la durata coperta dai pagamenti (1, 3 o 6 mesi; i pagamenti storici senza durata contano 1 mese). Bulb: attivo nei mesi con pacchetti o lezioni. I rinnovi sono contati una volta per cliente e per mese.</p>
+        </div>
+      </Sezione>
 
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
