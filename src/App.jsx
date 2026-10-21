@@ -500,13 +500,13 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
 }
 
 const MESSAGGI_GIORNO = [
-  "Buon relax! Goditi il weekend senza esagerare, idratati bene e fai due passi 🚶🏻‍♀️💧✨", // domenica
-  "Inizia una nuova settimana: un passo alla volta, con tanta motivazione 💪🏻✨", // lunedì
-  "Siamo all'inizio: non serve la perfezione, serve la costanza 🫶🏻", // martedì
-  "Metà settimana! Un'altra dose di motivazione leggera: stai andando bene ✨", // mercoledì
-  "Ultimo sprint: ancora un piccolo sforzo e ci siamo 🔥💪🏻", // giovedì
-  "Settimana quasi finita! Hai fatto un bel lavoro: ora puoi pensare anche al riposo 🧘🏻‍♀️✨", // venerdì
-  "Buon relax! Goditi il weekend senza esagerare, idratati bene e fai due passi 🚶🏻‍♀️💧✨", // sabato
+  "Domenica di relax, te la sei guadagnata 🫶🏻 Goditi la giornata senza esagerare, bevi tanta acqua e fatti una bella camminata ✨", // domenica
+  "Si riparte! Nessuna scusa, ma neanche pressione: facciamo una settimana alla volta, e questa la facciamo bene 💪🏻✨", // lunedì
+  "Siamo all'inizio, non ti chiedo di essere perfetta: ti chiedo di esserci. La costanza vince sempre 🫶🏻", // martedì
+  "Metà settimana! Se sei qui, stai già facendo più di quello che pensi. Avanti così, con calma e testa ✨", // mercoledì
+  "Ultimo sprint, dai che ci siamo quasi! Un allenamento alla volta e la settimana è tua 🔥💪🏻", // giovedì
+  "Settimana quasi in archivio, brava! Chiudila bene e poi pensa anche al riposo: anche quello fa parte del programma 🧘🏻‍♀️✨", // venerdì
+  "Weekend! Staccare fa bene: goditelo senza esagerare, idratati e fai due passi all'aria aperta 🚶🏻‍♀️💧✨", // sabato
 ];
 
 function RiepilogoSettimana({ client }) {
