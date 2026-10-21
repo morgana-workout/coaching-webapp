@@ -1435,7 +1435,9 @@ function ProgressiCarichi({ clientId }) {
           const precedenti = date.slice(0, -1).map((d) => g.date[d]);
           const maxPrec = precedenti.length ? Math.max(...precedenti) : 0;
           const record = date.length >= 2 && ultimo > maxPrec;
-          return { nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
+          const scorsa = date.length >= 2 ? g.date[date[date.length - 2]] : null;
+          const diffScorsa = scorsa == null ? null : Math.round((ultimo - scorsa) * 10) / 10;
+          return { scorsa, diffScorsa, nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
         }).sort((a, b) => a.nome.localeCompare(b.nome));
         // Costanza: settimane consecutive (lunedì-domenica) con almeno un allenamento registrato
         const lunedi = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
@@ -1454,6 +1456,8 @@ function ProgressiCarichi({ clientId }) {
   if (!esercizi || esercizi.length === 0) return null;
   const inAumento = esercizi.filter((e) => e.diff > 0).length;
   const fmt = (n) => String(n).replace(".", ",");
+  const oggiStr = formatDataLocale(new Date());
+  const inCalo = esercizi.filter((e) => e.diffScorsa != null && e.diffScorsa < 0 && e.ultimaData >= addGiorni(oggiStr, -21));
 
   return (
     <div className="space-y-2">
@@ -1466,6 +1470,15 @@ function ProgressiCarichi({ clientId }) {
           ))}
         </Card>
       )}
+      {inCalo.length > 0 && (
+        <Card className="p-4 bg-amber-50 border-amber-100 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-amber-700 font-medium">Da tenere d'occhio 👀</p>
+          {inCalo.map((e) => (
+            <p key={e.nome} className="text-sm text-slate-700"><span className="font-semibold">{e.nome}</span>: {fmt(e.scorsa)} → {fmt(e.ultimo)} kg ({fmt(e.diffScorsa)} kg rispetto alla volta scorsa)</p>
+          ))}
+          <p className="text-xs text-slate-500">Capita, è normale: è solo un'informazione utile per regolare recupero, sonno e programma 🫶🏻</p>
+        </Card>
+      )}
       <div className="px-1">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Progressi carichi</p>
         <p className="text-slate-400 text-xs mt-0.5">{inAumento} esercizi su {esercizi.length} con carico in aumento. Il valore è il kg più alto usato in ogni allenamento.</p>
@@ -1475,11 +1488,12 @@ function ProgressiCarichi({ clientId }) {
           <button onClick={() => setAperto(aperto === e.nome ? null : e.nome)} className="w-full text-left">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium text-slate-700 text-sm">{e.nome}{e.recordRecente ? " 🏆" : ""}</p>
-              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}>
+              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
                 {e.sessioni < 2 ? "1ª sessione" : `${e.diff > 0 ? "+" : ""}${fmt(e.diff)} kg`}
               </span>
             </div>
             <p className="text-slate-500 text-xs mt-1">{fmt(e.primo)} kg → {fmt(e.ultimo)} kg · massimo {fmt(e.max)} kg · {e.sessioni} {e.sessioni === 1 ? "sessione" : "sessioni"}</p>
+            {e.diffScorsa != null && <p className={`text-xs mt-0.5 ${e.diffScorsa > 0 ? "text-emerald-600" : e.diffScorsa < 0 ? "text-amber-600" : "text-slate-400"}`}>Rispetto alla volta scorsa: {e.diffScorsa > 0 ? "+" : ""}{fmt(e.diffScorsa)} kg</p>}
           </button>
           {aperto === e.nome && e.serie.length > 1 && (
             <div style={{ width: "100%", height: 150 }} className="mt-2">
