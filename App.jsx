@@ -9860,6 +9860,103 @@ async function esportaBackupCompleto(setInCorso) {
   setInCorso(false);
 }
 
+/* ------------------------------------------------------------------ */
+/* Riquadro "Ultime notifiche" (solo desktop): ultime 4 attività delle clienti, in tempo reale */
+/* ------------------------------------------------------------------ */
+function tempoRelativo(iso) {
+  const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (sec < 60) return "adesso";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min fa`;
+  const ore = Math.round(min / 60);
+  if (ore < 24) return `${ore} ${ore === 1 ? "ora" : "ore"} fa`;
+  const g = Math.round(ore / 24);
+  return g === 1 ? "ieri" : `${g} giorni fa`;
+}
+
+function FeedCoach({ onSelect }) {
+  const [righe, setRighe] = useState([]);
+  const [pronto, setPronto] = useState(false);
+  const [entrate, setEntrate] = useState({});
+  const [, ridisegna] = useState(0);
+  const [visti, setVisti] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("feed_coach_visti") || "[]")); } catch { return new Set(); }
+  });
+  const prime = React.useRef(null);
+  const attesa = React.useRef(null);
+  const salvaLocale = (set) => { try { localStorage.setItem("feed_coach_visti", JSON.stringify([...set].slice(-300))); } catch { /* ignora */ } };
+
+  const carica = async () => {
+    const { data, error } = await supabase.from("feed_coach").select("*").order("created_at", { ascending: false }).limit(4);
+    if (error) return;
+    const nuove = data || [];
+    // chi era già visto sul database (se la tabella esiste) viene unito a quello salvato sul computer
+    try {
+      const { data: vd, error: ve } = await supabase.from("feed_coach_visti").select("chiave").in("chiave", nuove.map((r) => r.chiave));
+      if (!ve && vd?.length) setVisti((prev) => { const n = new Set(prev); vd.forEach((v) => n.add(v.chiave)); salvaLocale(n); return n; });
+    } catch { /* tabella non presente: si usa solo il computer */ }
+    if (prime.current) {
+      const nuoveChiavi = nuove.filter((r) => !prime.current.has(r.chiave)).map((r) => r.chiave);
+      if (nuoveChiavi.length) {
+        setEntrate((e) => { const n = { ...e }; nuoveChiavi.forEach((k) => { n[k] = true; }); return n; });
+        setTimeout(() => setEntrate((e) => { const n = { ...e }; nuoveChiavi.forEach((k) => { delete n[k]; }); return n; }), 1200);
+      }
+    }
+    prime.current = new Set(nuove.map((r) => r.chiave));
+    setRighe(nuove);
+    setPronto(true);
+  };
+
+  useEffect(() => {
+    carica();
+    const ricarica = () => { clearTimeout(attesa.current); attesa.current = setTimeout(carica, 800); };
+    const canale = supabase.channel("feed-coach");
+    ["training_entries", "calendar_events", "checkins", "messaggi"].forEach((t) => {
+      canale.on("postgres_changes", { event: "INSERT", schema: "public", table: t }, ricarica);
+    });
+    canale.subscribe();
+    const ogniMinuto = setInterval(() => ridisegna((n) => n + 1), 30000);
+    return () => { clearTimeout(attesa.current); clearInterval(ogniMinuto); supabase.removeChannel(canale); };
+  }, []);
+
+  const segnaVisto = async (chiave) => {
+    if (visti.has(chiave)) return;
+    const n = new Set(visti); n.add(chiave); setVisti(n); salvaLocale(n);
+    try { await supabase.from("feed_coach_visti").upsert({ chiave }, { onConflict: "user_id,chiave", ignoreDuplicates: true }); } catch { /* ignora */ }
+  };
+
+  const icone = { allenamento: Dumbbell, lezione: Clock, check: ClipboardList, messaggio: MessageCircle };
+  if (!pronto) return null;
+  return createPortal(
+    <div className="hidden lg:block fixed top-4 right-4 w-64 z-30">
+      <style>{"@keyframes feedEntra{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}"}</style>
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche</p>
+        {righe.length === 0 && <p className="text-xs text-slate-400 px-1 py-2">Ancora nessuna attività dalle clienti.</p>}
+        <div className="space-y-1">
+          {righe.map((r) => {
+            const Icona = icone[r.tipo] || Bell;
+            const nonVisto = !visti.has(r.chiave);
+            return (
+              <button key={r.chiave} onClick={() => { segnaVisto(r.chiave); onSelect?.(r.client_id); }}
+                style={entrate[r.chiave] ? { animation: "feedEntra .5s ease-out" } : undefined}
+                className="w-full text-left flex items-start gap-2 rounded-xl px-2 py-2 hover:bg-slate-50">
+                <span className="mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center"><Icona size={13} /></span>
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-xs leading-snug break-words ${nonVisto ? "text-slate-800 font-medium" : "text-slate-500"}`}>{r.testo}</span>
+                  <span className="block text-[11px] text-slate-400 mt-0.5">{tempoRelativo(r.created_at)}</span>
+                </span>
+                {nonVisto && <span className="mt-1.5 flex-shrink-0 w-2 h-2 rounded-full bg-sky-500" aria-label="Da vedere" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function AdminApp({ onVistaCliente }) {
   const [clients, setClients] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -9881,7 +9978,8 @@ function AdminApp({ onVistaCliente }) {
 
   return (
     <PullToRefresh onRefresh={carica}>
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 lg:pr-[17rem]">
+      <FeedCoach onSelect={setSelectedId} />
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
         <div className="flex items-center gap-4">
