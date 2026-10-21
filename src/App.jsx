@@ -8770,19 +8770,13 @@ function calcolaFidelizzazione(pagamenti, pacchetti, clients, oggiStr) {
 
   // Bulb: pacchetti registrati + pagamenti di pacchetti (se non già coperti da un pacchetto registrato)
   const isPacchettoPag = (p) => (/bulb/i.test(p.tipo_piano || "") && /pacchetto/i.test(p.tipo_piano || "")) || (/1:1/.test(p.tipo_piano || "") && /\d+\s*lezion/i.test(p.note || ""));
-  pagamenti.filter((p) => p.client_id && p.stato !== "spesa" && p.data_pagamento && (/bulb/i.test(p.tipo_piano || "") || /1:1/.test(p.tipo_piano || ""))).forEach((p) => get(p.client_id).bulb.add(mese(p.data_pagamento)));
+  const pagatoBulb = (p) => p.client_id && p.data_pagamento && (p.stato === "saldato" || (p.stato === "da_saldare" && Number(p.importo_saldato) > 0)) && (/bulb/i.test(p.tipo_piano || "") || /1:1/.test(p.tipo_piano || ""));
+  pagamenti.filter(pagatoBulb).forEach((p) => { const x = get(p.client_id); x.bulb.add(mese(p.data_pagamento)); x.evBulb.add(mese(p.data_pagamento)); }); // gli eventi vengono dai pagamenti, che sono i dati più completi
   pacchetti.filter((pk) => pk.client_id && pk.creato_il).forEach((pk) => {
     const x = get(pk.client_id);
     const fine = pk.completato_il ? mese(pk.completato_il) : meseOggi;
     intervallo(mese(pk.creato_il), fine < mese(pk.creato_il) ? mese(pk.creato_il) : fine).forEach((k) => x.bulb.add(k));
-    x.evBulb.add(mese(pk.creato_il));
   });
-  const giorniTra = (a, b) => Math.abs((new Date(`${a}T12:00:00`) - new Date(`${b}T12:00:00`)) / 86400000);
-  pagamenti.filter((p) => p.client_id && p.stato !== "spesa" && p.data_pagamento && isPacchettoPag(p)).forEach((p) => {
-    const coperto = pacchetti.some((pk) => pk.client_id === p.client_id && pk.creato_il && giorniTra(pk.creato_il.slice(0, 10), p.data_pagamento) <= 20);
-    if (!coperto) get(p.client_id).evBulb.add(mese(p.data_pagamento));
-  });
-
   // Mesi dall'inizio ad oggi
   let primo = meseOggi;
   Object.values(info).forEach((x) => [...x.onl, ...x.bulb].forEach((k) => { if (k < primo) primo = k; }));
@@ -8961,10 +8955,9 @@ function StatisticheCoach({ clients }) {
     const prima = dati.pagamenti.some((q) => q.client_id === p.client_id && q.id !== p.id && onlineDelPag(q) && q.data_pagamento < `${mese}-01`);
     (prima ? rinnOnlineSet : nuoveOnlineSet).add(p.client_id);
   });
-  const eventiBulb = [
-    ...dati.pagamenti.filter(bulbPacchettoPag).map((p) => ({ cid: p.client_id, d: p.data_pagamento })),
-    ...dati.pacchetti.filter((pk) => pk.creato_il).map((pk) => ({ cid: pk.client_id, d: pk.creato_il.slice(0, 10) })),
-  ];
+  const eventiBulb = dati.pagamenti
+    .filter((p) => p.client_id && p.data_pagamento && (p.stato === "saldato" || (p.stato === "da_saldare" && Number(p.importo_saldato) > 0)) && (/bulb/i.test(p.tipo_piano || "") || /1:1/.test(p.tipo_piano || "")))
+    .map((p) => ({ cid: p.client_id, d: p.data_pagamento }));
   eventiBulb.filter((e) => nelMese(e.d)).forEach((e) => {
     const prima = eventiBulb.some((q) => q.cid === e.cid && q.d < `${mese}-01`);
     (prima ? rinnBulbSet : nuoveBulbSet).add(e.cid);
@@ -9011,8 +9004,8 @@ function StatisticheCoach({ clients }) {
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi e fidelizzazione</p>
         <p className="text-2xl font-semibold text-slate-800">{rinnFatti} <span className="text-base font-normal text-slate-400">rinnovi fatti questo mese</span></p>
-        <p className="text-xs text-slate-500">Coaching online: {rinnOnlineSet.size} · Pacchetti Bulb: {rinnBulbSet.size}{(nuoveOnlineSet.size + nuoveBulbSet.size) > 0 ? ` · Nuove partenze (primo pagamento): ${nuoveOnlineSet.size + nuoveBulbSet.size}` : ""}</p>
-        <p className="text-[11px] text-slate-400">Contati una volta per cliente al mese, anche se paga a rate. Per Bulb conta il pacchetto, non ogni pagamento.</p>
+        <p className="text-xs text-slate-500">Coaching online: {rinnOnlineSet.size} · Bulb: {rinnBulbSet.size}{(nuoveOnlineSet.size + nuoveBulbSet.size) > 0 ? ` · Nuove partenze (primo pagamento): ${nuoveOnlineSet.size + nuoveBulbSet.size}` : ""}</p>
+        <p className="text-[11px] text-slate-400">Contati una volta per cliente al mese, anche se paga a rate. Per Bulb conta il mese in cui torna a pagare lezioni o pacchetti, non ogni singolo pagamento.</p>
         {attesiTot === 0 ? <p className="text-slate-400 text-sm pt-1">Nessuna scadenza prevista in questo mese.</p> : (
           <>
             <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-emerald-600 ml-2">{retention}%</span>}</p>
@@ -9064,7 +9057,7 @@ function StatisticheCoach({ clients }) {
               </div>
             ))}
           </div>
-          <p className="text-[11px] text-slate-400">Online: un cliente è attivo per tutta la durata coperta dai pagamenti (1, 3 o 6 mesi; i pagamenti storici senza durata contano 1 mese). Bulb: attivo nei mesi con pacchetti o lezioni. I rinnovi sono contati una volta per cliente e per mese.</p>
+          <p className="text-[11px] text-slate-400">Online: un cliente è attivo per tutta la durata coperta dai pagamenti (1, 3 o 6 mesi; i pagamenti storici senza durata contano 1 mese). Bulb: attivo nei mesi con pagamenti di lezioni o pacchetti (o con un pacchetto in corso); il rinnovo è ogni mese in cui torna a pagare dopo il primo. I rinnovi sono contati una volta per cliente e per mese.</p>
         </div>
       </Sezione>
 
