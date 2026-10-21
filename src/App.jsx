@@ -499,6 +499,16 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   );
 }
 
+const MESSAGGI_GIORNO = [
+  "Buon relax! Goditi il weekend senza esagerare, idratati bene e fai due passi 🚶🏻‍♀️💧✨", // domenica
+  "Inizia una nuova settimana: un passo alla volta, con tanta motivazione 💪🏻✨", // lunedì
+  "Siamo all'inizio: non serve la perfezione, serve la costanza 🫶🏻", // martedì
+  "Metà settimana! Un'altra dose di motivazione leggera: stai andando bene ✨", // mercoledì
+  "Ultimo sprint: ancora un piccolo sforzo e ci siamo 🔥💪🏻", // giovedì
+  "Settimana quasi finita! Hai fatto un bel lavoro: ora puoi pensare anche al riposo 🧘🏻‍♀️✨", // venerdì
+  "Buon relax! Goditi il weekend senza esagerare, idratati bene e fai due passi 🚶🏻‍♀️💧✨", // sabato
+];
+
 function RiepilogoSettimana({ client }) {
   const [r, setR] = useState(null);
   const mostraLog = client.tipo_servizio !== "presenza" || client.log_visibile_cliente;
@@ -528,6 +538,7 @@ function RiepilogoSettimana({ client }) {
       <div className="min-w-0">
         <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">La tua settimana</p>
         <p className="font-semibold text-slate-800 text-sm">{vuoto ? "Si riparte da qui: anche un solo passo conta 💪🏻" : `Questa settimana: ${parti.join(", ")} 💪🏻`}</p>
+        <p className="text-slate-500 text-xs mt-1">{MESSAGGI_GIORNO[new Date().getDay()]}</p>
       </div>
     </Card>
   );
