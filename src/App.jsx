@@ -519,25 +519,35 @@ function RiepilogoSettimana({ client }) {
     const lun = new Date(oggi); lun.setDate(oggi.getDate() - ((oggi.getDay() + 6) % 7));
     const da = formatDataLocale(lun);
     (async () => {
-      const [t, k] = await Promise.all([
+      const [t, k, g] = await Promise.all([
         mostraLog ? supabase.from("training_entries").select("data").eq("client_id", client.id).gte("data", da).limit(500) : { data: [] },
         mostraKcal ? supabase.from("kcal_voci").select("data").eq("client_id", client.id).gte("data", da).limit(2000) : { data: [] },
+        mostraLog ? supabase.from("training_days").select("id, scheda_archiviata").eq("client_id", client.id) : { data: [] },
       ]);
-      setR({ all: new Set((t.data || []).map((x) => x.data)).size, diario: new Set((k.data || []).map((x) => x.data)).size });
+      setR({ all: new Set((t.data || []).map((x) => x.data)).size, diario: new Set((k.data || []).map((x) => x.data)).size, previsti: (g.data || []).filter((d) => !d.scheda_archiviata).length });
     })();
   }, [client.id, mostraLog, mostraKcal]);
   if (!r || (!mostraLog && !mostraKcal)) return null;
-  const parti = [];
-  // Se un valore è 0 non si scrive niente: compare solo ciò che c'è davvero
-  if (mostraLog && r.all > 0) parti.push(`${r.all} allenament${r.all === 1 ? "o" : "i"}`);
-  if (mostraKcal && r.diario > 0) parti.push(`diario compilato ${r.diario} giorn${r.diario === 1 ? "o" : "i"}`);
-  const vuoto = (mostraLog ? r.all : 0) + (mostraKcal ? r.diario : 0) === 0;
+  // Solo il numero degli allenamenti fatti; se mancano, quanti ne restano per completare la settimana
+  const fatti = mostraLog ? r.all : 0;
+  const previsti = mostraLog ? r.previsti || 0 : 0;
+  const mancano = Math.max(0, previsti - fatti);
+  let titolo = "";
+  if (mostraLog && fatti > 0) titolo = `${fatti} allenament${fatti === 1 ? "o è andato" : "i sono andati"} 💪🏻`;
+  else if (mostraLog && mancano > 0) titolo = `${mancano === 1 ? "Manca 1 allenamento" : `Mancano ${mancano} allenamenti`} per completare la settimana 💪🏻`;
+  else if (mostraLog) titolo = "Si riparte da qui: anche un solo passo conta 💪🏻";
+  const sotto = [];
+  if (mostraLog && fatti > 0 && previsti > 0) sotto.push(mancano > 0 ? `${mancano === 1 ? "Ne manca 1" : `Ne mancano ${mancano}`} per completare la settimana` : "Settimana completata, brava! 🔥");
+  if (mostraKcal && r.diario > 0) sotto.push(`Diario compilato ${r.diario} giorn${r.diario === 1 ? "o" : "i"}`);
+  if (!titolo && sotto.length) titolo = sotto.shift();
+  if (!titolo) titolo = "Si riparte da qui: anche un solo passo conta 💪🏻";
+  const vuoto = fatti === 0 && (mostraKcal ? r.diario : 0) === 0;
   return (
     <Card className="p-4 flex items-center gap-3 border-emerald-100 bg-emerald-50/50">
       <span className="text-2xl">{vuoto ? "🌱" : "🌟"}</span>
       <div className="min-w-0">
-        <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">La tua settimana</p>
-        <p className="font-semibold text-slate-800 text-sm">{vuoto ? "Si riparte da qui: anche un solo passo conta 💪🏻" : `Questa settimana: ${parti.join(", ")} 💪🏻`}</p>
+        <p className="font-semibold text-slate-800 text-sm">{titolo}</p>
+        {sotto.map((t) => <p key={t} className="text-slate-500 text-xs mt-0.5">{t}</p>)}
         <p className="text-slate-500 text-xs mt-1">{MESSAGGI_GIORNO[new Date().getDay()]}</p>
       </div>
     </Card>
