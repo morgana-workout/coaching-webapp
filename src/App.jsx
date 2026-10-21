@@ -8872,6 +8872,26 @@ function StatisticheCoach({ clients }) {
   const rinnovatiTot = rinnovatiOnline + rinnovatiLez;
   const retention = attesiTot > 0 ? Math.round((rinnovatiTot / attesiTot) * 100) : null;
 
+  // Rinnovi FATTI nel mese, contati una volta per cliente e per mese (anche se pagati a rate):
+  // online = pagamento di coaching nel mese di chi aveva già pagato prima; Bulb = nuovo pacchetto lezioni nel mese di chi ne aveva già avuto uno.
+  const pianoDi = (cid) => (clients.find((c) => c.id === cid) || {}).piano;
+  const onlineDelPag = (p) => p.stato === "saldato" && p.data_pagamento && mesiDelPagamento(p, pianoDi(p.client_id)) > 0;
+  const bulbPacchettoPag = (p) => p.stato !== "spesa" && p.data_pagamento && p.client_id && ((/bulb/i.test(p.tipo_piano || "") && /pacchetto/i.test(p.tipo_piano || "")) || (/1:1/.test(p.tipo_piano || "") && /\d+\s*lezion/i.test(p.note || "")));
+  const rinnOnlineSet = new Set(), nuoveOnlineSet = new Set(), rinnBulbSet = new Set(), nuoveBulbSet = new Set();
+  dati.pagamenti.filter((p) => onlineDelPag(p) && nelMese(p.data_pagamento)).forEach((p) => {
+    const prima = dati.pagamenti.some((q) => q.client_id === p.client_id && q.id !== p.id && onlineDelPag(q) && q.data_pagamento < `${mese}-01`);
+    (prima ? rinnOnlineSet : nuoveOnlineSet).add(p.client_id);
+  });
+  const eventiBulb = [
+    ...dati.pagamenti.filter(bulbPacchettoPag).map((p) => ({ cid: p.client_id, d: p.data_pagamento })),
+    ...dati.pacchetti.filter((pk) => pk.creato_il).map((pk) => ({ cid: pk.client_id, d: pk.creato_il.slice(0, 10) })),
+  ];
+  eventiBulb.filter((e) => nelMese(e.d)).forEach((e) => {
+    const prima = eventiBulb.some((q) => q.cid === e.cid && q.d < `${mese}-01`);
+    (prima ? rinnBulbSet : nuoveBulbSet).add(e.cid);
+  });
+  const rinnFatti = rinnOnlineSet.size + rinnBulbSet.size;
+
   const attive = clients.filter((c) => !c.archiviato);
   const nOnline = attive.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length;
   const nBulb = attive.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length;
@@ -8909,7 +8929,10 @@ function StatisticheCoach({ clients }) {
 
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi e fidelizzazione</p>
-        {attesiTot === 0 ? <p className="text-slate-400 text-sm">Nessun rinnovo previsto in questo mese.</p> : (
+        <p className="text-2xl font-semibold text-slate-800">{rinnFatti} <span className="text-base font-normal text-slate-400">rinnovi fatti questo mese</span></p>
+        <p className="text-xs text-slate-500">Coaching online: {rinnOnlineSet.size} · Pacchetti Bulb: {rinnBulbSet.size}{(nuoveOnlineSet.size + nuoveBulbSet.size) > 0 ? ` · Nuove partenze (primo pagamento): ${nuoveOnlineSet.size + nuoveBulbSet.size}` : ""}</p>
+        <p className="text-[11px] text-slate-400">Contati una volta per cliente al mese, anche se paga a rate. Per Bulb conta il pacchetto, non ogni pagamento.</p>
+        {attesiTot === 0 ? <p className="text-slate-400 text-sm pt-1">Nessuna scadenza prevista in questo mese.</p> : (
           <>
             <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-emerald-600 ml-2">{retention}%</span>}</p>
             <p className="text-xs text-slate-500">Coaching online: {rinnovatiOnline} su {attesiOnline} · Pacchetti lezioni: {rinnovatiLez} su {completati.length}</p>
