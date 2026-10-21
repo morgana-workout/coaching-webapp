@@ -1557,9 +1557,18 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   const [idB, setIdB] = useState("");
   const [urls, setUrls] = useState({});
   const VISTA0 = { z: 1, x: 50, y: 40 };
-  const [vista, setVista] = useState({ Prima: VISTA0, Dopo: VISTA0 });
+  // Zoom e posizione sono memorizzati per ogni singolo check: se cambi data e poi torni a un check, ritrovi la sua ultima impostazione.
+  const [perCheck, setPerCheck] = useState({});
+  const vistaDi = (c) => (c && perCheck[c.id]) || VISTA0;
   const [insieme, setInsieme] = useState(false);
-  const cambia = (titolo, patch) => setVista((v) => (insieme ? { Prima: { ...v.Prima, ...patch }, Dopo: { ...v.Dopo, ...patch } } : { ...v, [titolo]: { ...v[titolo], ...patch } }));
+  const cambia = (titolo, patch) => {
+    const c = titolo === "Prima" ? a : b;
+    setPerCheck((p) => {
+      const n = { ...p };
+      (insieme ? [a, b] : [c]).forEach((x) => { if (x) n[x.id] = { ...(p[x.id] || VISTA0), ...patch }; });
+      return n;
+    });
+  };
   const [grande, setGrande] = useState(null);
   const [note, setNote] = useState({});
   const [salvata, setSalvata] = useState("");
@@ -1575,11 +1584,18 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   }, [clienteFoto]);
   useEffect(() => {
     const r = salvati[angolo];
-    if (r) { setIdA(r.id_prima || ""); setIdB(r.id_dopo || ""); setVista({ Prima: { ...VISTA0, ...(r.vista?.Prima || {}) }, Dopo: { ...VISTA0, ...(r.vista?.Dopo || {}) } }); setInsieme(!!r.insieme); }
-    else { setIdA(""); setIdB(""); setVista({ Prima: VISTA0, Dopo: VISTA0 }); setInsieme(false); }
+    if (r) {
+      setIdA(r.id_prima || ""); setIdB(r.id_dopo || "");
+      const m = {};
+      Object.entries(r.vista?.perCheck || {}).forEach(([id, v]) => { m[id] = { ...VISTA0, ...v }; });
+      // versioni salvate prima di questa funzione: avevano solo "Prima" e "Dopo"
+      if (r.id_prima && r.vista?.Prima && !m[r.id_prima]) m[r.id_prima] = { ...VISTA0, ...r.vista.Prima };
+      if (r.id_dopo && r.vista?.Dopo && !m[r.id_dopo]) m[r.id_dopo] = { ...VISTA0, ...r.vista.Dopo };
+      setPerCheck(m); setInsieme(!!r.insieme);
+    } else { setIdA(""); setIdB(""); setPerCheck({}); setInsieme(false); }
   }, [angolo, salvati]);
   const salvaImpostazione = async (idPrima, idDopo) => {
-    const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista, insieme, updated_at: new Date().toISOString() };
+    const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista: { Prima: vistaDi(a), Dopo: vistaDi(b), perCheck }, insieme, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("confronto_foto_coach").upsert(riga, { onConflict: "client_id,angolo" });
     if (!error) { setSalvati((m) => ({ ...m, [angolo]: riga })); setSalvaMsg("Salvato: la cliente vede questo confronto ✓"); setTimeout(() => setSalvaMsg(""), 3000); }
     else setSalvaMsg("Non sono riuscita a salvare");
@@ -1644,12 +1660,10 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
             <div className="grid grid-cols-2 gap-3">
               {[["Prima", a, setIdA], ["Dopo", b, setIdB]].map(([titolo, c, setId]) => (
                 <div key={titolo} className="space-y-1.5">
-                  {isAdmin ? (
-                    <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
-                      {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
-                    </select>
-                  ) : <p className="text-center text-xs font-medium text-slate-600">{titolo}: {fmtData(c?.data_check)}</p>}
-                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => { if (isAdmin) cambia(titolo, patch); }} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
+                  <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
+                    {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
+                  </select>
+                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vistaDi(c)} onChange={(patch) => { if (isAdmin) cambia(titolo, patch); }} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
                   {isAdmin && c && (angolo === "foto_laterale_path" || angolo === "foto_extra_path") && (
                     <button onClick={() => invertiLaterali(c)} className="w-full text-[11px] text-sky-600 border border-sky-100 bg-sky-50 rounded-lg py-1.5 font-medium">↔ Inverti laterale dx e sx di questo check</button>
@@ -1672,13 +1686,13 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
             {isAdmin ? (
               <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
                 <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
-                <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
-                <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Tocca una foto per aprirla a schermo intero.</p>
+                <button onClick={() => setPerCheck((p) => ({ ...p, [a?.id]: VISTA0, [b?.id]: VISTA0 }))} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione di queste due foto</button>
+                <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Zoom e posizione restano legati a ogni check: se cambi data e poi ci ritorni li ritrovi. Ricorda di premere Salva. Tocca una foto per aprirla a schermo intero.</p>
                 <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
                 {salvaMsg && <p className="text-emerald-600 text-[11px] text-center">{salvaMsg}</p>}
                 <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
               </div>
-            ) : <p className="text-[11px] text-slate-400 text-center">Tocca una foto per aprirla a schermo intero.</p>}
+            ) : <p className="text-[11px] text-slate-400 text-center">Scegli le due date che vuoi confrontare. Tocca una foto per aprirla a schermo intero.</p>}
             {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
           </>
         )}
