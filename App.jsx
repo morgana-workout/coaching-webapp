@@ -2918,6 +2918,12 @@ function NotificheCliente({ client }) {
               <p className="text-slate-600 text-sm">{n.messaggio}</p>
             </>
           )}
+          {n.commento_coach && (
+            <div className="rounded-xl bg-sky-50 border border-sky-100 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wide text-sky-700 font-medium">Morgana ✨</p>
+              <p className="text-slate-700 text-sm whitespace-pre-wrap">{n.commento_coach}</p>
+            </div>
+          )}
           <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}{n.tipo === "nota" ? (n.stato === "inviata" ? " · Nuova" : " · ✓ Letta") : ""}</p>
         </Card>
       ))}
@@ -7375,6 +7381,48 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   );
 }
 
+/* Commento di Morgana a un messaggio automatico (record, costanza, promemoria): la cliente lo vede sotto il messaggio */
+function CommentoCoach({ n, onSalvato }) {
+  const [aperto, setAperto] = useState(false);
+  const [testo, setTesto] = useState(n.commento_coach || "");
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+  if (!(n.tipo === "nota" && n.proposta_luogo)) return null;
+  const salva = async () => {
+    const t = testo.trim();
+    if (!t) return;
+    setSalvando(true); setErrore("");
+    const { error } = await supabase.from("notifiche").update({ commento_coach: t, commento_coach_il: new Date().toISOString(), stato: "inviata" }).eq("id", n.id);
+    setSalvando(false);
+    if (error) { setErrore("Non sono riuscita a salvare, riprova 🫶🏻"); return; }
+    n.commento_coach = t;
+    inviaPush({ evento: "commento", notifica_id: n.id });
+    setAperto(false);
+    onSalvato?.();
+  };
+  if (!aperto) {
+    return n.commento_coach ? (
+      <div className="rounded-lg bg-white border border-sky-100 px-2.5 py-2">
+        <p className="text-[10px] uppercase tracking-wide text-sky-700 font-medium">Il tuo commento (la cliente lo vede)</p>
+        <p className="text-xs text-slate-700 whitespace-pre-wrap">{n.commento_coach}</p>
+        <button onClick={() => { setTesto(n.commento_coach || ""); setAperto(true); }} className="text-[11px] text-sky-600 font-medium mt-1">Modifica</button>
+      </div>
+    ) : (
+      <button onClick={() => setAperto(true)} className="text-xs text-sky-600 font-medium bg-white border border-sky-100 rounded-lg px-3 py-1.5">💬 Commenta</button>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={3} placeholder="Scrivi il tuo commento per la cliente..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white" />
+      {errore && <p className="text-rose-500 text-[11px]">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando || !testo.trim()} className="flex-1 bg-slate-800 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{salvando ? "Invio..." : "Invia alla cliente"}</button>
+        <button onClick={() => setAperto(false)} className="px-3 text-xs text-slate-500">Annulla</button>
+      </div>
+    </div>
+  );
+}
+
 function StoricoNotifiche({ clients }) {
   const [righe, setRighe] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -7421,6 +7469,7 @@ function StoricoNotifiche({ clients }) {
               <p className="text-slate-500 text-xs font-medium">{titolo(n)}</p>
               {n.tipo === "proposta_lezione" && <p className="text-slate-600 text-xs">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>}
               {n.messaggio && <p className="text-slate-600 text-xs">{n.messaggio}</p>}
+              <CommentoCoach n={n} onSalvato={() => setRighe((r) => [...r])} />
               <p className="text-slate-400 text-[11px]">Inviata il {new Date(n.created_at).toLocaleDateString("it-IT")} alle {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
             </Card>
           );
@@ -7653,6 +7702,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
                 <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
                 <p className="text-slate-500 text-xs font-medium">{titoloAuto(n.proposta_luogo)}</p>
                 <p className="text-slate-600 text-xs">{n.messaggio}</p>
+                <CommentoCoach n={n} onSalvato={carica} />
                 <div className="flex items-center justify-between pt-1">
                   <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
                   <button onClick={() => segnaAutoViste([n.id])} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
