@@ -1557,9 +1557,18 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   const [idB, setIdB] = useState("");
   const [urls, setUrls] = useState({});
   const VISTA0 = { z: 1, x: 50, y: 40 };
-  const [vista, setVista] = useState({ Prima: VISTA0, Dopo: VISTA0 });
+  // Zoom e posizione sono memorizzati per ogni singolo check: se cambi data e poi torni a un check, ritrovi la sua ultima impostazione.
+  const [perCheck, setPerCheck] = useState({});
+  const vistaDi = (c) => (c && perCheck[c.id]) || VISTA0;
   const [insieme, setInsieme] = useState(false);
-  const cambia = (titolo, patch) => setVista((v) => (insieme ? { Prima: { ...v.Prima, ...patch }, Dopo: { ...v.Dopo, ...patch } } : { ...v, [titolo]: { ...v[titolo], ...patch } }));
+  const cambia = (titolo, patch) => {
+    const c = titolo === "Prima" ? a : b;
+    setPerCheck((p) => {
+      const n = { ...p };
+      (insieme ? [a, b] : [c]).forEach((x) => { if (x) n[x.id] = { ...(p[x.id] || VISTA0), ...patch }; });
+      return n;
+    });
+  };
   const [grande, setGrande] = useState(null);
   const [note, setNote] = useState({});
   const [salvata, setSalvata] = useState("");
@@ -1575,11 +1584,18 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   }, [clienteFoto]);
   useEffect(() => {
     const r = salvati[angolo];
-    if (r) { setIdA(r.id_prima || ""); setIdB(r.id_dopo || ""); setVista({ Prima: { ...VISTA0, ...(r.vista?.Prima || {}) }, Dopo: { ...VISTA0, ...(r.vista?.Dopo || {}) } }); setInsieme(!!r.insieme); }
-    else { setIdA(""); setIdB(""); setVista({ Prima: VISTA0, Dopo: VISTA0 }); setInsieme(false); }
+    if (r) {
+      setIdA(r.id_prima || ""); setIdB(r.id_dopo || "");
+      const m = {};
+      Object.entries(r.vista?.perCheck || {}).forEach(([id, v]) => { m[id] = { ...VISTA0, ...v }; });
+      // versioni salvate prima di questa funzione: avevano solo "Prima" e "Dopo"
+      if (r.id_prima && r.vista?.Prima && !m[r.id_prima]) m[r.id_prima] = { ...VISTA0, ...r.vista.Prima };
+      if (r.id_dopo && r.vista?.Dopo && !m[r.id_dopo]) m[r.id_dopo] = { ...VISTA0, ...r.vista.Dopo };
+      setPerCheck(m); setInsieme(!!r.insieme);
+    } else { setIdA(""); setIdB(""); setPerCheck({}); setInsieme(false); }
   }, [angolo, salvati]);
   const salvaImpostazione = async (idPrima, idDopo) => {
-    const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista, insieme, updated_at: new Date().toISOString() };
+    const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista: { Prima: vistaDi(a), Dopo: vistaDi(b), perCheck }, insieme, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("confronto_foto_coach").upsert(riga, { onConflict: "client_id,angolo" });
     if (!error) { setSalvati((m) => ({ ...m, [angolo]: riga })); setSalvaMsg("Salvato: la cliente vede questo confronto ✓"); setTimeout(() => setSalvaMsg(""), 3000); }
     else setSalvaMsg("Non sono riuscita a salvare");
@@ -1644,12 +1660,10 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
             <div className="grid grid-cols-2 gap-3">
               {[["Prima", a, setIdA], ["Dopo", b, setIdB]].map(([titolo, c, setId]) => (
                 <div key={titolo} className="space-y-1.5">
-                  {isAdmin ? (
-                    <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
-                      {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
-                    </select>
-                  ) : <p className="text-center text-xs font-medium text-slate-600">{titolo}: {fmtData(c?.data_check)}</p>}
-                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vista[titolo]} onChange={(patch) => { if (isAdmin) cambia(titolo, patch); }} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
+                  <select value={c?.id || ""} onChange={(e) => setId(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white">
+                    {conFoto.map((x) => <option key={x.id} value={x.id}>{titolo}: {fmtData(x.data_check)}</option>)}
+                  </select>
+                  <FotoZoom src={urls[c?.id]} alt={`${titolo} ${fmtData(c?.data_check)}`} v={vistaDi(c)} onChange={(patch) => { if (isAdmin) cambia(titolo, patch); }} onTap={() => urls[c?.id] && setGrande(urls[c.id])} />
                   {c?.peso_kg != null && <p className="text-center text-xs text-slate-500">{String(c.peso_kg).replace(".", ",")} kg</p>}
                   {isAdmin && c && (angolo === "foto_laterale_path" || angolo === "foto_extra_path") && (
                     <button onClick={() => invertiLaterali(c)} className="w-full text-[11px] text-sky-600 border border-sky-100 bg-sky-50 rounded-lg py-1.5 font-medium">↔ Inverti laterale dx e sx di questo check</button>
@@ -1672,13 +1686,13 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
             {isAdmin ? (
               <div className="space-y-1.5 bg-slate-50 rounded-xl p-3">
                 <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
-                <button onClick={() => setVista({ Prima: VISTA0, Dopo: VISTA0 })} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione</button>
-                <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Tocca una foto per aprirla a schermo intero.</p>
+                <button onClick={() => setPerCheck((p) => ({ ...p, [a?.id]: VISTA0, [b?.id]: VISTA0 }))} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione di queste due foto</button>
+                <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Zoom e posizione restano legati a ogni check: se cambi data e poi ci ritorni li ritrovi. Ricorda di premere Salva. Tocca una foto per aprirla a schermo intero.</p>
                 <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
                 {salvaMsg && <p className="text-emerald-600 text-[11px] text-center">{salvaMsg}</p>}
                 <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
               </div>
-            ) : <p className="text-[11px] text-slate-400 text-center">Tocca una foto per aprirla a schermo intero.</p>}
+            ) : <p className="text-[11px] text-slate-400 text-center">Scegli le due date che vuoi confrontare. Tocca una foto per aprirla a schermo intero.</p>}
             {diffPeso !== null && a?.id !== b?.id && <p className="text-center text-sm text-slate-600">Differenza di peso: <span className="font-semibold">{diffPeso > 0 ? "+" : ""}{String(diffPeso).replace(".", ",")} kg</span></p>}
           </>
         )}
@@ -2903,6 +2917,12 @@ function NotificheCliente({ client }) {
               <p className="font-medium text-slate-700 text-sm">{n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota da Morgana"}</p>
               <p className="text-slate-600 text-sm">{n.messaggio}</p>
             </>
+          )}
+          {n.commento_coach && (
+            <div className="rounded-xl bg-sky-50 border border-sky-100 px-3 py-2">
+              <p className="text-[11px] uppercase tracking-wide text-sky-700 font-medium">Morgana ✨</p>
+              <p className="text-slate-700 text-sm whitespace-pre-wrap">{n.commento_coach}</p>
+            </div>
           )}
           <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")}{n.tipo === "nota" ? (n.stato === "inviata" ? " · Nuova" : " · ✓ Letta") : ""}</p>
         </Card>
@@ -7361,6 +7381,48 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   );
 }
 
+/* Commento di Morgana a un messaggio automatico (record, costanza, promemoria): la cliente lo vede sotto il messaggio */
+function CommentoCoach({ n, onSalvato }) {
+  const [aperto, setAperto] = useState(false);
+  const [testo, setTesto] = useState(n.commento_coach || "");
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+  if (!(n.tipo === "nota" && n.proposta_luogo)) return null;
+  const salva = async () => {
+    const t = testo.trim();
+    if (!t) return;
+    setSalvando(true); setErrore("");
+    const { error } = await supabase.from("notifiche").update({ commento_coach: t, commento_coach_il: new Date().toISOString(), stato: "inviata" }).eq("id", n.id);
+    setSalvando(false);
+    if (error) { setErrore("Non sono riuscita a salvare, riprova 🫶🏻"); return; }
+    n.commento_coach = t;
+    inviaPush({ evento: "commento", notifica_id: n.id });
+    setAperto(false);
+    onSalvato?.();
+  };
+  if (!aperto) {
+    return n.commento_coach ? (
+      <div className="rounded-lg bg-white border border-sky-100 px-2.5 py-2">
+        <p className="text-[10px] uppercase tracking-wide text-sky-700 font-medium">Il tuo commento (la cliente lo vede)</p>
+        <p className="text-xs text-slate-700 whitespace-pre-wrap">{n.commento_coach}</p>
+        <button onClick={() => { setTesto(n.commento_coach || ""); setAperto(true); }} className="text-[11px] text-sky-600 font-medium mt-1">Modifica</button>
+      </div>
+    ) : (
+      <button onClick={() => setAperto(true)} className="text-xs text-sky-600 font-medium bg-white border border-sky-100 rounded-lg px-3 py-1.5">💬 Commenta</button>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={3} placeholder="Scrivi il tuo commento per la cliente..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white" />
+      {errore && <p className="text-rose-500 text-[11px]">{errore}</p>}
+      <div className="flex gap-2">
+        <button onClick={salva} disabled={salvando || !testo.trim()} className="flex-1 bg-slate-800 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{salvando ? "Invio..." : "Invia alla cliente"}</button>
+        <button onClick={() => setAperto(false)} className="px-3 text-xs text-slate-500">Annulla</button>
+      </div>
+    </div>
+  );
+}
+
 function StoricoNotifiche({ clients }) {
   const [righe, setRighe] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -7407,6 +7469,7 @@ function StoricoNotifiche({ clients }) {
               <p className="text-slate-500 text-xs font-medium">{titolo(n)}</p>
               {n.tipo === "proposta_lezione" && <p className="text-slate-600 text-xs">{n.proposta_data?.split("-").reverse().join("/")} · {n.proposta_ora?.slice(0, 5)} — {n.proposta_luogo}</p>}
               {n.messaggio && <p className="text-slate-600 text-xs">{n.messaggio}</p>}
+              <CommentoCoach n={n} onSalvato={() => setRighe((r) => [...r])} />
               <p className="text-slate-400 text-[11px]">Inviata il {new Date(n.created_at).toLocaleDateString("it-IT")} alle {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
             </Card>
           );
@@ -7639,6 +7702,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
                 <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
                 <p className="text-slate-500 text-xs font-medium">{titoloAuto(n.proposta_luogo)}</p>
                 <p className="text-slate-600 text-xs">{n.messaggio}</p>
+                <CommentoCoach n={n} onSalvato={carica} />
                 <div className="flex items-center justify-between pt-1">
                   <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
                   <button onClick={() => segnaAutoViste([n.id])} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
@@ -9860,6 +9924,103 @@ async function esportaBackupCompleto(setInCorso) {
   setInCorso(false);
 }
 
+/* ------------------------------------------------------------------ */
+/* Riquadro "Ultime notifiche" (solo desktop): ultime 4 attività delle clienti, in tempo reale */
+/* ------------------------------------------------------------------ */
+function tempoRelativo(iso) {
+  const sec = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (sec < 60) return "adesso";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min fa`;
+  const ore = Math.round(min / 60);
+  if (ore < 24) return `${ore} ${ore === 1 ? "ora" : "ore"} fa`;
+  const g = Math.round(ore / 24);
+  return g === 1 ? "ieri" : `${g} giorni fa`;
+}
+
+function FeedCoach({ onSelect }) {
+  const [righe, setRighe] = useState([]);
+  const [pronto, setPronto] = useState(false);
+  const [entrate, setEntrate] = useState({});
+  const [, ridisegna] = useState(0);
+  const [visti, setVisti] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("feed_coach_visti") || "[]")); } catch { return new Set(); }
+  });
+  const prime = React.useRef(null);
+  const attesa = React.useRef(null);
+  const salvaLocale = (set) => { try { localStorage.setItem("feed_coach_visti", JSON.stringify([...set].slice(-300))); } catch { /* ignora */ } };
+
+  const carica = async () => {
+    const { data, error } = await supabase.from("feed_coach").select("*").order("created_at", { ascending: false }).limit(4);
+    if (error) return;
+    const nuove = data || [];
+    // chi era già visto sul database (se la tabella esiste) viene unito a quello salvato sul computer
+    try {
+      const { data: vd, error: ve } = await supabase.from("feed_coach_visti").select("chiave").in("chiave", nuove.map((r) => r.chiave));
+      if (!ve && vd?.length) setVisti((prev) => { const n = new Set(prev); vd.forEach((v) => n.add(v.chiave)); salvaLocale(n); return n; });
+    } catch { /* tabella non presente: si usa solo il computer */ }
+    if (prime.current) {
+      const nuoveChiavi = nuove.filter((r) => !prime.current.has(r.chiave)).map((r) => r.chiave);
+      if (nuoveChiavi.length) {
+        setEntrate((e) => { const n = { ...e }; nuoveChiavi.forEach((k) => { n[k] = true; }); return n; });
+        setTimeout(() => setEntrate((e) => { const n = { ...e }; nuoveChiavi.forEach((k) => { delete n[k]; }); return n; }), 1200);
+      }
+    }
+    prime.current = new Set(nuove.map((r) => r.chiave));
+    setRighe(nuove);
+    setPronto(true);
+  };
+
+  useEffect(() => {
+    carica();
+    const ricarica = () => { clearTimeout(attesa.current); attesa.current = setTimeout(carica, 800); };
+    const canale = supabase.channel("feed-coach");
+    ["training_entries", "calendar_events", "checkins", "messaggi"].forEach((t) => {
+      canale.on("postgres_changes", { event: "INSERT", schema: "public", table: t }, ricarica);
+    });
+    canale.subscribe();
+    const ogniMinuto = setInterval(() => ridisegna((n) => n + 1), 30000);
+    return () => { clearTimeout(attesa.current); clearInterval(ogniMinuto); supabase.removeChannel(canale); };
+  }, []);
+
+  const segnaVisto = async (chiave) => {
+    if (visti.has(chiave)) return;
+    const n = new Set(visti); n.add(chiave); setVisti(n); salvaLocale(n);
+    try { await supabase.from("feed_coach_visti").upsert({ chiave }, { onConflict: "user_id,chiave", ignoreDuplicates: true }); } catch { /* ignora */ }
+  };
+
+  const icone = { allenamento: Dumbbell, lezione: Clock, check: ClipboardList, messaggio: MessageCircle };
+  if (!pronto) return null;
+  return createPortal(
+    <div className="hidden lg:block fixed top-4 right-4 w-64 z-30">
+      <style>{"@keyframes feedEntra{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}"}</style>
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche</p>
+        {righe.length === 0 && <p className="text-xs text-slate-400 px-1 py-2">Ancora nessuna attività dalle clienti.</p>}
+        <div className="space-y-1">
+          {righe.map((r) => {
+            const Icona = icone[r.tipo] || Bell;
+            const nonVisto = !visti.has(r.chiave);
+            return (
+              <button key={r.chiave} onClick={() => { segnaVisto(r.chiave); onSelect?.(r.client_id); }}
+                style={entrate[r.chiave] ? { animation: "feedEntra .5s ease-out" } : undefined}
+                className="w-full text-left flex items-start gap-2 rounded-xl px-2 py-2 hover:bg-slate-50">
+                <span className="mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center"><Icona size={13} /></span>
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-xs leading-snug break-words ${nonVisto ? "text-slate-800 font-medium" : "text-slate-500"}`}>{r.testo}</span>
+                  <span className="block text-[11px] text-slate-400 mt-0.5">{tempoRelativo(r.created_at)}</span>
+                </span>
+                {nonVisto && <span className="mt-1.5 flex-shrink-0 w-2 h-2 rounded-full bg-sky-500" aria-label="Da vedere" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function AdminApp({ onVistaCliente }) {
   const [clients, setClients] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -9881,7 +10042,8 @@ function AdminApp({ onVistaCliente }) {
 
   return (
     <PullToRefresh onRefresh={carica}>
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 lg:pr-[17rem]">
+      <FeedCoach onSelect={setSelectedId} />
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
         <div className="flex items-center gap-4">
