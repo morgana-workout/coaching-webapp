@@ -58,7 +58,18 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
       supabase.from("kcal_foods").select("*").in("client_id", idLibrerie).order("nome"),
       supabase.from("kcal_voci").select("*").eq("client_id", clientId).order("data"),
     ]);
-    setFoods(fd || []);
+    let alimenti = fd || [];
+    // Libreria completamente vuota (cliente nuova): inserisce gli alimenti base, che poi si possono modificare o eliminare
+    if (alimenti.length === 0 && !(vc || []).length && !cl?.libreria_con) {
+      try {
+        const { data: base } = await supabase.from("kcal_foods_base").select("*");
+        if (base?.length) {
+          const { data: creati } = await supabase.from("kcal_foods").insert(base.map((b) => ({ client_id: clientId, nome: b.nome, unit: b.unit, uname: b.uname, per: b.per, kcal: b.kcal, proteine: b.proteine, carboidrati: b.carboidrati, grassi: b.grassi }))).select("*");
+          if (creati) alimenti = creati.sort((x, y) => x.nome.localeCompare(y.nome, "it"));
+        }
+      } catch (e) { /* senza alimenti base si parte da zero */ }
+    }
+    setFoods(alimenti);
     setVoci(vc || []);
     setObiettivo(cl?.obiettivo_kcal ?? null);
     setCaricando(false);
@@ -280,6 +291,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
   const [food, setFood] = useState(sheet.food && sheet.entryId ? null : sheet.food || null);
   const [amt, setAmt] = useState(sheet.amt || "");
   const [salvando, setSalvando] = useState(false);
+  const [nuovo, setNuovo] = useState(false); // creazione di un alimento direttamente dal pasto
 
   // In modifica di una voce già salvata, ricostruiamo un "alimento" equivalente a partire
   // dalla voce stessa (così la modifica funziona anche se l'alimento originale è stato
@@ -336,10 +348,15 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
 
   const nomeTitolo = MEALS.find((m) => m[0] === sheet.meal)[1];
 
+  // L'alimento creato da qui resta salvato nella lista Alimenti e si può usare subito per il pasto
+  const creato = (nuovoAlimento) => { setNuovo(false); onSalvato(); if (nuovoAlimento) scegli(nuovoAlimento); };
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) chiudi(); }}>
       <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">
-        {!food ? (
+        {nuovo ? (
+          <FormAlimento clientId={clientId} alimento={null} nomeIniziale={q.trim()} onAnnulla={() => setNuovo(false)} onSalvato={creato} />
+        ) : !food ? (
           <>
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-800">{nomeTitolo}</h3>
@@ -347,6 +364,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
             </div>
             <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Cerca tra i tuoi alimenti"
               className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
+            <button onClick={() => setNuovo(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">+ Nuovo alimento{q.trim() ? ` «${q.trim()}»` : ""}</button>
             <div className="space-y-1 max-h-[50vh] overflow-y-auto">
               {risultati.map((f) => (
                 <button key={f.id} onClick={() => scegli(f)} className="w-full flex items-center justify-between text-left border-b border-slate-100 py-2.5">
@@ -360,7 +378,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
               {!risultati.length && (
                 <p className="text-slate-400 text-sm py-3">
                   {foods.length ? "Nessun alimento con questo nome." : "La libreria è ancora vuota."}{" "}
-                  Vai nella scheda "Alimenti" per aggiungerne uno nuovo, poi torna qui per usarlo.
+                  Non lo trovi? Crealo qui con il pulsante «Nuovo alimento»: resta salvato nella tua lista.
                 </p>
               )}
             </div>
@@ -425,8 +443,8 @@ function LibreriaAlimenti({ clientId, foods, onCambiato }) {
   );
 }
 
-function FormAlimento({ clientId, alimento, onAnnulla, onSalvato }) {
-  const x = alimento || { nome: "", marca: "", unit: "g", uname: "", per: 100, kcal: "", proteine: "", carboidrati: "", grassi: "", quantita_abituale: "" };
+function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale = "" }) {
+  const x = alimento || { nome: nomeIniziale, marca: "", unit: "g", uname: "", per: 100, kcal: "", proteine: "", carboidrati: "", grassi: "", quantita_abituale: "" };
   const [f, setF] = useState({ ...x });
   const [salvando, setSalvando] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -445,12 +463,12 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato }) {
       quantita_abituale: mv(f.quantita_abituale),
     };
     setSalvando(true);
-    const { error } = alimento?.id
-      ? await supabase.from("kcal_foods").update(riga).eq("id", alimento.id)
-      : await supabase.from("kcal_foods").insert(riga);
+    const { data: salvato, error } = alimento?.id
+      ? await supabase.from("kcal_foods").update(riga).eq("id", alimento.id).select().single()
+      : await supabase.from("kcal_foods").insert(riga).select().single();
     setSalvando(false);
     if (error) { alert("Non sono riuscita a salvare l'alimento. Riprova tra un attimo 🫶🏻"); return; }
-    onSalvato();
+    onSalvato(salvato);
   };
 
   const elimina = async () => {
