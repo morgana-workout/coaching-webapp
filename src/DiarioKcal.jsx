@@ -52,7 +52,7 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
 
   const carica = async () => {
     // libreria_con: eventuale persona con cui condivido gli alimenti (es. Morgana e Giacomo)
-    const { data: cl } = await supabase.from("clients").select("obiettivo_kcal, libreria_con").eq("id", clientId).single();
+    const { data: cl } = await supabase.from("clients").select("nutrizione_attiva, libreria_con").eq("id", clientId).single();
     const idLibrerie = cl?.libreria_con ? [clientId, cl.libreria_con] : [clientId];
     const [{ data: fd }, { data: vc }] = await Promise.all([
       supabase.from("kcal_foods").select("*").in("client_id", idLibrerie).order("nome"),
@@ -71,15 +71,22 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
     }
     setFoods(alimenti);
     setVoci(vc || []);
-    setObiettivo(cl?.obiettivo_kcal ?? null);
+    // Obiettivo = kcal del piano nutrizionale attivo (se c'è); altrimenti nessun obiettivo
+    let ob = null;
+    if (cl?.nutrizione_attiva !== false) {
+      const { data: piani } = await supabase.from("nutrition_plans").select("kcal, data_inizio, data_fine, data_aggiornamento, created_at").eq("client_id", clientId);
+      const oggi = todayStr();
+      const k = (r) => r.data_inizio || r.data_aggiornamento || "";
+      const iniz = (piani || []).filter((r) => r.kcal != null && k(r) && k(r) <= oggi);
+      const validi = iniz.filter((r) => !r.data_fine || r.data_fine >= oggi);
+      const pool = validi.length ? validi : iniz;
+      const att = [...pool].sort((a, b) => k(b).localeCompare(k(a)) || (b.created_at || "").localeCompare(a.created_at || ""))[0];
+      ob = att ? Number(att.kcal) : null;
+    }
+    setObiettivo(ob);
     setCaricando(false);
   };
   useEffect(() => { carica(); }, [clientId]);
-
-  const salvaObiettivo = async (v) => {
-    setObiettivo(v);
-    await supabase.from("clients").update({ obiettivo_kcal: v }).eq("id", clientId);
-  };
 
   const vociPerGiorno = useMemo(() => {
     const m = {};
@@ -104,7 +111,7 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
         <DiarioGiorno
           clientId={clientId} isAdmin={isAdmin} date={date} setDate={setDate}
           foods={foods} vociGiorno={vociPerGiorno[date] || []} vociIeri={vociPerGiorno[addDays(date, -1)] || []}
-          obiettivo={obiettivo} onObiettivoCambiato={salvaObiettivo} onCambiato={carica}
+          obiettivo={obiettivo} onCambiato={carica}
         />
       )}
       {vista === "storico" && <StoricoKcal voci={voci} obiettivo={obiettivo} onVaiAGiorno={(d) => { setDate(d); setVista("diario"); }} />}
@@ -164,11 +171,10 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
   );
 }
 
-function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onObiettivoCambiato, onCambiato }) {
+function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onCambiato }) {
   const [sheet, setSheet] = useState(null); // { meal } | { meal, food, amt, entryId }
   const [mostraTotali, setMostraTotali] = useState(false);
   const totaleManuale = vociGiorno.find((v) => v.pasto === "totale");
-  const [editObiettivo, setEditObiettivo] = useState(false);
 
   const totaleKcal = vociGiorno.reduce((a, v) => a + Number(v.kcal), 0);
   const totaleMacro = vociGiorno.reduce((a, v) => ({
@@ -211,24 +217,14 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
         </div>
         {totaleMacro.mancanti > 0 && <p className="text-amber-600 text-xs">Macro parziali: {totaleMacro.mancanti} alimento/i senza valori inseriti.</p>}
 
-        {!editObiettivo ? (
-          obiettivo ? (
-            <div>
-              <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${sopra ? "bg-amber-500" : "bg-sky-500"}`} style={{ width: pct + "%" }} /></div>
-              <div className="flex justify-between items-center mt-1.5">
-                <span className="text-slate-500 text-xs">{sopra ? `Sopra di ${Math.round(totaleKcal - obiettivo)}` : `Restano ${Math.round(obiettivo - totaleKcal)}`} kcal su {num(obiettivo)}</span>
-                <button onClick={() => setEditObiettivo(true)} className="text-sky-600 text-xs font-medium flex-shrink-0">Cambia obiettivo</button>
-              </div>
+        {obiettivo ? (
+          <div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${sopra ? "bg-amber-500" : "bg-sky-500"}`} style={{ width: pct + "%" }} /></div>
+            <div className="mt-1.5">
+              <span className="text-slate-500 text-xs">{sopra ? `Sopra di ${Math.round(totaleKcal - obiettivo)}` : `Restano ${Math.round(obiettivo - totaleKcal)}`} kcal su {num(obiettivo)} (dal tuo piano)</span>
             </div>
-          ) : (
-            <div className="flex justify-between items-center"><span className="text-slate-400 text-xs">Nessun obiettivo impostato</span><button onClick={() => setEditObiettivo(true)} className="text-sky-600 text-xs font-medium">Imposta obiettivo</button></div>
-          )
-        ) : (
-          <form onSubmit={(e) => { e.preventDefault(); const v = Number(new FormData(e.target).get("t")); onObiettivoCambiato(v > 0 ? v : null); setEditObiettivo(false); }} className="flex gap-2">
-            <input name="t" type="number" min="0" defaultValue={obiettivo || ""} placeholder="kcal al giorno" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" autoFocus />
-            <button className="bg-slate-800 text-white text-sm font-medium rounded-lg px-3">Salva</button>
-          </form>
-        )}
+          </div>
+        ) : null}
       </Card>
 
       {mostraTotali ? (
