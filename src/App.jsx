@@ -616,6 +616,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       )}
 
       <RiepilogoSettimana client={client} />
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="invito" />
 
       {isOnline && (
         <Card className="p-5">
@@ -739,7 +740,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         )}
       </div>
 
-      <AttivaNotifichePush ruolo="cliente" clientId={client.id} />
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="gestione" />
 
       <ProfiloCliente client={client} onAggiornato={onAggiornato} />
 
@@ -769,7 +770,7 @@ function chiaveVapidInBytes(b64) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 
-function AttivaNotifichePush({ ruolo, clientId = null }) {
+function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
   const supportato = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
   const ios = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
   const [attive, setAttive] = useState(false);
@@ -778,7 +779,8 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
 
   const salva = async (sub) => {
     const j = sub.toJSON();
-    await supabase.from("push_subscriptions").upsert({ client_id: clientId, ruolo, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+    const { error } = await supabase.from("push_subscriptions").upsert({ client_id: clientId, ruolo, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+    if (error) throw error;
   };
 
   useEffect(() => {
@@ -820,7 +822,10 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
     setAttive(false);
   };
 
+  if (modalita === "invito" && attive) return null;
+  if (modalita === "gestione" && !attive) return null;
   if (!supportato) {
+    if (modalita === "gestione") return null;
     if (!ios) return null;
     return (
       <Card className="p-4 space-y-1">
@@ -839,8 +844,8 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
   }
   return (
     <Card className="p-4 space-y-2">
-      <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
-      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check e richieste di lezione." : "Ricevi un avviso per i messaggi di Morgana, i promemoria e i tuoi traguardi."}</p>
+      <p className="text-sm font-medium text-slate-700">🔔 {ruolo === "coach" ? "Notifiche sul telefono" : "Non perderti nulla ✨"}</p>
+      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check, richieste di lezione, record e carichi in calo." : "Attiva le notifiche: ti avviso io quando ti scrivo, quando fai un record e prima delle tue lezioni 🫶🏻"}</p>
       <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
       {errore && <p className="text-rose-500 text-xs">{errore}</p>}
     </Card>
@@ -10060,9 +10065,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         </Sezione>
       </div>
 
-      <div className="pt-2 border-t border-slate-100">
-        <Sezione id="account" titolo="Il tuo account"><div className="space-y-2">
+      <div className="pt-2 border-t border-slate-100 space-y-2">
         <AttivaNotifichePush ruolo="coach" />
+        <Sezione id="account" titolo="Il tuo account"><div className="space-y-2">
         <CambiaPasswordPropria />
       </div></Sezione>
       </div>
