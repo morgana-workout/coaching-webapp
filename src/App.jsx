@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
-import CicloCliente, { cicloAttivoPer } from "./Ciclo";
+import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
@@ -657,7 +657,7 @@ function RiepilogoSettimana({ client }) {
   if (!titolo) titolo = "Si riparte da qui: anche un solo passo conta 💪🏻";
   const vuoto = fatti === 0 && (mostraKcal ? r.diario : 0) === 0;
   return (
-    <Card className="px-3.5 py-2.5 flex items-center gap-2.5 border-emerald-100 bg-emerald-50/50">
+    <Card className="px-3.5 py-2.5 flex items-center gap-2.5 border-sky-200 bg-sky-50">
       {vuoto ? <Sprout size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" /> : <Star size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />}
       <div className="min-w-0">
         <p className="font-semibold text-slate-800 text-[13px] leading-snug">{titolo}</p>
@@ -738,7 +738,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </button>
       )}
 
-      <RiepilogoSettimana client={client} />
       <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="invito" />
 
       {isOnline && (
@@ -858,6 +857,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       {isSoloOnline && !prenotaAperto && !inviata && (
         <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-100 text-sky-700 rounded-2xl px-3 py-3 flex items-center justify-center gap-2"><Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Prenota lezione in presenza</span></button>
       )}
+
+      <RiepilogoSettimana client={client} />
 
       <div ref={richiestaRef}>
         {prenotaAperto && !inviata && (
@@ -1014,6 +1015,12 @@ function ClientCheckin({ client, onInviato }) {
     fase_mestruale: "",
   });
   const [notaFinale, setNotaFinale] = useState("");
+  useEffect(() => {
+    if (client.sesso === "M") return;
+    let vivo = true;
+    fasePerData(client.id, new Date()).then((f) => { if (vivo && f) setForm((p) => (p.fase_mestruale ? p : { ...p, fase_mestruale: f })); });
+    return () => { vivo = false; };
+  }, [client.id]);
   const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [inviando, setInviando] = useState(false);
   const [inviato, setInviato] = useState(false);
@@ -3338,6 +3345,13 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
   const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
+  useEffect(() => {
+    if (sesso === "M" || !f.data_check || f.fase_mestruale) return;
+    let vivo = true;
+    const p = f.data_check.split("-");
+    fasePerData(clientId, new Date(+p[0], +p[1] - 1, +p[2])).then((x) => { if (vivo && x) setF((q) => (q.fase_mestruale ? q : { ...q, fase_mestruale: x })); });
+    return () => { vivo = false; };
+  }, [f.data_check]);
   const campo = (label, key, unit) => (
     <div>
       <label className="text-xs text-slate-500">{label}</label>

@@ -142,7 +142,7 @@ function EditorConsigli({ consigli, onSalvato, onChiudi }) {
   );
 }
 
-function CalendarioMese({ mese, setMese, inizi, L, flusso, oggi }) {
+function CalendarioMese({ mese, setMese, inizi, L, flusso, oggi, onGiorno }) {
   const primo = new Date(mese.anno, mese.mese, 1);
   const giorniNelMese = new Date(mese.anno, mese.mese + 1, 0).getDate();
   const offset = (primo.getDay() + 6) % 7; // lunedì = 0
@@ -170,9 +170,9 @@ function CalendarioMese({ mese, setMese, inizi, L, flusso, oggi }) {
           const èOggi = data === oggi;
           const èInizio = inizi.includes(data);
           return (
-            <div key={i} className={`h-9 rounded-lg flex items-center justify-center text-xs ${st ? st.bg + " " + st.testo : "text-slate-500"} ${f?.previsto ? "opacity-60" : ""} ${èOggi ? "ring-2 ring-slate-800" : ""} ${èInizio ? "font-bold" : ""}`}>
+            <button key={i} type="button" onClick={() => onGiorno && onGiorno(data)} className={`h-9 rounded-lg flex items-center justify-center text-xs ${st ? st.bg + " " + st.testo : "text-slate-500"} ${f?.previsto ? "opacity-60" : ""} ${èOggi ? "ring-2 ring-slate-800" : ""} ${èInizio ? "font-bold underline" : ""}`}>
               {parseDate(data).getDate()}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -183,7 +183,7 @@ function CalendarioMese({ mese, setMese, inizi, L, flusso, oggi }) {
           </span>
         ))}
       </div>
-      <p className="text-slate-400 text-xs">I giorni più sbiaditi sono una previsione, basata sui tuoi cicli precedenti.</p>
+      <p className="text-slate-400 text-xs">Tocca un giorno per segnare (o togliere) l'inizio delle mestruazioni. I giorni più sbiaditi sono una previsione, basata sui cicli precedenti.</p>
     </Card>
   );
 }
@@ -230,6 +230,13 @@ export default function CicloCliente({ client, isAdmin = false }) {
     if (!confirm(`Eliminare l'inizio ciclo del ${fmtIt(r.data_inizio)}?`)) return;
     await supabase.from("ciclo_mestruale").delete().eq("id", r.id);
     carica();
+  };
+  const tocca = async (data) => {
+    if (salvando) return;
+    const r = righe.find((x) => x.data_inizio === data);
+    if (r) { elimina(r); return; }
+    if (data > oggi) { alert("Puoi segnare solo giorni già passati o di oggi."); return; }
+    if (confirm(`Segno l'inizio delle mestruazioni il ${fmtIt(data)}?`)) segna(data);
   };
   const salvaImpostazioni = async (patch) => {
     const nuove = { client_id: client.id, attivo: impostazioni?.attivo ?? true, durata: impostazioni?.durata ?? null, ...patch };
@@ -297,7 +304,7 @@ export default function CicloCliente({ client, isAdmin = false }) {
           {consiglio.sensazioni && <div><p className="text-xs font-medium text-slate-500">Come potresti sentirti</p><p className="text-sm text-slate-700 mt-0.5">{consiglio.sensazioni}</p></div>}
           {consiglio.allenamento && <div><p className="text-xs font-medium text-slate-500">Allenamento 💪🏻</p><p className="text-sm text-slate-700 mt-0.5">{consiglio.allenamento}</p></div>}
           {consiglio.extra && <div><p className="text-xs font-medium text-slate-500">Un consiglio in più ✨</p><p className="text-sm text-slate-700 mt-0.5">{consiglio.extra}</p></div>}
-          <p className="text-slate-400 text-xs pt-1">Sono consigli generali: ogni donna è diversa e risponde in modo diverso. Ascolta come stai e, se qualcosa ti preoccupa, parlane con il tuo medico.</p>
+          <p className="text-slate-400 text-xs pt-1">Sono consigli generali: ogni donna è diversa e risponde in modo diverso. Ascolta come stai e, se hai domande o dubbi, scrivimi.</p>
         </Card>
       ) : (
         <Card className="p-4 space-y-2">
@@ -323,7 +330,7 @@ export default function CicloCliente({ client, isAdmin = false }) {
         <p className="text-slate-400 text-xs">Puoi inserire anche i cicli passati: più date aggiungi, più le previsioni sono precise.</p>
       </Card>
 
-      {inizi.length > 0 && <CalendarioMese mese={mese} setMese={setMese} inizi={inizi} L={L} flusso={flusso} oggi={oggi} />}
+      <CalendarioMese mese={mese} setMese={setMese} inizi={inizi} L={L} flusso={flusso} oggi={oggi} onGiorno={tocca} />
 
       {righe.length > 0 && (
         <Card className="p-4 space-y-2">
@@ -345,4 +352,21 @@ export default function CicloCliente({ client, isAdmin = false }) {
       )}
     </div>
   );
+}
+
+// Fase mestruale (valore del check) in una data, calcolata dal calendario ciclo della cliente. "" se non ci sono dati.
+export async function fasePerData(clientId, data) {
+  try {
+    const [{ data: r }, { data: imp }] = await Promise.all([
+      supabase.from("ciclo_mestruale").select("*").eq("client_id", clientId).order("data_inizio"),
+      supabase.from("ciclo_impostazioni").select("*").eq("client_id", clientId).maybeSingle(),
+    ]);
+    if (!r || !r.length || (imp && imp.attivo === false)) return "";
+    const inizi = r.map((x) => x.data_inizio);
+    const L = durataCiclo(inizi, imp?.durata);
+    const flusso = r[r.length - 1].giorni_flusso || 5;
+    const f = faseInData(typeof data === "string" ? data : fmtDate(data), inizi, L, flusso);
+    if (!f) return "";
+    return f.fase === "premestruale" ? "luteale" : f.fase;
+  } catch (e) { return ""; }
 }
