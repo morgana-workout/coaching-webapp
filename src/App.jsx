@@ -7,7 +7,7 @@ import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from ".
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy,
+  Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy, User as UserIcon,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -670,6 +670,7 @@ function RiepilogoSettimana({ client }) {
 
 function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima = null }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
+  const [profiloAperto, setProfiloAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
   const [schedaAperta, setSchedaAperta] = useState(false);
   const richiestaRef = React.useRef(null);
@@ -717,7 +718,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
   }, [client.id, isBulb, pacchettoSingolo]);
 
   return (
-    <div className="px-5 pt-3 pb-24 space-y-3">
+    <div className="px-5 pt-4 pb-24 space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
         <p className="text-slate-500 text-xs mt-0.5">Costanza batte perfezione, sempre.</p>
@@ -823,10 +824,10 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       )}
 
       {menu.length > 0 && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           {menu.map((m) => (
             <button key={m.key} onClick={() => onApri(m.key)}
-              className="relative bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-2.5 flex items-center gap-2.5 text-left active:bg-slate-50">
+              className="relative bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-3 flex items-center gap-2.5 text-left active:bg-slate-50">
               <span className="relative text-sky-500">
                 <m.icon size={18} strokeWidth={1.6} />
                 {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
@@ -837,26 +838,32 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-3">
         {isOnline && (
-          <button onClick={() => setSchedaAperta(true)} className="flex-1 bg-slate-800 text-white rounded-2xl px-3 py-3 flex items-center justify-center gap-2">
-            <Dumbbell size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Il mio programma</span>
+          <button onClick={() => setSchedaAperta(true)} className="bg-slate-800 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Dumbbell size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Il mio programma</span>
           </button>
         )}
         {isSoloOnline ? (
-          <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="flex-1 bg-sky-500 text-white rounded-2xl px-3 py-3 flex items-center justify-center gap-2">
-            <Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Prenota call</span>
+          <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Prenota call</span>
           </a>
         ) : (
-          <button onClick={() => setPrenotaAperto(true)} className="flex-1 bg-sky-500 text-white rounded-2xl px-3 py-3 flex items-center justify-center gap-2">
-            <Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">{isBulb ? "Prenota lezione" : "Prenota in presenza"}</span>
+          <button onClick={() => setPrenotaAperto(true)} className="bg-sky-500 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">{isBulb ? "Prenota lezione" : "Prenota in presenza"}</span>
           </button>
         )}
+        {isSoloOnline && !prenotaAperto && !inviata && (
+          <button onClick={() => setPrenotaAperto(true)} className="bg-sky-100 text-sky-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Prenota lezione in presenza</span>
+          </button>
+        )}
+        <button onClick={() => setProfiloAperto((v) => !v)} className="bg-white border border-slate-200 text-slate-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+          <UserIcon size={16} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" /><span className="font-medium text-sm leading-tight">Il mio profilo</span>
+        </button>
       </div>
 
-      {isSoloOnline && !prenotaAperto && !inviata && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-100 text-sky-700 rounded-2xl px-3 py-3 flex items-center justify-center gap-2"><Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Prenota lezione in presenza</span></button>
-      )}
+      {profiloAperto && <ProfiloCliente client={client} onAggiornato={onAggiornato} />}
 
       <RiepilogoSettimana client={client} />
 
@@ -869,11 +876,9 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         )}
       </div>
 
-      <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="gestione" />
-
-      <ProfiloCliente client={client} onAggiornato={onAggiornato} />
-
       <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
+
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="gestione" />
     </div>
   );
 }
@@ -6904,6 +6909,80 @@ function SelettoreMessaggiPronti({ nome, onScegli }) {
   );
 }
 
+// Coach: cosa ha compilato ogni cliente (allenamento, cibo, ciclo, check) e da quanti giorni, con reminder gentile
+function AttivitaClienti({ clients }) {
+  const [d, setD] = useState(null);
+  const [aperta, setAperta] = useState(true);
+  const [invio, setInvio] = useState(null);
+  const [inviati, setInviati] = useState({});
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const da = addGiorni(formatDataLocale(new Date()), -120);
+        const tr = await leggiTutto(() => supabase.from("training_entries").select("client_id, data").gte("data", da).order("id"));
+        const kc = await leggiTutto(() => supabase.from("kcal_voci").select("client_id, data").gte("data", da).order("created_at"));
+        const ci = await leggiTutto(() => supabase.from("ciclo_mestruale").select("client_id, data_inizio").order("created_at"));
+        const { data: imp } = await supabase.from("ciclo_impostazioni").select("client_id, attivo");
+        const ultimo = (righe, campo) => { const m = {}; righe.forEach((r) => { const v = r[campo]; if (v && (!m[r.client_id] || v > m[r.client_id])) m[r.client_id] = v; }); return m; };
+        if (vivo) setD({ tr: ultimo(tr, "data"), kc: ultimo(kc, "data"), ci: ultimo(ci, "data_inizio"), imp: Object.fromEntries((imp || []).map((x) => [x.client_id, x.attivo])) });
+      } catch (e) { if (vivo) setD({ tr: {}, kc: {}, ci: {}, imp: {} }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  if (!d) return null;
+  const oggi = formatDataLocale(new Date());
+  const giorniFa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
+  const voce = (nome, ds, verde, giallo) => {
+    if (!ds) return { nome, testo: "mai", stato: "r" };
+    const g = giorniFa(ds);
+    return { nome, testo: g <= 0 ? "oggi" : g === 1 ? "ieri" : `${g} gg`, stato: g <= verde ? "g" : g <= giallo ? "a" : "r" };
+  };
+  const righe = clients.filter((c) => !c.archiviato).map((c) => {
+    const v = [];
+    v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log" });
+    if (c.kcal_attivo !== false) v.push({ ...voce("Cibo", d.kc[c.id], 2, 5), chiave: "cibo", frase: "l'alimentazione nel diario" });
+    if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario" });
+    if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check" });
+    return { c, v, rossi: v.filter((x) => x.stato === "r") };
+  }).sort((x, y) => y.rossi.length - x.rossi.length || `${x.c.nome}`.localeCompare(`${y.c.nome}`));
+  const colori = { g: "bg-emerald-50 text-emerald-700", a: "bg-amber-50 text-amber-700", r: "bg-rose-50 text-rose-700" };
+  const manda = async ({ c, rossi }) => {
+    const elenco = rossi.map((x) => x.frase);
+    const lista = elenco.length > 1 ? elenco.slice(0, -1).join(", ") + " e " + elenco[elenco.length - 1] : elenco[0];
+    const testo = `Ciao ${(c.nome || "").trim().split(" ")[0]}! 🫶🏻 Ho visto che mancano ${lista}: ti va di segnarli sull'app? Più dati mi dai e più riesco a seguirti e a calibrare tutto su di te 💪🏻 Se hai dubbi su come fare scrivimi pure ✨`;
+    if (!confirm(`Mando questo messaggio a ${c.nome}?\n\n${testo}`)) return;
+    setInvio(c.id);
+    try {
+      const { data: nm, error } = await supabase.from("messaggi").insert({ client_id: c.id, mittente: "coach", testo }).select("id").single();
+      if (error) throw error;
+      if (nm?.id) inviaPush({ evento: "messaggio", messaggio_id: nm.id });
+      setInviati((p) => ({ ...p, [c.id]: true }));
+    } catch (e) { alert("Non sono riuscita a mandare il messaggio. Riprova."); }
+    setInvio(null);
+  };
+  return (
+    <Card className="p-4 space-y-1">
+      <button onClick={() => setAperta((x) => !x)} className="w-full flex items-center justify-between pb-1">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cosa hanno compilato</span>
+        <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
+      </button>
+      {aperta && <p className="text-[11px] text-slate-400">Giorni dall'ultima volta · in cima chi ha più bisogno di un reminder</p>}
+      {aperta && righe.map((r) => (
+        <div key={r.c.id} className="py-3 border-b border-slate-100 last:border-0">
+          <p className="text-[15px] font-semibold text-slate-800 mb-2">{r.c.nome} {r.c.cognome}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {r.v.map((x) => <span key={x.chiave} className={`${colori[x.stato]} rounded-full px-2.5 py-1 text-xs whitespace-nowrap`}>{x.nome} <b>{x.testo}</b></span>)}
+          </div>
+          {r.rossi.length > 0 && (inviati[r.c.id]
+            ? <p className="text-emerald-600 text-xs mt-2">Reminder inviato ✓</p>
+            : <button onClick={() => manda(r)} disabled={invio === r.c.id} className="mt-2 text-sky-700 text-[13px] font-medium disabled:opacity-50">✨ Manda reminder →</button>)}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 // Coach: per ogni cliente online/ibrida, cosa manca ancora (scheda CSV, PDF, video, nutrizione)
 function DaCompletareClienti({ clients, onSelect }) {
   const [d, setD] = useState(null);
@@ -7247,6 +7326,8 @@ function OggiCoach({ clients, onSelect, vai }) {
       </Card>
 
       <EserciziMancantiClienti clients={clients} onSelect={onSelect} />
+
+      <AttivitaClienti clients={clients} />
 
       <DaCompletareClienti clients={clients} onSelect={onSelect} />
     </div>
