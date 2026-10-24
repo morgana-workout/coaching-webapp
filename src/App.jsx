@@ -3223,6 +3223,57 @@ function ClientApprofondimenti() {
   );
 }
 
+/* Pallino chat mobile: si trascina dove si vuole (la posizione resta salvata) e, toccandolo, apre la chat sopra la sezione in cui si è */
+function ChatBolla({ chiave, conteggio = 0, titolo, onChiudi, children }) {
+  const DIM = 56;
+  const leggi = () => { try { const p = JSON.parse(localStorage.getItem("bolla_" + chiave) || "null"); if (p && typeof p.x === "number") return p; } catch (e) { /* ignora */ } return null; };
+  const [pos, setPos] = useState(() => leggi() || { x: Math.max(8, window.innerWidth - DIM - 16), y: Math.max(8, window.innerHeight - DIM - 96) });
+  const [aperta, setAperta] = useState(false);
+  const trascino = React.useRef(null);
+  const limita = (p) => ({ x: Math.min(Math.max(4, p.x), window.innerWidth - DIM - 4), y: Math.min(Math.max(4, p.y), window.innerHeight - DIM - 4) });
+  useEffect(() => { const f = () => setPos((p) => limita(p)); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  const giu = (e) => { trascino.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, mosso: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (er) { /* ignora */ } };
+  const muovi = (e) => {
+    const t = trascino.current; if (!t) return;
+    const dx = e.clientX - t.sx, dy = e.clientY - t.sy;
+    if (!t.mosso && Math.abs(dx) + Math.abs(dy) < 6) return;
+    t.mosso = true;
+    setPos(limita({ x: t.ox + dx, y: t.oy + dy }));
+  };
+  const su = () => {
+    const t = trascino.current; trascino.current = null;
+    if (!t) return;
+    if (t.mosso) { try { localStorage.setItem("bolla_" + chiave, JSON.stringify(pos)); } catch (e) { /* ignora */ } }
+    else setAperta(true);
+  };
+  const chiudi = () => { setAperta(false); onChiudi?.(); };
+  return createPortal(
+    <>
+      {!aperta && (
+        <button onPointerDown={giu} onPointerMove={muovi} onPointerUp={su} onPointerCancel={() => { trascino.current = null; }} aria-label="Apri la chat"
+          style={{ position: "fixed", left: pos.x, top: pos.y, width: DIM, height: DIM, zIndex: 60, touchAction: "none" }}
+          className="rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/40 flex items-center justify-center">
+          <MessageCircle size={26} strokeWidth={1.75} />
+          {conteggio > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center border-2 border-slate-50">{conteggio}</span>}
+        </button>
+      )}
+      {aperta && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 70 }} className="flex flex-col justify-end">
+          <div className="absolute inset-0 bg-slate-900/30" onClick={chiudi} />
+          <div className="relative bg-white rounded-t-3xl shadow-2xl w-full max-w-md mx-auto flex flex-col" style={{ height: "72dvh" }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-shrink-0">
+              <p className="font-semibold text-slate-800 text-sm">{titolo}</p>
+              <button onClick={chiudi} className="text-slate-400 p-1" aria-label="Chiudi"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3 bg-slate-50 rounded-b-none">{children}</div>
+          </div>
+        </div>
+      )}
+    </>,
+    document.body
+  );
+}
+
 function ClientApp({ session, anteprima = null }) {
   const [tab, setTab] = useState("home");
   const [client, setClient] = useState(null);
@@ -3234,6 +3285,18 @@ function ClientApp({ session, anteprima = null }) {
   const [chatNonLetti, setChatNonLetti] = useState(0);
   const [lezioneProssima, setLezioneProssima] = useState(null);
   const [cicloImp, setCicloImp] = useState(null);
+  const contaChat = async () => {
+    try {
+      if (!client || anteprima) return;
+      const { count } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("mittente", "coach").eq("letto", false);
+      setChatNonLetti(count || 0);
+    } catch (e) { /* ignora */ }
+  };
+  useEffect(() => {
+    if (!client || anteprima) return;
+    const t = setInterval(contaChat, 20000);
+    return () => clearInterval(t);
+  }, [client?.id]);
 
   const carica = async () => {
     setCaricando(true);
@@ -3303,7 +3366,6 @@ function ClientApp({ session, anteprima = null }) {
     ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
-    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
 
   return (
@@ -3323,7 +3385,6 @@ function ClientApp({ session, anteprima = null }) {
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
-        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} /></div>}
         {tab === "log" && <DiarioAllenamento clientId={client.id} />}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
@@ -3332,6 +3393,11 @@ function ClientApp({ session, anteprima = null }) {
         {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
+      {!anteprima && client && (
+        <ChatBolla chiave={`c_${client.id}`} conteggio={chatNonLetti} titolo="Chat con Morgana" onChiudi={contaChat}>
+          <ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} />
+        </ChatBolla>
+      )}
     </div>
   );
 }
@@ -10481,9 +10547,19 @@ function AdminApp({ onVistaCliente }) {
   };
   useEffect(() => { carica(); }, []);
 
+  const [chatCoachNuove, setChatCoachNuove] = useState(0);
+  const contaChatCoach = async () => {
+    try {
+      const { count } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+      setChatCoachNuove(count || 0);
+    } catch (e) { /* ignora */ }
+  };
+  useEffect(() => { contaChatCoach(); const t = setInterval(contaChatCoach, 20000); return () => clearInterval(t); }, []);
+
   if (caricando) return <Spinner />;
 
   return (
+    <>
     <PullToRefresh onRefresh={carica}>
     <div className="min-h-screen bg-slate-50 lg:pr-[17rem]">
       <FeedCoach onSelect={setSelectedId} />
@@ -10502,6 +10578,10 @@ function AdminApp({ onVistaCliente }) {
       )}
     </div>
     </PullToRefresh>
+    <ChatBolla chiave="coach" conteggio={chatCoachNuove} titolo="Chat" onChiudi={contaChatCoach}>
+      <ChatCoach clients={clients.filter((c) => !c.archiviato)} onChanged={contaChatCoach} />
+    </ChatBolla>
+    </>
   );
 }
 
