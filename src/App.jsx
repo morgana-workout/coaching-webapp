@@ -10081,6 +10081,7 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
 
 function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
+  const [menuAperto, setMenuAperto] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
   const [vistaLista, setVistaLista] = useState("schede");
@@ -10178,38 +10179,40 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-3 gap-1.5">
-        <button onClick={() => setVista("oggi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "oggi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Oggi</button>
-        <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
-        <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
-        <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Notifiche
-          {(nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length) > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length}</span>
-          )}
-        </button>
-        <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
-        <button onClick={() => setVista("candidature")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "candidature" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Candidature
-          {candidatureNuove > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{candidatureNuove}</span>
-          )}
-        </button>
-        <button onClick={() => setVista("chat")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "chat" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Chat
-          {chatNonLette > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{chatNonLette}</span>
-          )}
-        </button>
-        <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
-        <button onClick={() => setVista("esercizi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Esercizi</button>
-        <button onClick={() => setVista("sfide")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "sfide" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Sfide
-          {sfideDaFare > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{sfideDaFare}</span>
-          )}
-        </button>
-      </div>
+      {(() => {
+        const voci = [
+          { k: "oggi", l: "Oggi" }, { k: "lista", l: "Lista" }, { k: "calendario", l: "Calendario" },
+          { k: "notifiche", l: "Notifiche", b: nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length },
+          { k: "guadagni", l: "Guadagni" }, { k: "candidature", l: "Candidature", b: candidatureNuove },
+          { k: "chat", l: "Chat", b: chatNonLette }, { k: "statistiche", l: "Statistiche" },
+          { k: "esercizi", l: "Esercizi" }, { k: "sfide", l: "Sfide", b: sfideDaFare },
+        ];
+        const totale = voci.reduce((t, v) => t + (v.b || 0), 0);
+        const corrente = voci.find((v) => v.k === vista);
+        return (
+          <div className="relative z-20">
+            <button onClick={() => setMenuAperto((x) => !x)} className="w-full bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2 text-left">
+              <span className="text-sky-500 text-lg leading-none">☰</span>
+              <span className="font-semibold text-slate-800 text-sm">{corrente ? corrente.l : "Menu"}</span>
+              <span className="ml-auto flex items-center gap-2">
+                {totale > 0 && !menuAperto && <span className="bg-rose-500 text-white text-[10px] font-bold rounded-full px-1.5 min-w-[20px] h-5 flex items-center justify-center">{totale}</span>}
+                <span className="text-slate-400 text-xs">{menuAperto ? "▲" : "▼"}</span>
+              </span>
+            </button>
+            {menuAperto && (
+              <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-xl grid grid-cols-3 gap-2">
+                {voci.map((v) => (
+                  <button key={v.k} onClick={() => { setVista(v.k); setMenuAperto(false); }}
+                    className={`relative py-2.5 rounded-xl text-xs font-medium ${vista === v.k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+                    {v.l}
+                    {v.b > 0 && <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{v.b}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {vista === "esercizi" && <LibreriaEserciziCoach />}
       {vista === "sfide" && <SfideCoach clients={clientiAttivi} onCambiato={caricaNonLetteCoach} />}
