@@ -2,11 +2,12 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
+import CicloCliente, { cicloAttivoPer } from "./Ciclo";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy,
+  Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -446,6 +447,119 @@ function ProfiloCliente({ client, onAggiornato }) {
   );
 }
 
+/* Scheda "La tua lezione": la cliente può chiedere un'altra data. Morgana approva, modifica o rifiuta. */
+function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
+  const [richiesta, setRichiesta] = useState(undefined); // richiesta di spostamento in attesa (o null)
+  const [proposta, setProposta] = useState(null);
+  const [apri, setApri] = useState(false);
+  const [data, setData] = useState("");
+  const [ora, setOra] = useState(evento.ora && SLOT_ORARI.includes(evento.ora.slice(0, 5)) ? evento.ora.slice(0, 5) : SLOT_ORARI[6]);
+  const [luogo, setLuogo] = useState(evento.luogo || client.sede_abituale || LUOGHI[0]);
+  const [nota, setNota] = useState("");
+  const [inviando, setInviando] = useState(false);
+  const fmt = (d) => d.split("-").reverse().join("/");
+  const disponibile = giornoDisponibile(data);
+  const oreAlla = (new Date(`${evento.data}T${evento.ora || "00:00"}`) - new Date()) / 3600000;
+
+  const carica = async () => {
+    const { data: r } = await supabase.from("calendar_events").select("*").eq("sostituisce_id", evento.id).eq("stato", "richiesta").limit(1).maybeSingle();
+    setRichiesta(r || null);
+    if (r) {
+      const { data: pr } = await supabase.from("notifiche").select("*").eq("calendar_event_id", r.id).eq("tipo", "proposta_lezione").eq("stato", "inviata").limit(1).maybeSingle();
+      setProposta(pr || null);
+    } else setProposta(null);
+  };
+  useEffect(() => { carica(); }, [evento.id]);
+
+  const invia = async () => {
+    if (!data) return;
+    setInviando(true);
+    const { data: creato, error } = await supabase.from("calendar_events").insert({
+      client_id: client.id, tipo: "lezione", data, ora, luogo, nota: nota || null,
+      stato: "richiesta", sostituisce_id: evento.id, fuori_disponibilita: !disponibile,
+    }).select().single();
+    setInviando(false);
+    if (error) { alert("Non sono riuscita a inviare la richiesta. Riprova."); return; }
+    if (creato?.id) inviaPush({ evento: "richiesta", event_id: creato.id });
+    setApri(false);
+    await carica();
+    onFatto?.();
+  };
+  const annullaRichiesta = async () => {
+    if (!richiesta) return;
+    await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", richiesta.id);
+    await carica();
+    onFatto?.();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) onChiudi(); }}>
+      <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-800">La tua lezione</h3>
+          <button onClick={onChiudi} className="text-slate-400"><X size={20} /></button>
+        </div>
+        <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-3.5 py-3">
+          <Clock size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold text-slate-800">{fmt(evento.data)}{evento.ora ? ` · ${evento.ora.slice(0, 5)}` : ""}</p>
+            {evento.luogo && <p className="text-slate-500 text-xs">{evento.luogo}</p>}
+          </div>
+        </div>
+
+        {richiesta === undefined ? (
+          <p className="text-slate-400 text-sm">Caricamento...</p>
+        ) : richiesta ? (
+          <div className="space-y-3">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 text-sm text-amber-800 space-y-1">
+              <p className="font-medium">Hai chiesto di spostarla a {fmt(richiesta.data)} · {richiesta.ora?.slice(0, 5)}</p>
+              {richiesta.luogo && <p className="text-xs">{richiesta.luogo}</p>}
+              <p className="text-xs">In attesa di Morgana 🫶🏻 Fino alla sua risposta resta valida la lezione di prima.</p>
+            </div>
+            {proposta && (
+              <div className="bg-sky-50 border border-sky-200 rounded-xl px-3.5 py-3 text-sm text-sky-800">
+                Morgana ti ha proposto un altro orario: {fmt(proposta.proposta_data)} · {proposta.proposta_ora?.slice(0, 5)}. Aprilo nelle Notifiche per rispondere ✨
+              </div>
+            )}
+            <button onClick={annullaRichiesta} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">Annulla la richiesta di spostamento</button>
+          </div>
+        ) : !apri ? (
+          <div className="space-y-2">
+            <button onClick={() => setApri(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-3">Richiedi un'altra data</button>
+            {oreAlla < 24 && oreAlla > 0 && <p className="text-slate-400 text-xs text-center">Mancano meno di 24 ore: Morgana valuterà se è possibile spostarla.</p>}
+            <p className="text-slate-400 text-xs text-center">Morgana riceve la richiesta e poi la approva o ti propone un altro orario.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-slate-700">Quando preferiresti?</p>
+            <InputData value={data} onChange={(e) => setData(e.target.value)} />
+            {data && !disponibile && (
+              <div className="bg-slate-50 border border-slate-200 text-slate-600 rounded-lg px-3 py-2 text-xs">
+                Questo giorno è normalmente non disponibile (weekend o festivo). Puoi inviare la richiesta come eccezione: Morgana valuterà.
+              </div>
+            )}
+            <div>
+              <label className="text-xs text-slate-500">Orario (durata 60 minuti)</label>
+              <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                {SLOT_ORARI.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Sede</label>
+              <SelezionaLuogo value={luogo} onChange={setLuogo} />
+            </div>
+            <textarea placeholder="Vuoi dirmi il motivo? (facoltativo)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2">
+              <button onClick={invia} disabled={inviando || !data} className="flex-1 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-40">{inviando ? "Invio..." : "Invia richiesta"}</button>
+              <button onClick={() => setApri(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Indietro</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   const [data, setData] = useState("");
   const [ora, setOra] = useState(SLOT_ORARI[6]);
@@ -543,12 +657,12 @@ function RiepilogoSettimana({ client }) {
   if (!titolo) titolo = "Si riparte da qui: anche un solo passo conta 💪🏻";
   const vuoto = fatti === 0 && (mostraKcal ? r.diario : 0) === 0;
   return (
-    <Card className="p-4 flex items-center gap-3 border-emerald-100 bg-emerald-50/50">
-      <span className="text-2xl">{vuoto ? "🌱" : "🌟"}</span>
+    <Card className="px-3.5 py-2.5 flex items-center gap-2.5 border-emerald-100 bg-emerald-50/50">
+      {vuoto ? <Sprout size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" /> : <Star size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />}
       <div className="min-w-0">
-        <p className="font-semibold text-slate-800 text-sm">{titolo}</p>
-        {sotto.map((t) => <p key={t} className="text-slate-500 text-xs mt-0.5">{t}</p>)}
-        <p className="text-slate-500 text-xs mt-1">{MESSAGGI_GIORNO[new Date().getDay()]}</p>
+        <p className="font-semibold text-slate-800 text-[13px] leading-snug">{titolo}</p>
+        {sotto.length > 0 && <p className="text-slate-500 text-[11px] leading-snug mt-0.5">{sotto.join(" · ")}</p>}
+        <p className="text-slate-400 text-[11px] leading-snug mt-0.5 line-clamp-2">{MESSAGGI_GIORNO[new Date().getDay()]}</p>
       </div>
     </Card>
   );
@@ -567,6 +681,14 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
   const [prossimaLezione, setProssimaLezione] = useState(undefined);
   const [infoPacchetto, setInfoPacchetto] = useState(null);
+  const [prossimoEv, setProssimoEv] = useState(null);
+  const [sheetLezione, setSheetLezione] = useState(null);
+  const caricaProssimoEv = async () => {
+    const oggi = formatDataLocale(new Date());
+    const { data } = await supabase.from("calendar_events").select("id, data, ora, luogo, stato").eq("client_id", client.id).eq("tipo", "lezione").eq("stato", "confermato").gte("data", oggi).order("data").order("ora").limit(1).maybeSingle();
+    setProssimoEv(data || null);
+  };
+  useEffect(() => { caricaProssimoEv(); }, [client.id]);
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const isSoloOnline = client.tipo_servizio === "online";
@@ -595,20 +717,21 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
   }, [client.id, isBulb, pacchettoSingolo]);
 
   return (
-    <div className="px-5 pt-6 pb-24 space-y-5">
+    <div className="px-5 pt-3 pb-24 space-y-3">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
-        <p className="text-slate-500 text-sm mt-1">Costanza batte perfezione, sempre.</p>
+        <h1 className="text-xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
+        <p className="text-slate-500 text-xs mt-0.5">Costanza batte perfezione, sempre.</p>
       </div>
 
       {!isBulb && lezioneProssima && (
-        <button onClick={() => onApri?.("lezioni")} className="w-full text-left">
-          <Card className="p-4 flex items-center gap-3 border-sky-200 bg-sky-50/50">
-            <span className="text-2xl">📅</span>
+        <button onClick={() => (lezioneProssima.stato === "confermato" ? setSheetLezione(lezioneProssima) : onApri?.("lezioni"))} className="w-full text-left">
+          <Card className="px-3.5 py-3 flex items-center gap-3 border-sky-200 bg-sky-50/50">
+            <Clock size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione{lezioneProssima.stato === "richiesta" ? " (da confermare)" : ""}</p>
               <p className="font-semibold text-slate-800">{lezioneProssima.data.split("-").reverse().join("/")}{lezioneProssima.ora ? ` · ${lezioneProssima.ora.slice(0, 5)}` : ""}</p>
               {lezioneProssima.luogo && <p className="text-slate-500 text-xs">{lezioneProssima.luogo}</p>}
+              {lezioneProssima.stato === "confermato" && <p className="text-sky-600 text-[11px] mt-0.5">Tocca per chiedere di spostarla</p>}
             </div>
             <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
           </Card>
@@ -619,33 +742,27 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="invito" />
 
       {isOnline && (
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossimo check</span>
+        <Card className="px-3.5 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500 text-[11px] uppercase tracking-wide font-medium">Prossimo check</span>
             <StatoBadge stato={client.stato_check} />
           </div>
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
-              {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
-                <p className="text-rose-500 text-sm font-medium mt-1">Scaduto: invia il tuo check</p>
-              )}
-              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
-            </div>
-            <Clock className="text-sky-500" size={32} />
+          <div className="flex items-baseline justify-between mt-0.5">
+            <p className="text-xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
+            <p className="text-slate-400 text-[11px]">Ultimo: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
           </div>
+          {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
+            <p className="text-rose-500 text-xs font-medium mt-0.5">Scaduto: invia il tuo check</p>
+          )}
         </Card>
       )}
 
-      {isOnline && (
-        <button onClick={() => setSchedaAperta(true)} className="w-full bg-slate-800 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Dumbbell size={22} /><span className="font-medium text-sm">Il mio programma</span>
-        </button>
-      )}
       {schedaAperta && <SchedaRiassuntiva client={client} onClose={() => setSchedaAperta(false)} />}
+      {sheetLezione && <ModificaLezioneSheet client={client} evento={sheetLezione} onChiudi={() => setSheetLezione(null)} onFatto={() => { caricaProssimoEv(); }} />}
 
       {isBulb && pacchettoSingolo && (
-        <Card className="p-5">
+        <Card className="px-3.5 py-3">
+          <div onClick={() => prossimaLezione?.stato === "confermato" && setSheetLezione(prossimaLezione)}>
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione</span>
           {prossimaLezione === undefined ? (
             <p className="text-slate-400 text-sm mt-2">Caricamento...</p>
@@ -657,11 +774,13 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
           ) : (
             <p className="text-slate-500 text-sm mt-2">Nessuna lezione ancora programmata.</p>
           )}
+          {prossimaLezione?.stato === "confermato" && <p className="text-sky-600 text-[11px] mt-1">Tocca per chiedere di spostarla</p>}
+          </div>
         </Card>
       )}
 
       {isBulb && !pacchettoSingolo && (
-        <Card className="p-5">
+        <Card className="px-3.5 py-3">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
           {(() => {
             const totale = infoPacchetto?.totale ?? lezioniIncluse;
@@ -682,6 +801,12 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                       {rimaste > 0 ? `${rimaste} ${rimaste === 1 ? "lezione rimasta" : "lezioni rimaste"}` : "Pacchetto completato"}
                       {prossima ? ` · prossima il ${prossima.data.split("-").reverse().slice(0, 2).join("/")}${prossima.ora ? ` alle ${prossima.ora.slice(0, 5)}` : ""}` : ""}
                     </p>
+                    {prossimoEv && (
+                      <button onClick={() => setSheetLezione(prossimoEv)} className="w-full mt-2 flex items-center justify-between bg-sky-50 text-sky-700 rounded-lg px-3 py-2 text-xs font-medium">
+                        <span>Prossima lezione: {prossimoEv.data.split("-").reverse().slice(0, 2).join("/")}{prossimoEv.ora ? ` · ${prossimoEv.ora.slice(0, 5)}` : ""}</span>
+                        <span>Modifica ›</span>
+                      </button>
+                    )}
                     {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
                   </>
                 )}
@@ -699,36 +824,39 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       )}
 
       {menu.length > 0 && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2">
           {menu.map((m) => (
             <button key={m.key} onClick={() => onApri(m.key)}
-              className="relative bg-white border border-slate-200 shadow-sm rounded-2xl min-h-[104px] p-4 flex flex-col items-start justify-between text-left active:bg-slate-50">
+              className="relative bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-2.5 flex items-center gap-2.5 text-left active:bg-slate-50">
               <span className="relative text-sky-500">
-                <m.icon size={28} />
+                <m.icon size={18} strokeWidth={1.6} />
                 {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
               </span>
-              <span className="font-medium text-slate-800 text-sm leading-tight">{m.label}</span>
+              <span className="font-medium text-slate-800 text-[13px] leading-tight">{m.label}</span>
             </button>
           ))}
         </div>
       )}
 
-      {isBulb && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione</span>
-        </button>
-      )}
+      <div className="flex gap-2">
+        {isOnline && (
+          <button onClick={() => setSchedaAperta(true)} className="flex-1 bg-slate-800 text-white rounded-2xl px-3 py-3 flex items-center justify-center gap-2">
+            <Dumbbell size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Il mio programma</span>
+          </button>
+        )}
+        {isSoloOnline ? (
+          <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="flex-1 bg-sky-500 text-white rounded-2xl px-3 py-3 flex items-center justify-center gap-2">
+            <Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Prenota call</span>
+          </a>
+        ) : (
+          <button onClick={() => setPrenotaAperto(true)} className="flex-1 bg-sky-500 text-white rounded-2xl px-3 py-3 flex items-center justify-center gap-2">
+            <Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">{isBulb ? "Prenota lezione" : "Prenota in presenza"}</span>
+          </button>
+        )}
+      </div>
 
-      {isSoloOnline && (
-        <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota call</span>
-        </a>
-      )}
-
-      {!isBulb && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione in presenza</span>
-        </button>
+      {isSoloOnline && !prenotaAperto && !inviata && (
+        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-100 text-sky-700 rounded-2xl px-3 py-3 flex items-center justify-center gap-2"><Phone size={16} strokeWidth={1.75} /><span className="font-medium text-sm">Prenota lezione in presenza</span></button>
       )}
 
       <div ref={richiestaRef}>
@@ -2918,6 +3046,8 @@ function NotificheCliente({ client }) {
     if (n.calendar_event_id) {
       await supabase.from("calendar_events").update({ data: n.proposta_data, ora: n.proposta_ora, luogo: n.proposta_luogo, stato: "confermato" }).eq("id", n.calendar_event_id);
       await sincronizzaLezionePacchetto(n.calendar_event_id);
+      const { data: evAcc } = await supabase.from("calendar_events").select("sostituisce_id").eq("id", n.calendar_event_id).maybeSingle();
+      if (evAcc?.sostituisce_id) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", evAcc.sostituisce_id); await scollegaLezionePacchetto(evAcc.sostituisce_id); }
     }
     await supabase.from("notifiche").update({ stato: "accettata" }).eq("id", n.id);
     carica();
@@ -2972,6 +3102,7 @@ function NotificheCliente({ client }) {
 }
 
 function LeMieLezioni({ client }) {
+  const [sheet, setSheet] = useState(null);
   const [eventi, setEventi] = useState([]);
   const [caricando, setCaricando] = useState(true);
 
@@ -3011,6 +3142,7 @@ function LeMieLezioni({ client }) {
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
+      {sheet && <ModificaLezioneSheet client={client} evento={sheet} onChiudi={() => setSheet(null)} onFatto={carica} />}
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Le mie lezioni</h1>
         <p className="text-slate-500 text-sm mt-1">Puoi annullare gratuitamente fino a 24 ore prima.</p>
@@ -3027,6 +3159,7 @@ function LeMieLezioni({ client }) {
                 <p className="text-slate-500 text-xs ">{e.luogo}</p>
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
+              {e.stato === "confermato" && <button onClick={() => setSheet(e)} className="text-sky-600 text-xs font-medium flex-shrink-0">Sposta</button>}
               <button onClick={() => annulla(e)} className="text-rose-500 text-xs font-medium flex-shrink-0">Annulla</button>
             </Card>
           ))}
@@ -3088,6 +3221,7 @@ function ClientApp({ session, anteprima = null }) {
   const [nonLette, setNonLette] = useState(0);
   const [chatNonLetti, setChatNonLetti] = useState(0);
   const [lezioneProssima, setLezioneProssima] = useState(null);
+  const [cicloImp, setCicloImp] = useState(null);
 
   const carica = async () => {
     setCaricando(true);
@@ -3133,6 +3267,7 @@ function ClientApp({ session, anteprima = null }) {
       setChatNonLetti(chatCount || 0);
       const { data: lzP } = await supabase.from("calendar_events").select("id, data, ora, luogo, stato").eq("client_id", c.id).eq("tipo", "lezione").in("stato", ["confermato", "richiesta"]).gte("data", formatDataLocale(new Date())).order("data").order("ora").limit(1);
       setLezioneProssima(lzP?.[0] || null);
+      try { const { data: ci } = await supabase.from("ciclo_impostazioni").select("*").eq("client_id", c.id).maybeSingle(); setCicloImp(ci || null); } catch (e) { setCicloImp(null); }
     }
     setCaricando(false);
   };
@@ -3151,6 +3286,7 @@ function ClientApp({ session, anteprima = null }) {
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
     ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
+    ...(cicloAttivoPer(client, cicloImp) ? [{ key: "ciclo", label: "Il mio ciclo", icon: Droplets }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
@@ -3166,7 +3302,7 @@ function ClientApp({ session, anteprima = null }) {
             <ArrowLeft size={18} /> Home
           </button>
         ) : (
-          <img src="/logo.png" alt="MorGainz" className="h-11 w-auto" />
+          <img src="/logo.png" alt="MorGainz" className="h-8 w-auto" />
         )}
         {!anteprima && <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>}
       </div>
@@ -3180,6 +3316,7 @@ function ClientApp({ session, anteprima = null }) {
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
         {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
+        {tab === "ciclo" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Il mio ciclo</p><CicloCliente client={client} /></div>}
         {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
@@ -5846,6 +5983,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "allenamento", label: "Allenamento" },
     { key: "nutrizione", label: "Nutrizione" },
     { key: "kcal", label: "Alimentazione" },
+    ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
     { key: "chat", label: "Chat" },
     { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
@@ -6191,6 +6329,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
+
+      {tab === "ciclo" && <CicloCliente client={client} isAdmin />}
 
       {tab === "notifiche" && <NotificheDellaCliente client={client} />}
 
@@ -7706,14 +7846,24 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
     const { data: au } = await supabase.from("notifiche").select("*, clients(nome, cognome)").eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%").order("created_at", { ascending: false });
     setAutoNuove(au || []);
     const { data: r } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("data");
-    setRichieste(r || []);
+    const idOrig = (r || []).map((x) => x.sostituisce_id).filter(Boolean);
+    let orig = {};
+    if (idOrig.length) { const { data: o } = await supabase.from("calendar_events").select("id, data, ora, luogo").in("id", idOrig); (o || []).forEach((x) => { orig[x.id] = x; }); }
+    setRichieste((r || []).map((x) => ({ ...x, originale: x.sostituisce_id ? orig[x.sostituisce_id] || null : null })));
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
     setCheckDaRivedere(c || []);
     setCaricando(false);
   };
   useEffect(() => { carica(); }, []);
 
-  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); await sincronizzaLezionePacchetto(id); carica(); };
+  const approva = async (id) => {
+    const { data: ev } = await supabase.from("calendar_events").select("sostituisce_id").eq("id", id).maybeSingle();
+    await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id);
+    await sincronizzaLezionePacchetto(id);
+    // se era una richiesta di spostamento, la lezione di prima viene liberata
+    if (ev?.sostituisce_id) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", ev.sostituisce_id); await scollegaLezionePacchetto(ev.sostituisce_id); }
+    carica();
+  };
   const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); carica(); };
   const segnaRevisionato = async (id) => {
     await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
@@ -7789,7 +7939,9 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
             <Card key={r.id} className="p-3 space-y-2">
               <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
                 <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
-                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
+                {r.sostituisce_id && <p className="text-amber-600 text-xs font-medium">🔁 Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
+                <p className="text-slate-500 text-xs">{r.sostituisce_id ? "Nuova data: " : ""}{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
+                {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
               </button>
               {proponiPer === r.id ? (
                 <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
