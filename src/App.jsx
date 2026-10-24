@@ -6938,19 +6938,29 @@ function AttivitaClienti({ clients }) {
     const g = giorniFa(ds);
     return { nome, testo: g <= 0 ? "oggi" : g === 1 ? "ieri" : `${g} gg`, stato: g <= verde ? "g" : g <= giallo ? "a" : "r" };
   };
-  const righe = clients.filter((c) => !c.archiviato).map((c) => {
+  const righe = clients.filter((c) => !c.archiviato && c.stato_pacchetto !== "scaduto" && c.tipo_servizio !== "presenza").map((c) => {
     const v = [];
-    v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log" });
-    if (c.kcal_attivo !== false) v.push({ ...voce("Cibo", d.kc[c.id], 2, 5), chiave: "cibo", frase: "l'alimentazione nel diario" });
-    if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario" });
-    if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check" });
+    v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log", intro: "il Log allenamento 💪🏻 Apri \"Log allenamento\", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci" });
+    if (c.kcal_attivo !== false) v.push({ ...voce("Cibo", d.kc[c.id], 2, 5), chiave: "cibo", frase: "l'alimentazione nel diario", intro: "il Log alimentazione 🍽️ Apri \"Log alimentazione\", cerca gli alimenti e aggiungili ai pasti: ti dice subito calorie e macro della giornata" });
+    if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario", intro: "il calendario del ciclo 🌸 Apri \"Il mio ciclo\" e tocca il giorno in cui arrivano le mestruazioni: l'app ti dice in che fase sei e ti dà consigli su come allenarti e come potresti sentirti" });
+    if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "il Check 📏 Apri \"Check\" nel giorno programmato e inserisci peso, misure e foto: è il modo migliore per vedere i risultati" });
     return { c, v, rossi: v.filter((x) => x.stato === "r") };
   }).sort((x, y) => y.rossi.length - x.rossi.length || `${x.c.nome}`.localeCompare(`${y.c.nome}`));
   const colori = { g: "bg-emerald-50 text-emerald-700", a: "bg-amber-50 text-amber-700", r: "bg-rose-50 text-rose-700" };
   const manda = async ({ c, rossi }) => {
-    const elenco = rossi.map((x) => x.frase);
-    const lista = elenco.length > 1 ? elenco.slice(0, -1).join(", ") + " e " + elenco[elenco.length - 1] : elenco[0];
-    const testo = `Ciao ${(c.nome || "").trim().split(" ")[0]}! 🫶🏻 Ho visto che mancano ${lista}: ti va di segnarli sull'app? Più dati mi dai e più riesco a seguirti e a calibrare tutto su di te 💪🏻 Se hai dubbi su come fare scrivimi pure ✨`;
+    const nuove = rossi.filter((x) => x.testo === "mai");
+    const ferme = rossi.filter((x) => x.testo !== "mai");
+    const nome1 = (c.nome || "").trim().split(" ")[0];
+    let testo = `Ciao ${nome1}! 🫶🏻 `;
+    if (nuove.length) {
+      testo += `L'app ha ${nuove.length > 1 ? "delle funzioni" : "una funzione"} che non hai ancora provato:\n\n` + nuove.map((x) => `• ${x.intro}`).join("\n\n") + `\n\nSfruttale per darmi più dati possibili: io riesco a seguirti meglio e tu hai tutto sotto controllo ✨`;
+    }
+    if (ferme.length) {
+      const el = ferme.map((x) => x.frase);
+      const lista = el.length > 1 ? el.slice(0, -1).join(", ") + " e " + el[el.length - 1] : el[0];
+      testo += `${nuove.length ? "\n\nInoltre " : "Ho visto che "}mancano ${lista} da un po': ti va di segnarli sull'app? Più dati mi dai e più riesco a calibrare tutto su di te 💪🏻`;
+    }
+    testo += `\n\nSe hai dubbi su come fare scrivimi pure, ci sono io 🫶🏻`;
     if (!confirm(`Mando questo messaggio a ${c.nome}?\n\n${testo}`)) return;
     setInvio(c.id);
     try {
