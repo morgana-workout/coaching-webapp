@@ -8,7 +8,7 @@ import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from ".
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy, User as UserIcon,
+  Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy, User as UserIcon, Search,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
@@ -90,6 +90,19 @@ function giornoDisponibile(dataStr) {
 /* ------------------------------------------------------------------ */
 /* UI helpers                                                          */
 /* ------------------------------------------------------------------ */
+const ApriClienteCtx = React.createContext(null);
+// Nome cliente toccabile (solo coach): apre il profilo della cliente
+function NomeCl({ c, className = "" }) {
+  const apri = React.useContext(ApriClienteCtx);
+  if (!c) return null;
+  const testo = `${c.nome || ""} ${c.cognome || ""}`.trim();
+  if (!apri || !c.id) return <>{testo}</>;
+  return (
+    <span role="link" onClick={(e) => { e.stopPropagation(); e.preventDefault(); apri(c.id); }}
+      className={`text-sky-700 underline decoration-sky-200 underline-offset-2 cursor-pointer ${className}`}>{testo}</span>
+  );
+}
+
 function Card({ children, className = "" }) {
   return <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`}>{children}</div>;
 }
@@ -7100,7 +7113,7 @@ function AttivitaClienti({ clients }) {
       {aperta && <p className="text-[11px] text-slate-400">Giorni dall'ultima volta · in cima chi ha più bisogno di un reminder</p>}
       {aperta && righe.map((r) => (
         <div key={r.c.id} className="py-3 border-b border-slate-100 last:border-0">
-          <p className="text-[15px] font-semibold text-slate-800 mb-2">{r.c.nome} {r.c.cognome}</p>
+          <p className="text-[15px] font-semibold text-slate-800 mb-2"><NomeCl c={r.c} /></p>
           <div className="flex flex-wrap gap-1.5">
             {r.v.map((x) => <span key={x.chiave} className={`${colori[x.stato]} rounded-full px-2.5 py-1 text-xs whitespace-nowrap`}>{x.nome} <b>{x.testo}</b></span>)}
           </div>
@@ -7161,7 +7174,7 @@ function DaCompletareClienti({ clients, onSelect }) {
       {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
       {aperta && righe.map(({ c, manca }) => (
         <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+          <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
           {manca.map((m) => <span key={m.k} className="block text-xs text-rose-600">• {m.t}</span>)}
         </button>
       ))}
@@ -7239,7 +7252,7 @@ function EserciziMancantiClienti({ clients, onSelect }) {
       {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
       {aperta && righe.map(({ c, mancano, varianti }) => (
         <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+          <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
           {mancano.map((m) => <span key={m.t} className="block text-xs text-rose-600">• {m.t}: {m.m}</span>)}
           {varianti.map((m) => <span key={m.t} className="block text-xs text-amber-600">• {m.t}: {m.m}</span>)}
         </button>
@@ -7393,7 +7406,7 @@ function OggiCoach({ clients, onSelect, vai }) {
             return (
               <button key={n.c.id} onClick={() => onSelect(n.c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
                 <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-slate-700 font-medium truncate">{n.c.nome} {n.c.cognome}</span>
+                  <span className="text-sm text-slate-700 font-medium truncate"><NomeCl c={n.c} /></span>
                   <span className={`text-xs font-semibold flex-shrink-0 ${g < 0 ? "text-rose-600" : g <= 2 ? "text-amber-600" : "text-slate-500"}`}>{testo}</span>
                 </span>
                 <span className="block text-xs text-slate-500">Check inviato il {fmt(n.check)} · scheda entro il {fmt(n.scad)} · {n.pagato ? "pagamento ricevuto ✓" : "pagamento da verificare"}</span>
@@ -7415,7 +7428,7 @@ function OggiCoach({ clients, onSelect, vai }) {
           <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Pacchetti scaduti</p>
           {scadenze.map((s, i) => (
             <button key={i} onClick={() => onSelect(s.c.id)} className="w-full flex items-center justify-between py-1.5 text-left">
-              <span className="text-sm text-slate-700 font-medium">{s.c.nome} {s.c.cognome}</span>
+              <span className="text-sm text-slate-700 font-medium"><NomeCl c={s.c} /></span>
               <span className="text-xs text-amber-600">{s.testo}</span>
             </button>
           ))}
@@ -7433,7 +7446,7 @@ function OggiCoach({ clients, onSelect, vai }) {
               return (
                 <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-1.5 text-left border-b border-slate-100 last:border-0">
                   <span>
-                    <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+                    <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
                     <span className="block text-[11px] text-slate-400">{c.piano || "—"} · scade il {c.data_scadenza.split("-").reverse().slice(0, 2).join("/")}</span>
                   </span>
                   <span className={`text-xs ${n < 0 ? "text-rose-500" : n <= 7 ? "text-amber-600" : "text-slate-500"}`}>{testoGiorni(n)}</span>
@@ -7449,7 +7462,7 @@ function OggiCoach({ clients, onSelect, vai }) {
         {daSeguire.length === 0 && <p className="text-emerald-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
         {daSeguire.map(({ c, motivi }) => (
           <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-            <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
+            <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
             <span className="block text-xs text-rose-500">{motivi.join(" · ")}</span>
           </button>
         ))}
@@ -7555,7 +7568,7 @@ function PromemoriaMessaggi({ clients }) {
                 <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-emerald-500 border-emerald-500" : "border-slate-300"}`}>
                   {fatto && <Check size={13} className="text-white" />}
                 </span>
-                <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}>{c.nome} {c.cognome}</span>
+                <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}><NomeCl c={c} /></span>
                 {!fatto && <span className="text-[10px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
               </button>
             );
@@ -7629,7 +7642,7 @@ function ChatCoach({ clients, onChanged }) {
             <Card key={c.id} className="p-3">
               <button onClick={() => setAperta(c.id)} className="w-full text-left flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                  <p className="font-medium text-slate-700 text-sm"><NomeCl c={c} /></p>
                   <p className="text-slate-500 text-xs truncate">
                     {u ? `${u.ultimo.mittente === "coach" ? "Tu: " : ""}${u.ultimo.testo || "📷 Foto"}` : "Nessun messaggio"}
                   </p>
@@ -7868,7 +7881,7 @@ function StoricoNotifiche({ clients }) {
           return (
             <Card key={n.id} className="p-3 space-y-1">
               <div className="flex items-start justify-between gap-2">
-                <p className="font-medium text-slate-700 text-sm">{nomeCliente(n.client_id)}</p>
+                <p className="font-medium text-slate-700 text-sm"><NomeCl c={clients.find((x) => x.id === n.client_id)} /></p>
                 <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 flex-shrink-0 ${b.c}`}>{b.t}</span>
               </div>
               <p className="text-slate-500 text-xs font-medium">{titolo(n)}</p>
@@ -7911,7 +7924,7 @@ function CompleanniClienti({ clients }) {
         {prossimi.map((x) => (
           <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-amber-50/60 border-amber-200" : ""}`}>
             <div className="min-w-0">
-              <p className="font-medium text-slate-700 text-sm">{nome(x.c)}</p>
+              <p className="font-medium text-slate-700 text-sm"><NomeCl c={x.c} /></p>
               <p className="text-slate-500 text-xs">Compie {x.prossimo.getFullYear() - x.y} anni · {dm(x.prossimo)}</p>
             </div>
             <span className="text-xs font-medium text-sky-700 bg-sky-50 rounded-full px-2 py-0.5 flex-shrink-0">{quando(x.giorni)}</span>
@@ -7965,7 +7978,7 @@ function StoricoAzioniClienti({ clients }) {
         {righe.slice(0, quante).map((r) => (
           <Card key={r.client_id + r.tipo + r.giorno} className="p-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-medium text-slate-700 text-sm">{nome(r.client_id)}</p>
+              <p className="font-medium text-slate-700 text-sm"><NomeCl c={clients.find((x) => x.id === r.client_id)} /></p>
               <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
             </div>
             <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
@@ -8018,7 +8031,7 @@ function ClientiDaRiattivare({ clients, onSelect }) {
             return (
               <Card key={c.id} className="p-3 flex items-center gap-3">
                 <button onClick={() => onSelect?.(c.id)} className="flex-1 min-w-0 text-left">
-                  <p className="font-medium text-slate-700 text-sm truncate">{c.nome} {c.cognome}</p>
+                  <p className="font-medium text-slate-700 text-sm truncate"><NomeCl c={c} /></p>
                   <p className="text-slate-400 text-[11px]">{giorni === null ? "Nessuna attività registrata" : `Ultima attività ${giorni} giorni fa`}{wa !== null ? ` · scritto su WhatsApp ${wa === 0 ? "oggi" : wa + " giorni fa"}` : ""}</p>
                 </button>
                 {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-emerald-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
@@ -8133,7 +8146,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
             {promemoriaDomani.map((v) => (
               <Card key={v.cliente.id + v.marker} className="p-3">
                 <button onClick={() => onSelect(v.cliente.id)} className="w-full text-left">
-                  <p className="font-medium text-slate-700 text-sm">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="font-medium text-slate-700 text-sm"><NomeCl c={v.cliente} /></p>
                   <p className="text-slate-500 text-xs">{v.marker === "promemoria_pacchetto" ? "Pacchetto in scadenza il " : "Check previsto il "}{v.data.split("-").reverse().join("/")}</p>
                 </button>
               </Card>
@@ -8147,7 +8160,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
             {nuoveDaCompletare.map((c) => (
               <Card key={c.id} className="p-3 flex items-center gap-3 bg-amber-50/60 border-amber-200">
                 <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 text-left">
-                    <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                    <p className="font-medium text-slate-700 text-sm"><NomeCl c={c} /></p>
                     <p className="text-slate-500 text-xs">Si è registrata da sola — manca ancora pacchetto e prezzo</p>
                 </button>
                 <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
@@ -9698,7 +9711,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
             {previsti.map((v) => (
               <button key={v.chiave} onClick={() => onSelect(v.cliente.id)} className="w-full flex items-center justify-between py-2 text-left gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm text-slate-700 font-medium truncate">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="text-sm text-slate-700 font-medium truncate"><NomeCl c={v.cliente} /></p>
                   <p className="text-xs text-slate-400">{v.titolo}{v.data ? ` · ${v.data.split("-").reverse().join("/")}` : ""}</p>
                 </div>
                 {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-amber-600 flex-shrink-0">importo da definire</span>}
@@ -9811,7 +9824,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
               return (
                 <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-2 text-left">
                   <div className="min-w-0">
-                    <p className="text-sm text-slate-700 font-medium truncate">{c.nome} {c.cognome}</p>
+                    <p className="text-sm text-slate-700 font-medium truncate"><NomeCl c={c} /></p>
                     <p className="text-xs text-slate-400">
                       {b?.importo_ricorrente != null ? `${Number(b.importo_ricorrente).toFixed(2)}€` : "Importo non impostato"}
                       {b?.frequenza_pagamento ? ` · ${labelFrequenza(b.frequenza_pagamento)}` : ""}
@@ -10051,7 +10064,7 @@ function CandidatureCoach({ onClientiCambiati }) {
         <Card key={c.id} className="p-4 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="font-medium text-slate-800">{c.nome} {c.cognome}</p>
+              <p className="font-medium text-slate-800"><NomeCl c={c} /></p>
               <p className="text-xs text-slate-500">
                 {calcolaEta(c.data_nascita) ? `${calcolaEta(c.data_nascita)} anni · ` : ""}
                 {ETICHETTE_SERVIZIO[c.tipo_servizio] || c.tipo_servizio}
@@ -10199,6 +10212,32 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
   );
 }
 
+function CercaClienti({ clienti, onSelect }) {
+  const [q, setQ] = useState("");
+  const t = q.trim().toLowerCase();
+  const risultati = t ? clienti.filter((c) => `${c.nome} ${c.cognome || ""}`.toLowerCase().includes(t)).slice(0, 8) : [];
+  return (
+    <div className="relative z-30">
+      <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
+        <Search size={17} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca una cliente..." className="flex-1 min-w-0 text-sm text-slate-800 bg-transparent outline-none" />
+        {q && <button onClick={() => setQ("")} className="text-slate-400 text-sm px-1" aria-label="Cancella">×</button>}
+      </div>
+      {t && (
+        <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          {risultati.length === 0 && <p className="px-4 py-3 text-sm text-slate-400">Nessuna cliente trovata</p>}
+          {risultati.map((c) => (
+            <button key={c.id} onClick={() => { onSelect(c.id); setQ(""); }} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0">
+              <span className="text-sm text-slate-800">{c.nome} {c.cognome}</span>
+              <span className="text-[11px] text-slate-400 capitalize">{c.tipo_servizio || ""}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [menuAperto, setMenuAperto] = useState(false);
@@ -10298,6 +10337,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       {mostraForm && (
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
+
+      <CercaClienti clienti={clientiAttivi} onSelect={onSelect} />
 
       {(() => {
         const voci = [
@@ -10399,7 +10440,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
               <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-slate-700 ">{c.nome} {c.cognome}</p>
+                    <p className="font-medium text-slate-700 "><NomeCl c={c} /></p>
                     <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
                       {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
@@ -10613,7 +10654,7 @@ function AdminApp({ onVistaCliente }) {
   if (caricando) return <Spinner />;
 
   return (
-    <>
+    <ApriClienteCtx.Provider value={setSelectedId}>
     <PullToRefresh onRefresh={carica}>
     <div className="min-h-screen bg-slate-50 lg:pr-[17rem]">
       <FeedCoach onSelect={setSelectedId} />
@@ -10635,7 +10676,7 @@ function AdminApp({ onVistaCliente }) {
     <ChatBolla chiave="coach" conteggio={chatCoachNuove} titolo="Chat" onChiudi={contaChatCoach}>
       <ChatCoach clients={clients.filter((c) => !c.archiviato)} onChanged={contaChatCoach} />
     </ChatBolla>
-    </>
+    </ApriClienteCtx.Provider>
   );
 }
 
