@@ -865,8 +865,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
 
       {profiloAperto && <ProfiloCliente client={client} onAggiornato={onAggiornato} />}
 
-      <RiepilogoSettimana client={client} />
-
       <div ref={richiestaRef}>
         {prenotaAperto && !inviata && (
           <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
@@ -875,6 +873,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
           <p className="text-emerald-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
         )}
       </div>
+
+      <div className="pt-8" />
 
       <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
 
@@ -1960,8 +1960,21 @@ function formattaPeriodo(r) {
 
 function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   const [vista, setVista] = useState("aggiornamenti");
+  const [grafico, setGrafico] = useState("macro");
   const conKcal = (storico || []).filter((r) => r.kcal != null && r.data_aggiornamento);
   if (conKcal.length === 0) return null;
+  const dataCiclo = (r) => r.data_inizio || r.data_aggiornamento;
+  const ordinati = [...conKcal].sort((x, y) => dataCiclo(x).localeCompare(dataCiclo(y)));
+  const num = (v) => (v == null ? null : Number(v));
+  const delta = (corrente, precedente) => (corrente == null || precedente == null ? null : corrente - precedente);
+  const Freccia = ({ d, unita = "" }) => d == null || d === 0 ? null : <span className={`text-[10px] ml-0.5 ${d > 0 ? "text-emerald-600" : "text-rose-600"}`}>{d > 0 ? "▲" : "▼"}{Math.abs(d)}{unita}</span>;
+  const primo = ordinati[0], ultimo = ordinati[ordinati.length - 1];
+  const variazione = (campo) => delta(num(ultimo[campo]), num(primo[campo]));
+  const fmtVar = (d, unita) => (d == null ? "—" : d === 0 ? "invariati" : `${d > 0 ? "+" : ""}${d}${unita}`);
+  const datiMacro = ordinati.map((r) => ({
+    data: dataCiclo(r).split("-").reverse().slice(0, 2).join("/"),
+    Proteine: num(r.proteine_g), Carboidrati: num(r.carboidrati_g), Grassi: num(r.grassi_g),
+  }));
 
   const perMese = (() => {
     const map = {};
@@ -1983,13 +1996,48 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   return (
     <Card className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Storico kcal</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Storico nutrizione</p>
+        <div className="flex gap-1">
+          <button onClick={() => setGrafico("macro")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${grafico === "macro" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Macros</button>
+          <button onClick={() => setGrafico("kcal")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${grafico === "kcal" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Kcal</button>
+        </div>
+      </div>
+      <div className="flex justify-end">
         <div className="flex gap-1">
           <button onClick={() => setVista("aggiornamenti")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${vista === "aggiornamenti" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Settimanale</button>
           <button onClick={() => setVista("mensile")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${vista === "mensile" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Mensile</button>
         </div>
       </div>
-      {datiGrafico.length > 1 && (
+      {grafico === "macro" && datiMacro.length > 1 && (
+        <>
+          <div className="flex gap-3 text-[11px] text-slate-600">
+            <span><i className="inline-block w-2 h-2 rounded-full bg-sky-500 mr-1" />Proteine</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1" />Carboidrati</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-1" />Grassi</span>
+          </div>
+          <div style={{ width: "100%", height: 170 }}>
+            <ResponsiveContainer>
+              <LineChart data={datiMacro}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="data" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} width={34} domain={["dataMin - 10", "dataMax + 10"]} />
+                <Tooltip />
+                <Line type="monotone" dataKey="Proteine" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="Carboidrati" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="Grassi" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+      {ordinati.length > 1 && (
+        <div className="bg-slate-50 rounded-xl px-3 py-2.5 text-xs text-slate-700 leading-relaxed">
+          <p className="font-semibold">Dal {dataCiclo(primo).split("-").reverse().join("/")} a oggi</p>
+          <p>Proteine {fmtVar(variazione("proteine_g"), " g")} · Carboidrati {fmtVar(variazione("carboidrati_g"), " g")} · Grassi {fmtVar(variazione("grassi_g"), " g")}</p>
+          <p>Kcal {fmtVar(variazione("kcal"), "")}</p>
+        </div>
+      )}
+      {grafico === "kcal" && datiGrafico.length > 1 && (
         <div style={{ width: "100%", height: 150 }}>
           <ResponsiveContainer>
             <LineChart data={datiGrafico}>
@@ -2012,7 +2060,10 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
                   className={`w-full flex justify-between items-center text-sm border-b border-slate-100 pb-1.5 ${isAdmin ? "text-left hover:bg-slate-50 rounded px-1 -mx-1" : ""}`}>
                   <span className="text-slate-500">{formattaPeriodo(r)}</span>
                   <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
-                  <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
+                  {(() => {
+                    const i = ordinati.findIndex((x) => x.id === r.id); const pr = i > 0 ? ordinati[i - 1] : null;
+                    return <span className="text-slate-500 text-xs text-right">P{r.proteine_g ?? "—"}<Freccia d={pr ? delta(num(r.proteine_g), num(pr.proteine_g)) : null} /> C{r.carboidrati_g ?? "—"}<Freccia d={pr ? delta(num(r.carboidrati_g), num(pr.carboidrati_g)) : null} /> G{r.grassi_g ?? "—"}<Freccia d={pr ? delta(num(r.grassi_g), num(pr.grassi_g)) : null} /></span>;
+                  })()}
                 </Riga>
                 {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-red-500 px-1.5 flex-shrink-0">🗑</button>}
               </li>
@@ -3385,7 +3436,7 @@ function ClientApp({ session, anteprima = null }) {
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
-        {tab === "log" && <DiarioAllenamento clientId={client.id} />}
+        {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioAllenamento clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
         {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
