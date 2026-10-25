@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
 import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
+import AnalisiCibo from "./AnalisiCibo";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
@@ -6119,6 +6120,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "allenamento", label: "Allenamento" },
     { key: "nutrizione", label: "Nutrizione" },
     { key: "kcal", label: "Alimentazione" },
+    ...(client.kcal_attivo !== false ? [{ key: "analisi", label: "Cosa mangia" }] : []),
     ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
     { key: "chat", label: "Chat" },
     { key: "notifiche", label: "Notifiche" },
@@ -6466,6 +6468,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
       {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
 
+      {tab === "analisi" && client.kcal_attivo !== false && <AnalisiCibo client={client} />}
       {tab === "ciclo" && <CicloCliente client={client} isAdmin />}
 
       {tab === "notifiche" && <NotificheDellaCliente client={client} />}
