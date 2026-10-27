@@ -103,6 +103,30 @@ function NomeCl({ c, className = "" }) {
   );
 }
 
+const SLOT_ORARI_COACH = (() => { const s = []; for (let h = 7; h <= 21; h++) { s.push(`${String(h).padStart(2, "0")}:00`); if (h < 21) s.push(`${String(h).padStart(2, "0")}:30`); } return s; })();
+// Orario per la coach: fasce ogni 30 minuti dalle 7 alle 21 oppure orario a mano (es. 08:05)
+function OraCoach({ value, onChange, className = "", vuoto = false }) {
+  const v = (value || "").slice(0, 5);
+  const fuori = !!v && !SLOT_ORARI_COACH.includes(v);
+  const [manuale, setManuale] = useState(fuori);
+  useEffect(() => { if (fuori) setManuale(true); }, [fuori]);
+  if (manuale) {
+    return (
+      <div className="flex items-center gap-1">
+        <input type="time" value={v} onChange={(e) => onChange({ target: { value: e.target.value } })} className={className} />
+        <button type="button" onClick={() => { setManuale(false); if (fuori) onChange({ target: { value: vuoto ? "" : SLOT_ORARI_COACH[0] } }); }} className="text-sky-600 text-xs px-1 flex-shrink-0">Fasce</button>
+      </div>
+    );
+  }
+  return (
+    <select value={v} onChange={(e) => { if (e.target.value === "__manuale") { setManuale(true); return; } onChange(e); }} className={className}>
+      {vuoto && <option value="">--:--</option>}
+      {SLOT_ORARI_COACH.map((s) => <option key={s} value={s}>{s}</option>)}
+      <option value="__manuale">✏️ Altro orario...</option>
+    </select>
+  );
+}
+
 function Card({ children, className = "" }) {
   return <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`}>{children}</div>;
 }
@@ -4634,10 +4658,7 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
         </button>
         <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
         <InputData value={data} onChange={(e) => { const v = e.target.value; setData(v); setSalvato(false); if (!v) { setOra(""); salva({ data: "", ora: "" }); } }} className="flex-1" onBlur={(e) => { if (!e.target.value && (lezione.data || lezione.calendar_event_id)) { setOra(""); salva({ data: "", ora: "" }); } }} />
-        <select value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
-          <option value="">--:--</option>
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0" vuoto />
       </div>
       <input value={nota} onChange={(e) => { setNota(e.target.value); setSalvato(false); }} placeholder="Nota sulla lezione"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
@@ -6710,9 +6731,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
-        <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
       {f.tipo === "lezione" && (
         <div>
@@ -6770,10 +6789,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
       )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
-        <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">--:--</option>
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" vuoto />
       </div>
       {evento.tipo === "lezione" && (
         <SelezionaLuogo value={f.luogo} vuoto="— sede —" onChange={(v) => setF({ ...f, luogo: v })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -7007,9 +7023,7 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
       <p className="text-sm font-medium text-slate-700">Proponi un altro orario</p>
       <div className="grid grid-cols-2 gap-3">
         <InputData value={data} onChange={(e) => setData(e.target.value)} />
-        <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
       <SelezionaLuogo value={luogo} onChange={setLuogo} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <textarea placeholder="Messaggio (facoltativo)" value={messaggio} onChange={(e) => setMessaggio(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
