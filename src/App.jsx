@@ -4,6 +4,7 @@ import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
 import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
+import MessaggioPronto from "./MessaggioPronto";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
@@ -6187,6 +6188,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       </div>
 
       {tab === "riepilogo" && <RiepilogoCliente client={client} checkins={checkins} onVaiADati={() => setTab("dati")} />}
+      {tab === "riepilogo" && <Card className="p-4"><p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Messaggio per WhatsApp</p><MessaggioPronto client={client} chiuso={false} /></Card>}
 
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
@@ -7088,12 +7090,12 @@ function AttivitaClienti({ clients }) {
   const righe = clients.filter((c) => !c.archiviato && c.stato_pacchetto !== "scaduto" && c.tipo_servizio !== "presenza").map((c) => {
     const v = [];
     v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log", intro: "il Log allenamento 💪🏻 Apri \"Log allenamento\", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci" });
-    if (c.kcal_attivo !== false) v.push({ ...voce("Cibo", d.kc[c.id], 2, 5), chiave: "cibo", frase: "l'alimentazione nel diario", intro: "il Log alimentazione 🍽️ Apri \"Log alimentazione\", cerca gli alimenti e aggiungili ai pasti: ti dice subito calorie e macro della giornata" });
+    if (c.kcal_attivo !== false) { const vc = voce("Cibo", d.kc[c.id], 2, 5); v.push({ ...vc, stato: vc.testo === "mai" ? "n" : vc.stato, chiave: "cibo", frase: "l'alimentazione nel diario" }); }
     if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario", intro: "il calendario del ciclo 🌸 Apri \"Il mio ciclo\" e tocca il giorno in cui arrivano le mestruazioni: l'app ti dice in che fase sei e ti dà consigli su come allenarti e come potresti sentirti" });
     if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "il Check 📏 Apri \"Check\" nel giorno programmato e inserisci peso, misure e foto: è il modo migliore per vedere i risultati" });
     return { c, v, rossi: v.filter((x) => x.stato === "r") };
   }).sort((x, y) => y.rossi.length - x.rossi.length || `${x.c.nome}`.localeCompare(`${y.c.nome}`));
-  const colori = { g: "bg-emerald-50 text-emerald-700", a: "bg-amber-50 text-amber-700", r: "bg-rose-50 text-rose-700" };
+  const colori = { g: "bg-emerald-50 text-emerald-700", a: "bg-amber-50 text-amber-700", r: "bg-rose-50 text-rose-700", n: "bg-slate-100 text-slate-500" };
   const manda = async ({ c, rossi }) => {
     const nuove = rossi.filter((x) => x.testo === "mai");
     const ferme = rossi.filter((x) => x.testo !== "mai");
@@ -7131,6 +7133,7 @@ function AttivitaClienti({ clients }) {
           <div className="flex flex-wrap gap-1.5">
             {r.v.map((x) => <span key={x.chiave} className={`${colori[x.stato]} rounded-full px-2.5 py-1 text-xs whitespace-nowrap`}>{x.nome} <b>{x.testo}</b></span>)}
           </div>
+          <MessaggioPronto client={r.c} />
           {r.rossi.length > 0 && (inviati[r.c.id]
             ? <p className="text-emerald-600 text-xs mt-2">Reminder inviato ✓</p>
             : <button onClick={() => manda(r)} disabled={invio === r.c.id} className="mt-2 text-sky-700 text-[13px] font-medium disabled:opacity-50">✨ Manda reminder →</button>)}
