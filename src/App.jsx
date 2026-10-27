@@ -758,6 +758,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
 
   return (
     <div className="px-5 pt-4 pb-24 space-y-4">
+      <div className="flex flex-col gap-4" style={{ minHeight: "calc(100dvh - 6.5rem - env(safe-area-inset-bottom))" }}>
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
         <p className="text-slate-500 text-xs mt-0.5">Costanza batte perfezione, sempre.</p>
@@ -877,7 +878,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 mt-auto pb-4">
         {isOnline && (
           <button onClick={() => setSchedaAperta(true)} className="bg-slate-800 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
             <Dumbbell size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Il mio programma</span>
@@ -892,11 +893,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
             <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">{isBulb ? "Prenota lezione" : "Prenota in presenza"}</span>
           </button>
         )}
-      </div>
-
-      <div style={{ height: "22dvh" }} />
-
-      <div className="grid grid-cols-2 gap-3">
         {isSoloOnline && !prenotaAperto && !inviata && (
           <button onClick={() => setPrenotaAperto(true)} className="bg-sky-100 text-sky-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
             <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Prenota lezione in presenza</span>
@@ -905,6 +901,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         <button onClick={() => setProfiloAperto((v) => !v)} className="bg-white border border-slate-200 text-slate-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
           <UserIcon size={16} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" /><span className="font-medium text-sm leading-tight">Il mio profilo</span>
         </button>
+      </div>
       </div>
 
       {profiloAperto && <ProfiloCliente client={client} onAggiornato={onAggiornato} />}
