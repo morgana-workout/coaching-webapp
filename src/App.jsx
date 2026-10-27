@@ -913,7 +913,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         )}
       </div>
 
-      <div className="pt-8" />
+      <div style={{ height: "34dvh" }} />
 
       <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
 
