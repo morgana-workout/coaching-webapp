@@ -877,8 +877,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </div>
       )}
 
-      <div style={{ height: "30dvh" }} />
-
       <div className="grid grid-cols-2 gap-3">
         {isOnline && (
           <button onClick={() => setSchedaAperta(true)} className="bg-slate-800 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
@@ -894,6 +892,11 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
             <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">{isBulb ? "Prenota lezione" : "Prenota in presenza"}</span>
           </button>
         )}
+      </div>
+
+      <div style={{ height: "22dvh" }} />
+
+      <div className="grid grid-cols-2 gap-3">
         {isSoloOnline && !prenotaAperto && !inviata && (
           <button onClick={() => setPrenotaAperto(true)} className="bg-sky-100 text-sky-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
             <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Prenota lezione in presenza</span>
