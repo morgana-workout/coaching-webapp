@@ -7092,8 +7092,8 @@ function AttivitaClienti({ clients }) {
     v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log", intro: "il Log allenamento 💪🏻 Apri \"Log allenamento\", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci" });
     if (c.kcal_attivo !== false) { const vc = voce("Cibo", d.kc[c.id], 2, 5); v.push({ ...vc, stato: vc.testo === "mai" ? "n" : vc.stato, chiave: "cibo", frase: "l'alimentazione nel diario" }); }
     if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario", intro: "il calendario del ciclo 🌸 Apri \"Il mio ciclo\" e tocca il giorno in cui arrivano le mestruazioni: l'app ti dice in che fase sei e ti dà consigli su come allenarti e come potresti sentirti" });
-    if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "il Check 📏 Apri \"Check\" nel giorno programmato e inserisci peso, misure e foto: è il modo migliore per vedere i risultati" });
-    return { c, v, rossi: v.filter((x) => x.stato === "r") };
+    if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "", soloInfo: true });
+    return { c, v, rossi: v.filter((x) => x.stato === "r" && !x.soloInfo) };
   }).sort((x, y) => y.rossi.length - x.rossi.length || `${x.c.nome}`.localeCompare(`${y.c.nome}`));
   const colori = { g: "bg-emerald-50 text-emerald-700", a: "bg-amber-50 text-amber-700", r: "bg-rose-50 text-rose-700", n: "bg-slate-100 text-slate-500" };
   const manda = async ({ c, rossi }) => {

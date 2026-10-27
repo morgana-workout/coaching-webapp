@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 
-/* Solo coach: propone un messaggio da copiare/mandare su WhatsApp, costruito sui dati reali della cliente (allenamenti, check, progressi, cosa manca). */
+/* Solo coach: propone un messaggio da copiare/mandare su WhatsApp, costruito sui dati reali della cliente (allenamenti, progressi, cosa manca). */
 
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
 function fmt(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
@@ -78,16 +78,17 @@ function costruisci(client, d, seme) {
 
   // 2. progressi veri
   if (d.record) righe.push(`Ho visto anche che nel ${d.record.esercizio} sei salita da ${d.record.kg_prima} a ${d.record.kg_oggi} kg: bellissimo progresso! 🔥`);
-  if (d.peso != null && d.nCheck >= 2) {
-    const dir = d.peso < -0.05 ? `il peso è sceso di ${dec(d.peso)} kg` : d.peso > 0.05 ? `il peso è salito di ${dec(d.peso)} kg` : "il peso è rimasto stabile";
-    righe.push(`Guardando i tuoi ultimi check, ${dir}${d.vita != null && Math.abs(d.vita) >= 0.5 ? ` e la vita è ${d.vita < 0 ? "diminuita" : "aumentata"} di ${dec(d.vita)} cm` : ""}. Li guardiamo con calma insieme, il quadro si legge sul lungo periodo 💪🏻`);
-  }
+
+  if (!fermo && d.allenamenti > 0) righe.push(scegli([
+    `Brava anche per come stai compilando il log: segnare carichi e ripetizioni mi permette di seguirti davvero 💪🏻`,
+    `Mi piace molto come stai usando il Log allenamento: è un grande aiuto per costruire i tuoi progressi ✨`,
+  ], seme + 3));
+  if (d.ciclo === true) righe.push(`E grazie per segnare il ciclo nell'app: mi aiuta a darti consigli su misura per ogni fase 🌸`);
 
   // 3. cosa manca (mai l'alimentazione se non la usa)
   const nuove = [];
   if (d.mai_allenato) nuove.push(`il Log allenamento 💪🏻 Apri "Log allenamento", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci`);
   if (d.ciclo === false && client.sesso !== "M") nuove.push(`il calendario del ciclo 🌸 Apri "Il mio ciclo" e tocca il giorno in cui arrivano le mestruazioni: ti do consigli per allenarti in base alla fase`);
-  if (online && d.mai_check) nuove.push(`il Check 📏 inserisci peso, misure e foto nel giorno programmato: è il modo migliore per vedere i risultati`);
   if (nuove.length) righe.push(`L'app ha ${nuove.length > 1 ? "delle funzioni" : "una funzione"} che non hai ancora provato:\n${nuove.map((x) => "• " + x).join("\n")}\nSfruttale per darmi più dati possibili: io riesco a seguirti meglio e tu hai tutto sotto controllo ✨`);
   else if (fermo && !d.mai_allenato) righe.push(`Quando riesci, segna gli allenamenti nel Log: più dati mi dai e più riesco a seguirti su misura 💪🏻`);
 
@@ -95,22 +96,23 @@ function costruisci(client, d, seme) {
   const consigli = d.usaCibo
     ? [
       `Un consiglio: continua a controllare i macros giorno per giorno, anche i condimenti e i fuori pasto fanno la differenza 🥗`,
-      `Ricordati di bere almeno 2 litri d'acqua al giorno, aiuta energia, fame e recupero 💧`,
     ]
     : [
       `Come stai andando con l'alimentazione? Ti trovi bene con le porzioni e i pasti di questi giorni? 🍽️`,
-      `Una piccola cosa: ricordati di bere almeno 2 litri d'acqua al giorno, aiuta energia, fame e recupero 💧`,
       `Se ti va, raccontami come mangi in una giornata tipo: così posso darti qualche spunto su misura per te 🥗`,
       `Occhio a tenere sotto controllo i macros, soprattutto le proteine ad ogni pasto, fanno una grande differenza 💪🏻`,
     ];
-  righe.push(scegli(consigli, seme + 1));
+  const tuttoPerfetto = bene && nuove.length === 0;
+  const pioggia = (Number(d.oggi.slice(8)) + seme + (client.nome || "").length) % 3 === 0; // solo ogni tanto
+  if (tuttoPerfetto && pioggia) righe.push(`E ricordati di bere tanta acqua, almeno 2 litri al giorno: aiuta energia, fame e recupero 💧`);
+  else righe.push(scegli(consigli, seme + 1));
 
   // 5. evento vicino + chiusura
   if (d.prossimoEv) righe.push(`Ci vediamo ${d.prossimoEv.data === d.oggi ? "oggi" : d.prossimoEv.data === addG(d.oggi, 1) ? "domani" : "a breve"}${d.prossimoEv.ora ? ` alle ${d.prossimoEv.ora.slice(0, 5)}` : ""}, non vedo l'ora! 🫶🏻`);
   righe.push(scegli([
-    `Per qualsiasi dubbio scrivimi pure, ci sono io 🫶🏻`,
-    `Se hai domande o dubbi scrivimi, sono qui per te ✨`,
-    `Sono sempre qui se vuoi parlarne 🫶🏻`,
+    `Sono sempre a disposizione per chiarimenti o per qualsiasi altra cosa, scrivimi pure 🫶🏻`,
+    `Se hai dubbi, domande o hai bisogno di altro, io ci sono sempre: scrivimi quando vuoi ✨`,
+    `Per qualsiasi chiarimento o altro sono a tua disposizione, ci sono io 🫶🏻`,
   ], seme + 2));
 
   if (d.giorniSenzaMsg != null && d.giorniSenzaMsg > 12 && motivo === "tienila presente") motivo = `non vi scrivete da ${d.giorniSenzaMsg} giorni`;
