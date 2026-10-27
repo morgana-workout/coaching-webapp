@@ -877,6 +877,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </div>
       )}
 
+      <div style={{ height: "30dvh" }} />
+
       <div className="grid grid-cols-2 gap-3">
         {isOnline && (
           <button onClick={() => setSchedaAperta(true)} className="bg-slate-800 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
@@ -913,7 +915,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         )}
       </div>
 
-      <div style={{ height: "34dvh" }} />
+      <div className="pt-6" />
 
       <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
 
@@ -3364,7 +3366,7 @@ function ChatBolla({ chiave, conteggio = 0, titolo, onChiudi, children }) {
   );
 }
 
-function ClientApp({ session, anteprima = null }) {
+function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
   const [tab, setTab] = useState("home");
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
@@ -3468,7 +3470,12 @@ function ClientApp({ session, anteprima = null }) {
         ) : (
           <img src="/logo.png" alt="MorGainz" className="h-8 w-auto" />
         )}
-        {!anteprima && <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>}
+        {!anteprima && (
+          <div className="flex items-center gap-4">
+            {onTornaCoach && <button onClick={onTornaCoach} className="text-sky-600 text-xs font-medium">← Torna a Coach</button>}
+            <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
+          </div>
+        )}
       </div>
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
         {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} lezioneProssima={lezioneProssima} />}
@@ -10812,8 +10819,7 @@ export default function App() {
     if (vistaCliente) {
       return (
         <>
-          <ClientApp session={session} />
-          <button onClick={() => impostaVistaCliente(false)} className="fixed bottom-24 right-3 z-50 bg-slate-800 text-white text-xs font-medium rounded-full px-4 py-2 shadow-lg">← Torna a Coach</button>
+          <ClientApp session={session} onTornaCoach={() => impostaVistaCliente(false)} />
         </>
       );
     }
