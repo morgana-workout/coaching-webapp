@@ -101,20 +101,15 @@ function calcola(client, d) {
     else aree.push({ k: "Monitoraggio ciclo", v: 0, p: null, nota: "mai registrato" });
   }
 
-  const conDati = aree.filter((a) => a.v !== null);
-  const tot = media(conDati.map((a) => a.v));
-  const confr = conDati.filter((a) => a.p !== null);
-  const delta = confr.length ? Math.round(media(confr.map((a) => a.v)) - media(confr.map((a) => a.p))) : null;
-
   // andamento settimanale (8 settimane): allenamenti (obiettivo 3/sett) e diario (obiettivo 5 gg/sett)
-  const sett = [];
+  const settT = [], settK = [];
   for (let w = 7; w >= 0; w--) {
     const r = [giorniFa(w * 7 + 6), giorniFa(w * 7)];
     const t = clamp((new Set(d.tr.filter((x) => dentro(x.data, r)).map((x) => x.data)).size / 3) * 100);
     const k = kcalOn ? clamp((new Set(d.kc.filter((x) => dentro(x.data, r)).map((x) => x.data)).size / 5) * 100) : null;
-    sett.push(media([t, k]));
+    settT.push(t); settK.push(k);
   }
-  return { aree, tot: tot === null ? null : Math.round(tot), delta, sett, poche: !d.tr.length && !d.kc.length && !ck.length };
+  return { aree, settT, settK };
 }
 
 function Linea({ valori }) {
@@ -123,42 +118,92 @@ function Linea({ valori }) {
   return <svg width={w} height={h} className="mt-2"><polyline fill="none" stroke="#2F5E8E" strokeWidth="2" points={pts} /></svg>;
 }
 
+const AREE = [
+  ["allenamento", "Aderenza all'allenamento", true],
+  ["alimentazione", "Aderenza nutrizionale", true],
+  ["corpo", "Composizione corporea", false],
+  ["check", "Aderenza al monitoraggio", false],
+  ["ciclo", "Monitoraggio ciclo", false],
+];
+const VAL_MANUALE = { si: 100, parz: 60, no: 20 };
+const ETICHETTA_MANUALE = { si: "Rispettato", parz: "Parzialmente", no: "Non rispettato" };
+
+function Segmento({ opzioni, valore, onScegli }) {
+  return (
+    <span className="inline-flex border border-sky-200 rounded-lg overflow-hidden mr-2">
+      {opzioni.map(([k, l]) => <button key={k} onClick={() => onScegli(k)} className={`px-2.5 py-1 text-xs ${valore === k ? "bg-sky-700 text-white" : "bg-white text-slate-600"}`}>{l}</button>)}
+    </span>
+  );
+}
+
 export default function AndamentoCliente({ client, checkins }) {
-  const [r, setR] = useState(null);
+  const [raw, setRaw] = useState(null);
+  const [imp, setImp] = useState({});
+  const [aperte, setAperte] = useState(false);
   useEffect(() => {
-    let vivo = true; setR(null);
+    let vivo = true; setRaw(null); setImp({});
     (async () => {
       try {
         const da = giorniFa(60);
         const tr = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg").eq("client_id", client.id).gte("data", da).order("id"));
         const kc = await leggi(() => supabase.from("kcal_voci").select("data, proteine").eq("client_id", client.id).gte("data", da).order("created_at"));
         const { data: ci } = await supabase.from("ciclo_mestruale").select("data_inizio").eq("client_id", client.id);
-        const { data: imp } = await supabase.from("ciclo_impostazioni").select("attivo").eq("client_id", client.id).maybeSingle();
+        const { data: im } = await supabase.from("ciclo_impostazioni").select("attivo").eq("client_id", client.id).maybeSingle();
         const { data: an } = await supabase.from("analisi_cibo_impostazioni").select("fase").eq("client_id", client.id).maybeSingle();
         const { data: pi } = await supabase.from("nutrition_plans").select("*").eq("client_id", client.id).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
-        if (vivo) setR(calcola(client, { tr, kc, ci: ci || [], ck: checkins || [], cicloAttivo: imp?.attivo, fase: an?.fase, piano: pi }));
-      } catch (e) { if (vivo) setR({ errore: true }); }
+        const { data: ai } = await supabase.from("andamento_impostazioni").select("impostazioni").eq("client_id", client.id).maybeSingle();
+        if (vivo) { setRaw(calcola(client, { tr, kc, ci: ci || [], ck: checkins || [], cicloAttivo: im?.attivo, fase: an?.fase, piano: pi })); setImp(ai?.impostazioni || {}); }
+      } catch (e) { if (vivo) setRaw({ errore: true }); }
     })();
     return () => { vivo = false; };
   }, [client.id, (checkins || []).length]);
-  if (!r) return <div className="bg-white border border-sky-200 rounded-2xl p-4 text-xs text-slate-400">Calcolo l'andamento…</div>;
-  if (r.errore) return null;
-  const conDelta = r.aree.filter((a) => a.v !== null && a.p !== null).map((a) => ({ ...a, d: a.v - a.p }));
+  const salva = async (nuove) => {
+    setImp(nuove);
+    try { await supabase.from("andamento_impostazioni").upsert({ client_id: client.id, impostazioni: nuove, updated_at: new Date().toISOString() }); } catch (e) { /* ignora */ }
+  };
+  const imposta = (id, patch) => salva({ ...imp, [id]: { ...(imp[id] || {}), ...patch } });
+  if (!raw) return <div className="bg-white border border-sky-200 rounded-2xl p-4 text-xs text-slate-400">Calcolo l'andamento…</div>;
+  if (raw.errore) return null;
+
+  // applica le impostazioni scelte per questa cliente
+  const aree = AREE.flatMap(([id, label, manualePossibile]) => {
+    const m = imp[id]?.mode || "auto";
+    if (m === "escludi") return [];
+    if (m === "manuale" && manualePossibile) { const v = imp[id]?.val || "parz"; return [{ k: label, v: VAL_MANUALE[v], p: null, nota: "indicato da te: " + ETICHETTA_MANUALE[v].toLowerCase(), manuale: true }]; }
+    const r0 = raw.aree.find((x) => x.k === label);
+    return r0 ? [r0] : [];
+  });
+  const conDati = aree.filter((a) => a.v !== null);
+  const totN = media(conDati.map((a) => a.v));
+  const tot = totN === null ? null : Math.round(totN);
+  const confr = conDati.filter((a) => a.p !== null);
+  const delta = confr.length ? Math.round(media(confr.map((a) => a.v)) - media(confr.map((a) => a.p))) : null;
+  const sett = raw.settT.map((t, i) => {
+    const parti = [];
+    const mt = imp.allenamento?.mode || "auto", mk = imp.alimentazione?.mode || "auto";
+    if (mt === "auto") parti.push(t); else if (mt === "manuale") parti.push(VAL_MANUALE[imp.allenamento?.val || "parz"]);
+    if (mk === "auto") parti.push(raw.settK[i]); else if (mk === "manuale") parti.push(VAL_MANUALE[imp.alimentazione?.val || "parz"]);
+    return media(parti);
+  });
+  const settOk = sett.every((v) => v !== null);
+  const conDelta = aree.filter((a) => a.v !== null && a.p !== null).map((a) => ({ ...a, d: a.v - a.p }));
   const su = [...conDelta].sort((a, b) => b.d - a.d)[0];
   const giu = [...conDelta].sort((a, b) => a.d - b.d)[0];
   const freccia = (d) => (d > 1 ? "▲ +" + d : d < -1 ? "▼ " + d : "▬ 0");
   return (
-    <div className="bg-white border border-sky-200 rounded-2xl p-4 flex flex-col lg:flex-row gap-5">
+    <div className="bg-white border border-sky-200 rounded-2xl p-4 space-y-3">
+    <div className="flex flex-col lg:flex-row gap-5">
       <div className="lg:w-64 bg-sky-100 rounded-xl p-4 flex-shrink-0">
         <p className="text-[11px] text-slate-600">Indice di aderenza e progressione · ultimi 30 giorni</p>
-        <p className="text-4xl font-bold text-sky-700 leading-tight my-1">{r.tot === null ? "—" : r.tot + "%"}</p>
-        <p className="text-[13px] font-semibold text-sky-700">{r.delta === null ? "dati insufficienti per il confronto" : freccia(r.delta).replace("▲ +", "▲ +").replace(/(\d+)$/, "$1 punti vs 30 giorni precedenti")}</p>
-        <Linea valori={r.sett} />
+        <p className="text-4xl font-bold text-sky-700 leading-tight my-1">{tot === null ? "—" : tot + "%"}</p>
+        <p className="text-[13px] font-semibold text-sky-700">{delta === null ? "dati insufficienti per il confronto" : freccia(delta) + " punti vs 30 giorni precedenti"}</p>
+        {settOk && sett.length > 1 && <Linea valori={sett} />}
         <p className="text-[11px] text-slate-600">ultime 8 settimane (frequenza allenamenti e registrazione dieta)</p>
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Per dominio</p>
-        {r.aree.map((a) => {
+        {aree.length === 0 && <p className="text-sm text-slate-400">Nessuna area inclusa nel calcolo.</p>}
+        {aree.map((a) => {
           const dd = a.v !== null && a.p !== null ? a.v - a.p : null;
           const basso = a.v !== null && (a.v < 40 || (dd !== null && dd < -1));
           return (
@@ -178,9 +223,31 @@ export default function AndamentoCliente({ client, checkins }) {
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Variazioni rilevanti</p>
         {su && su.d > 1 && <p className="bg-sky-100 text-sky-700 rounded-xl px-3 py-2 text-[13px]">▲ Maggior miglioramento: {su.k} +{su.d}</p>}
         {giu && giu.d < -1 && <p className="bg-slate-800 text-white rounded-xl px-3 py-2 text-[13px]">▼ Maggior peggioramento: {giu.k} {giu.d}</p>}
-        {r.aree.filter((a) => a.v !== null && a.v < 40).slice(0, 2).map((a) => <p key={a.k} className="bg-slate-100 text-slate-600 rounded-xl px-3 py-2 text-[13px]">Area critica: {a.k} ({a.v}%)</p>)}
-        {!conDelta.length && <p className="text-[12px] text-slate-400">Il confronto con i 30 giorni precedenti richiede dati in entrambi i periodi.</p>}
+        {aree.filter((a) => a.v !== null && a.v < 40).slice(0, 2).map((a) => <p key={a.k} className="bg-slate-100 text-slate-600 rounded-xl px-3 py-2 text-[13px]">Area critica: {a.k} ({a.v}%)</p>)}
+        {!conDelta.length && <p className="text-[12px] text-slate-400">Il confronto con i 30 giorni precedenti richiede dati in entrambi i periodi (le aree indicate da te non entrano).</p>}
       </div>
+    </div>
+    <div className="border-t border-sky-100 pt-2">
+      <button onClick={() => setAperte((x) => !x)} className="text-xs text-sky-700 font-medium">⚙ Impostazioni analisi {aperte ? "▴" : "▾"}</button>
+      {aperte && (
+        <div className="mt-2">
+          <p className="text-[11px] text-slate-500 mb-2">Scegli per questa cliente cosa includere. "Manuale" = lo indichi tu, anche se non registra nell'app.</p>
+          {AREE.filter(([id, label]) => id === "alimentazione" || id === "allenamento" || raw.aree.some((x) => x.k === label) || imp[id]?.mode === "escludi").map(([id, label, manualePossibile]) => {
+            const m = imp[id]?.mode || "auto";
+            return (
+              <div key={id} className="grid sm:grid-cols-[190px_1fr] gap-2 items-center py-2 border-b border-sky-50 text-[13px]">
+                <span className="text-slate-700">{label}</span>
+                <div className="flex flex-wrap items-center gap-y-1">
+                  <Segmento opzioni={manualePossibile ? [["auto", "Auto"], ["manuale", "Manuale"], ["escludi", "Escludi"]] : [["auto", "Auto"], ["escludi", "Escludi"]]} valore={m} onScegli={(k) => imposta(id, { mode: k })} />
+                  {m === "manuale" && <Segmento opzioni={[["si", "Rispettato"], ["parz", "Parzialmente"], ["no", "Non rispettato"]]} valore={imp[id]?.val || "parz"} onScegli={(k) => imposta(id, { val: k })} />}
+                  {m === "escludi" && <span className="text-[11px] text-slate-500">esclusa dall'indice</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
     </div>
   );
 }
