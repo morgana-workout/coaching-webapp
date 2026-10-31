@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { indiceEstetico } from "./ConsigliEstetica";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 /* Solo coach: indice di andamento in % per cliente, ultimi 30 giorni vs i 30 prima. Calcolo con soglie semplici (vedi commenti). */
@@ -141,7 +142,7 @@ function Segmento({ opzioni, valore, onScegli }) {
 
 const NOME_FASE = { cut: "deficit energetico (cut)", leanbulk: "surplus controllato (lean bulk)", recomp: "ricomposizione corporea (recomp)" };
 
-function DettaglioCorpo({ checkins, fase, punteggio, onChiudi }) {
+function DettaglioCorpo({ checkins, fase, punteggio, est, onChiudi }) {
   const ck = [...(checkins || [])].filter((c) => c.data_check && (c.peso_kg || c.ombelico_cm)).sort((a, b) => a.data_check.localeCompare(b.data_check));
   const dati = ck.map((c) => ({ data: c.data_check.slice(8, 10) + "/" + c.data_check.slice(5, 7), peso: c.peso_kg ? Number(c.peso_kg) : null, vita: c.ombelico_cm ? Number(c.ombelico_cm) : null }));
   const primo = ck[0], ultimo = ck[ck.length - 1];
@@ -187,6 +188,7 @@ function DettaglioCorpo({ checkins, fase, punteggio, onChiudi }) {
             </>
           )}
         </section>
+        {est && est.length >= 2 && <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Valutazione estetica guidata</p><p>Indice {est[est.length - 2].idx}% → {est[est.length - 1].idx}% ({est[est.length - 1].idx - est[est.length - 2].idx >= 0 ? "+" : ""}{est[est.length - 1].idx - est[est.length - 2].idx} punti): pelle/ritenzione, definizione, struttura, simmetrie e postura valutate sulle foto. Il punteggio del dominio è la media tra la risposta antropometrica (peso e circonferenza) e questa valutazione.</p></section>}
         <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Lettura</p>
           <p>{lettura}{fase ? " Fase impostata: " + NOME_FASE[fase] + "." : ""}</p></section>
         <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Su cosa lavorare</p>
@@ -203,6 +205,12 @@ export default function AndamentoCliente({ client, checkins }) {
   const [imp, setImp] = useState({});
   const [aperte, setAperte] = useState(false);
   const [dettaglio, setDettaglio] = useState(false);
+  const [est, setEst] = useState([]);
+  const caricaEst = async () => {
+    const { data } = await supabase.from("valutazione_estetica").select("data_check, voti").eq("client_id", client.id).order("data_check");
+    setEst((data || []).map((x) => ({ data: x.data_check, idx: indiceEstetico(x.voti) })).filter((x) => x.idx !== null));
+  };
+  useEffect(() => { caricaEst(); const h = () => caricaEst(); window.addEventListener("estetica-aggiornata", h); return () => window.removeEventListener("estetica-aggiornata", h); }, [client.id]);
   useEffect(() => {
     let vivo = true; setRaw(null); setImp({});
     (async () => {
@@ -233,7 +241,14 @@ export default function AndamentoCliente({ client, checkins }) {
     const m = imp[id]?.mode || "auto";
     if (m === "escludi") return [];
     if (m === "manuale" && manualePossibile) { const v = imp[id]?.val || "parz"; return [{ k: label, v: VAL_MANUALE[v], p: null, nota: "indicato da te: " + ETICHETTA_MANUALE[v].toLowerCase(), manuale: true }]; }
-    const r0 = raw.aree.find((x) => x.k === label);
+    let r0 = raw.aree.find((x) => x.k === label);
+    if (id === "corpo" && est.length >= 2) {
+      const a = est[est.length - 2], b = est[est.length - 1];
+      const es = Math.round(clamp(50 + 2.5 * (b.idx - a.idx)));
+      const notaE = "valutazione estetica " + a.idx + "% → " + b.idx + "%";
+      if (r0 && r0.v !== null) r0 = { ...r0, v: Math.round((r0.v + es) / 2), nota: r0.nota + " · " + notaE };
+      else r0 = { k: label, v: es, p: null, nota: notaE + " (solo valutazione guidata)" };
+    }
     return r0 ? [r0] : [];
   });
   const conDati = aree.filter((a) => a.v !== null);
@@ -311,7 +326,7 @@ export default function AndamentoCliente({ client, checkins }) {
         </div>
       )}
     </div>
-    {dettaglio && <DettaglioCorpo checkins={checkins} fase={raw.fase} punteggio={aree.find((x) => x.k === "Composizione corporea")?.v ?? null} onChiudi={() => setDettaglio(false)} />}
+    {dettaglio && <DettaglioCorpo est={est} checkins={checkins} fase={raw.fase} punteggio={aree.find((x) => x.k === "Composizione corporea")?.v ?? null} onChiudi={() => setDettaglio(false)} />}
     </div>
   );
 }

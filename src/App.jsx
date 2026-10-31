@@ -6,6 +6,7 @@ import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
 import MessaggioPronto from "./MessaggioPronto";
 import AndamentoCliente from "./AndamentoCliente";
+import { ConsigliProgramma, ValutazioneEstetica } from "./ConsigliEstetica";
 import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale, PrimoEUltimoCheck } from "./QuadroCliente";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
@@ -6198,6 +6199,10 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
           <AndamentoCliente client={client} checkins={checkins} />
+          <div className="grid lg:grid-cols-2 gap-4 items-start">
+            <ConsigliProgramma client={client} />
+            <ValutazioneEstetica client={client} checkins={checkins} />
+          </div>
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="space-y-3 min-w-0">
               <AttivitaClienti clients={[client]} singola />
