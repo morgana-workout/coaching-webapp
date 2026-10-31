@@ -1,0 +1,164 @@
+import React, { useState, useEffect, useRef } from "react";
+import { supabase } from "./supabaseClient";
+
+/* Solo coach: quadro generale della cliente, note rapide, traguardi e ultime notifiche, elenco laterale. */
+
+const dmy = (d) => (d ? d.split("-").reverse().join("/") : "");
+function durata(dataInizio) {
+  if (!dataInizio) return null;
+  const p = dataInizio.split("-");
+  const ini = new Date(+p[0], +p[1] - 1, +p[2]);
+  const giorni = Math.max(0, Math.floor((Date.now() - ini.getTime()) / 86400000));
+  if (giorni < 14) return giorni + (giorni === 1 ? " giorno" : " giorni");
+  if (giorni < 60) return Math.floor(giorni / 7) + " settimane";
+  const mesi = Math.round(giorni / 30.4);
+  if (mesi < 12) return mesi + " mesi";
+  const anni = Math.floor(mesi / 12), r = mesi % 12;
+  return anni + (anni === 1 ? " anno" : " anni") + (r ? " e " + r + " mesi" : "");
+}
+function giorniA(data) {
+  if (!data) return null;
+  const p = data.split("-");
+  return Math.round((new Date(+p[0], +p[1] - 1, +p[2], 12) - new Date()) / 86400000);
+}
+
+function Voce({ label, valore, sotto }) {
+  return (
+    <div className="text-center min-w-0">
+      <p className="text-[11px] text-slate-500">{label}</p>
+      <p className="text-[15px] font-semibold text-slate-800 truncate">{valore || "—"}</p>
+      {sotto && <p className="text-[11px] text-slate-500 truncate">{sotto}</p>}
+    </div>
+  );
+}
+
+export function QuadroGenerale({ client, checkins }) {
+  const [lezioni, setLezioni] = useState(null);
+  const [inizioReale, setInizioReale] = useState(null);
+  const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
+  const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
+  useEffect(() => {
+    if (isBulb && incluse) {
+      supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true).then(({ count }) => setLezioni(count ?? 0));
+    } else setLezioni(null);
+    setInizioReale(null);
+    if (!client.data_inizio) {
+      const ultimo = (checkins || []).map((c) => c.data_check).filter(Boolean).sort()[0];
+      setInizioReale(ultimo || (client.created_at ? client.created_at.slice(0, 10) : null));
+    }
+  }, [client.id, client.data_inizio]);
+  const inizio = client.data_inizio || inizioReale;
+  const ck = (checkins || [])[0];
+  const gCheck = ck?.data_check ? -giorniA(ck.data_check) : null;
+  const gScad = giorniA(client.data_scadenza);
+  const tipo = client.tipo_servizio === "ibrido" ? "Online + lezioni" : client.tipo_servizio === "presenza" ? "In presenza" : "Online";
+  const pacchetto = [client.piano, incluse ? incluse + " lezioni" : null].filter(Boolean).join(" · ") || tipo;
+  return (
+    <div className="bg-white border border-sky-200 rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <Voce label="Con me da" valore={durata(inizio)} sotto={inizio ? "dal " + dmy(inizio) : null} />
+      <Voce label="Pacchetto" valore={pacchetto} sotto={tipo} />
+      <Voce label="Scadenza" valore={client.data_scadenza ? dmy(client.data_scadenza).slice(0, 5) : null} sotto={gScad === null ? null : gScad < 0 ? "scaduto da " + (-gScad) + " gg" : gScad === 0 ? "oggi" : "tra " + gScad + " giorni"} />
+      <Voce label="Lezioni" valore={incluse ? (lezioni ?? 0) + " / " + incluse : null} sotto={incluse ? "fatte" : "non previste"} />
+      <Voce label="Ultimo check" valore={gCheck === null ? "mai" : gCheck <= 0 ? "oggi" : gCheck + " gg fa"} sotto={ck?.peso_kg ? ck.peso_kg + " kg" : null} />
+      <Voce label="Telefono" valore={client.telefono || null} sotto={client.email || null} />
+    </div>
+  );
+}
+
+export function NoteRapide({ client }) {
+  const [testo, setTesto] = useState("");
+  const [stato, setStato] = useState("");
+  const pronto = useRef(false);
+  const timer = useRef(null);
+  useEffect(() => {
+    pronto.current = false; setTesto(""); setStato("");
+    supabase.from("note_rapide_coach").select("testo").eq("client_id", client.id).maybeSingle().then(({ data }) => {
+      setTesto(data?.testo || ""); pronto.current = true;
+    });
+  }, [client.id]);
+  const cambia = (v) => {
+    setTesto(v); setStato("");
+    if (!pronto.current) return;
+    clearTimeout(timer.current);
+    const id = client.id;
+    timer.current = setTimeout(async () => {
+      const { error } = await supabase.from("note_rapide_coach").upsert({ client_id: id, testo: v, updated_at: new Date().toISOString() });
+      setStato(error ? "Non salvato, riprova" : "Salvato ✓");
+    }, 800);
+  };
+  return (
+    <div>
+      <textarea value={testo} onChange={(e) => cambia(e.target.value)} rows={5} placeholder={"Le tue note su " + client.nome + "… (si salvano da sole)"} className="w-full text-[13px] leading-relaxed text-slate-800 bg-sky-50/50 border border-sky-200 rounded-xl px-3 py-2" />
+      {stato && <p className="text-[11px] text-slate-500 mt-1">{stato}</p>}
+    </div>
+  );
+}
+
+export function TraguardiENotifiche({ client }) {
+  const [tr, setTr] = useState(null);
+  const [nt, setNt] = useState(null);
+  useEffect(() => {
+    setTr(null); setNt(null);
+    (async () => {
+      const { data } = await supabase.from("notifiche").select("tipo, proposta_luogo, messaggio, stato, created_at").eq("client_id", client.id).order("created_at", { ascending: false }).limit(60);
+      const righe = data || [];
+      setTr(righe.filter((n) => (n.proposta_luogo || "").startsWith("auto_traguardo")).slice(0, 6));
+      setNt(righe.slice(0, 6));
+    })();
+  }, [client.id]);
+  const titolo = (n) => {
+    const m = n.proposta_luogo || "";
+    if (n.tipo === "proposta_lezione") return "Proposta di orario";
+    if (m.startsWith("promemoria_pacchetto")) return "Pacchetto in scadenza";
+    if (m.startsWith("promemoria_check")) return "Check in arrivo";
+    if (m.startsWith("auto_check")) return "Check ricevuto";
+    if (m.startsWith("auto_pacchetto")) return "Pacchetto quasi finito";
+    if (m.startsWith("auto_traguardo_record")) return "Nuovo record";
+    if (m.startsWith("auto_traguardo_streak")) return "Costanza";
+    if (m.startsWith("lez_")) return "Lezione";
+    return "Nota";
+  };
+  const data = (s) => new Date(s).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" });
+  const Box = ({ titolo: t, righe, vuoto, cosa }) => (
+    <div className="bg-white border border-sky-200 rounded-2xl p-4">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">{t}</p>
+      {righe === null ? <p className="text-xs text-slate-400">Carico…</p> : righe.length === 0 ? <p className="text-sm text-slate-400">{vuoto}</p> : (
+        <ul className="space-y-1.5">{righe.map((n, i) => (
+          <li key={i} className="text-[13px] text-slate-700"><span className="text-slate-400 text-[11px] mr-2">{data(n.created_at)}</span><span className="font-medium">{titolo(n)}</span>{cosa && n.messaggio ? <span className="text-slate-500"> — {n.messaggio.length > 70 ? n.messaggio.slice(0, 70) + "…" : n.messaggio}</span> : null}</li>
+        ))}</ul>
+      )}
+    </div>
+  );
+  return (
+    <div className="grid lg:grid-cols-2 gap-4">
+      <Box titolo="Traguardi log allenamento" righe={tr} vuoto="Ancora nessun traguardo registrato" cosa />
+      <Box titolo="Ultime notifiche inviate alla cliente" righe={nt} vuoto="Nessuna notifica inviata" />
+    </div>
+  );
+}
+
+export function ElencoLaterale({ clients, attivoId, onSelect }) {
+  const [q, setQ] = useState("");
+  const [nuovi, setNuovi] = useState({});
+  useEffect(() => {
+    const carica = async () => {
+      try {
+        const { data } = await supabase.from("messaggi").select("client_id").eq("mittente", "cliente").eq("letto", false).eq("nascosto_coach", false);
+        const m = {}; (data || []).forEach((r) => { m[r.client_id] = (m[r.client_id] || 0) + 1; }); setNuovi(m);
+      } catch (e) { /* ignora */ }
+    };
+    carica(); const t = setInterval(carica, 20000); return () => clearInterval(t);
+  }, []);
+  const lista = clients.filter((c) => !c.archiviato && (!q || (c.nome + " " + (c.cognome || "")).toLowerCase().includes(q.toLowerCase())));
+  return (
+    <aside className="hidden lg:block w-56 flex-shrink-0 bg-white border-r border-sky-100 sticky top-0 h-screen overflow-y-auto p-3">
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca cliente" className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-[13px] mb-2" />
+      {lista.map((c) => (
+        <button key={c.id} onClick={() => onSelect(c.id)} className={`w-full flex items-center justify-between text-left px-3 py-1.5 rounded-lg text-[13px] mb-0.5 ${c.id === attivoId ? "bg-sky-100 text-sky-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+          <span className="truncate">{c.nome} {c.cognome ? c.cognome[0] + "." : ""}</span>
+          {nuovi[c.id] ? <span className="bg-slate-800 text-white rounded-full px-1.5 text-[10px]">{nuovi[c.id]}</span> : null}
+        </button>
+      ))}
+    </aside>
+  );
+}

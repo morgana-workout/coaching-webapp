@@ -5,6 +5,7 @@ import DiarioKcal from "./DiarioKcal";
 import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
 import MessaggioPronto from "./MessaggioPronto";
+import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale } from "./QuadroCliente";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
@@ -185,9 +186,9 @@ function Spinner() {
 }
 const STATO_LABEL = {
   programmato: { t: "Programmato", c: "bg-sky-100 text-sky-700" },
-  da_compilare: { t: "Da compilare", c: "bg-amber-100 text-amber-700" },
+  da_compilare: { t: "Da compilare", c: "bg-slate-100 text-slate-700" },
   ricevuto: { t: "In revisione", c: "bg-violet-100 text-violet-700" },
-  revisionato: { t: "Revisionato", c: "bg-emerald-100 text-emerald-700" },
+  revisionato: { t: "Revisionato", c: "bg-sky-100 text-sky-700" },
 };
 function StatoBadge({ stato }) {
   const s = STATO_LABEL[stato] || { t: stato || "—", c: "bg-slate-100 text-slate-500" };
@@ -217,7 +218,7 @@ function Login({ erroreLink }) {
     <div className="min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
         {erroreLink && (
-          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-xl px-4 py-3 mb-5">
+          <div className="bg-slate-800/10 border border-slate-800/30 text-slate-400 text-sm rounded-xl px-4 py-3 mb-5">
             Il link che hai usato non è più valido o è scaduto ({erroreLink}). Chiedi a Morgana di inviartene uno nuovo, poi accedi qui sotto con la password che avevi già impostato.
           </div>
         )}
@@ -242,7 +243,7 @@ function Login({ erroreLink }) {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
               />
-              {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+              {errore && <p className="text-slate-600 text-xs">{errore}</p>}
               <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
                 {caricando ? "Accesso in corso..." : "Accedi"}
               </button>
@@ -357,7 +358,7 @@ function Registrazione({ onTornaAlLogin }) {
         <input type="password" placeholder="Conferma password" value={confermaPassword} required onChange={(e) => setConfermaPassword(e.target.value)} className={campoClass} />
       </div>
 
-      {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-600 text-xs">{errore}</p>}
       <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
         {caricando ? "Creo l'account..." : "Crea account"}
       </button>
@@ -550,7 +551,7 @@ function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
           <p className="text-slate-400 text-sm">Caricamento...</p>
         ) : richiesta ? (
           <div className="space-y-3">
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-3 text-sm text-amber-800 space-y-1">
+            <div className="bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-3 text-sm text-slate-800 space-y-1">
               <p className="font-medium">Hai chiesto di spostarla a {fmt(richiesta.data)} · {richiesta.ora?.slice(0, 5)}</p>
               {richiesta.luogo && <p className="text-xs">{richiesta.luogo}</p>}
               <p className="text-xs">In attesa di Morgana 🫶🏻 Fino alla sua risposta resta valida la lezione di prima.</p>
@@ -626,7 +627,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
       <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min)</p>
       <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
       {extra && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 text-xs">
+        <div className="bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-xs">
           Questa lezione in presenza ha un costo aggiuntivo se non hai acquistato in precedenza un pacchetto lezioni.
         </div>
       )}
@@ -785,14 +786,15 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         <Card className="px-3.5 py-2.5">
           <div className="flex items-center justify-between">
             <span className="text-slate-500 text-[11px] uppercase tracking-wide font-medium">Prossimo check</span>
-            <StatoBadge stato={client.stato_check} />
+            <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Chat</button>
+          <StatoBadge stato={client.stato_check} />
           </div>
           <div className="flex items-baseline justify-between mt-0.5">
             <p className="text-xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
             <p className="text-slate-400 text-[11px]">Ultimo: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
           </div>
           {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
-            <p className="text-rose-500 text-xs font-medium mt-0.5">Scaduto: invia il tuo check</p>
+            <p className="text-slate-800 text-xs font-medium mt-0.5">Scaduto: invia il tuo check</p>
           )}
         </Card>
       )}
@@ -809,7 +811,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
           ) : prossimaLezione ? (
             <p className="text-2xl font-semibold text-slate-800 mt-2">
               {prossimaLezione.data.split("-").reverse().join("/")}{prossimaLezione.ora ? ` · ${prossimaLezione.ora.slice(0, 5)}` : ""}
-              {prossimaLezione.stato === "richiesta" && <span className="block text-amber-600 text-sm font-normal mt-1">Da confermare</span>}
+              {prossimaLezione.stato === "richiesta" && <span className="block text-slate-600 text-sm font-normal mt-1">Da confermare</span>}
             </p>
           ) : (
             <p className="text-slate-500 text-sm mt-2">Nessuna lezione ancora programmata.</p>
@@ -847,7 +849,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                         <span>Modifica ›</span>
                       </button>
                     )}
-                    {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
+                    {rimaste <= 2 && <p className="text-slate-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
                   </>
                 )}
               </>
@@ -857,7 +859,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       )}
 
       {client.stato_pacchetto === "in scadenza" && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 text-sm">
+        <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 text-sm">
           <AlertCircle size={18} />
           Il tuo coaching scade il {client.data_scadenza}
         </div>
@@ -870,7 +872,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
               className="relative bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-3 flex items-center gap-2.5 text-left active:bg-slate-50">
               <span className="relative text-sky-500">
                 <m.icon size={18} strokeWidth={1.6} />
-                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
+                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
               </span>
               <span className="font-medium text-slate-800 text-[13px] leading-tight">{m.label}</span>
             </button>
@@ -911,7 +913,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
           <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
         )}
         {inviata && (
-          <p className="text-emerald-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
+          <p className="text-sky-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
         )}
       </div>
 
@@ -1012,7 +1014,7 @@ function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
   if (attive) {
     return (
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-emerald-600">🔔 Notifiche attive su questo telefono</p>
+        <p className="text-xs text-sky-600">🔔 Notifiche attive su questo telefono</p>
         <button onClick={disattiva} className="text-[11px] text-slate-400 underline">Disattiva</button>
       </div>
     );
@@ -1022,7 +1024,7 @@ function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
       <p className="text-sm font-medium text-slate-700">🔔 {ruolo === "coach" ? "Notifiche sul telefono" : "Non perderti nulla ✨"}</p>
       <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check, richieste di lezione, record e carichi in calo." : "Attiva le notifiche: ti avviso io quando ti scrivo, quando fai un record e prima delle tue lezioni 🫶🏻"}</p>
       <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
     </Card>
   );
 }
@@ -1143,7 +1145,7 @@ function ClientCheckin({ client, onInviato }) {
   if (inviato) {
     return (
       <div className="px-5 pt-16 flex flex-col items-center text-center">
-        <CheckCircle2 className="text-emerald-500 mb-4" size={48} />
+        <CheckCircle2 className="text-sky-500 mb-4" size={48} />
         <h2 className="text-lg font-semibold text-slate-800">Check inviato, grazie! 🫶🏻</h2>
         <p className="text-slate-500 text-sm mt-2">Guardo i tuoi dati con calma e ti scrivo presto ✨💪🏻</p>
       </div>
@@ -1198,7 +1200,7 @@ function ClientCheckin({ client, onInviato }) {
         {slider("Aderenza all'allenamento", "aderenza_allenamento")}
       </Card>
       <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi <span className="text-rose-400 normal-case font-normal">(obbligatorie)</span></p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi <span className="text-slate-600 normal-case font-normal">(obbligatorie)</span></p>
         <FotoInputs files={files} setFiles={setFiles} />
       </Card>
       <Card className="p-4 space-y-2">
@@ -1207,7 +1209,7 @@ function ClientCheckin({ client, onInviato }) {
           onChange={(e) => setNotaFinale(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300" rows={3} />
       </Card>
-      {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+      {errore && <p className="text-slate-800 text-sm">{errore}</p>}
       <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white font-medium rounded-xl py-3">
         {inviando ? "Invio in corso..." : "Invia check"}
       </button>
@@ -1603,14 +1605,14 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
           <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => `${v}%`} width={40} />
           <Tooltip formatter={(v) => (v == null ? "—" : `${v}%`)} />
           <Line type="monotone" dataKey="pesoPct" name="Peso" stroke="#0ea5e9" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-          <Line type="monotone" dataKey="vitaPct" name="Vita" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-          <Line type="monotone" dataKey="muscoloPct" name="Braccio/coscia" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+          <Line type="monotone" dataKey="vitaPct" name="Vita" stroke="#94a3b8" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+          <Line type="monotone" dataKey="muscoloPct" name="Braccio/coscia" stroke="#27466D" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
         </LineChart>
       </ResponsiveContainer>
       <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Peso</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Vita</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Braccio/coscia</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Vita</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Braccio/coscia</span>
       </div>
       <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{sottotitolo && !vediTutto ? " in questa finestra" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
     </Card>
@@ -1678,8 +1680,8 @@ function ProgressiCarichi({ clientId }) {
         </Card>
       )}
       {inCalo.length > 0 && (
-        <Card className="p-4 bg-amber-50 border-amber-100 space-y-1.5">
-          <p className="text-xs uppercase tracking-wide text-amber-700 font-medium">Da tenere d'occhio 👀</p>
+        <Card className="p-4 bg-slate-100 border-slate-100 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-slate-700 font-medium">Da tenere d'occhio 👀</p>
           {inCalo.map((e) => (
             <p key={e.nome} className="text-sm text-slate-700"><span className="font-semibold">{e.nome}</span>: {fmt(e.scorsa)} → {fmt(e.ultimo)} kg ({fmt(e.diffScorsa)} kg rispetto alla volta scorsa)</p>
           ))}
@@ -1695,12 +1697,12 @@ function ProgressiCarichi({ clientId }) {
           <button onClick={() => setAperto(aperto === e.nome ? null : e.nome)} className="w-full text-left">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium text-slate-700 text-sm">{e.nome}{e.recordRecente ? " 🏆" : ""}</p>
-              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-sky-100 text-sky-700" : e.diff < 0 ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500"}`}>
                 {e.sessioni < 2 ? "1ª sessione" : `${e.diff > 0 ? "+" : ""}${fmt(e.diff)} kg`}
               </span>
             </div>
             <p className="text-slate-500 text-xs mt-1">{fmt(e.primo)} kg → {fmt(e.ultimo)} kg · massimo {fmt(e.max)} kg · {e.sessioni} {e.sessioni === 1 ? "sessione" : "sessioni"}</p>
-            {e.diffScorsa != null && <p className={`text-xs mt-0.5 ${e.diffScorsa > 0 ? "text-emerald-600" : e.diffScorsa < 0 ? "text-amber-600" : "text-slate-400"}`}>Rispetto alla volta scorsa: {e.diffScorsa > 0 ? "+" : ""}{fmt(e.diffScorsa)} kg</p>}
+            {e.diffScorsa != null && <p className={`text-xs mt-0.5 ${e.diffScorsa > 0 ? "text-sky-600" : e.diffScorsa < 0 ? "text-slate-600" : "text-slate-400"}`}>Rispetto alla volta scorsa: {e.diffScorsa > 0 ? "+" : ""}{fmt(e.diffScorsa)} kg</p>}
           </button>
           {aperto === e.nome && e.serie.length > 1 && (
             <div style={{ width: "100%", height: 150 }} className="mt-2">
@@ -1893,7 +1895,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                     <div>
                       <textarea value={note[c?.id] || ""} onChange={(e) => setNote((n) => ({ ...n, [c.id]: e.target.value }))} onBlur={() => c && salvaNota(c)} rows={3}
                         placeholder="Nota per la cliente su questo check..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
-                      {salvata === c?.id && <p className="text-emerald-600 text-[11px]">Nota salvata ✓</p>}
+                      {salvata === c?.id && <p className="text-sky-600 text-[11px]">Nota salvata ✓</p>}
                     </div>
                   ) : (c?.nota_foto_coach && (
                     <div className="bg-sky-50 border border-sky-100 rounded-lg px-2 py-1.5">
@@ -1910,7 +1912,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                 <button onClick={() => setPerCheck((p) => ({ ...p, [a?.id]: VISTA0, [b?.id]: VISTA0 }))} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione di queste due foto</button>
                 <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Zoom e posizione restano legati a ogni check: se cambi data e poi ci ritorni li ritrovi. Ricorda di premere Salva. Tocca una foto per aprirla a schermo intero.</p>
                 <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
-                {salvaMsg && <p className="text-emerald-600 text-[11px] text-center">{salvaMsg}</p>}
+                {salvaMsg && <p className="text-sky-600 text-[11px] text-center">{salvaMsg}</p>}
                 <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
               </div>
             ) : <p className="text-[11px] text-slate-400 text-center">Scegli le due date che vuoi confrontare. Tocca una foto per aprirla a schermo intero.</p>}
@@ -2008,7 +2010,7 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   const ordinati = [...conKcal].sort((x, y) => dataCiclo(x).localeCompare(dataCiclo(y)));
   const num = (v) => (v == null ? null : Number(v));
   const delta = (corrente, precedente) => (corrente == null || precedente == null ? null : corrente - precedente);
-  const Freccia = ({ d, unita = "" }) => d == null || d === 0 ? null : <span className={`text-[10px] ml-0.5 ${d > 0 ? "text-emerald-600" : "text-rose-600"}`}>{d > 0 ? "▲" : "▼"}{Math.abs(d)}{unita}</span>;
+  const Freccia = ({ d, unita = "" }) => d == null || d === 0 ? null : <span className={`text-[10px] ml-0.5 ${d > 0 ? "text-sky-600" : "text-slate-800"}`}>{d > 0 ? "▲" : "▼"}{Math.abs(d)}{unita}</span>;
   const primo = ordinati[0], ultimo = ordinati[ordinati.length - 1];
   const variazione = (campo) => delta(num(ultimo[campo]), num(primo[campo]));
   const fmtVar = (d, unita) => (d == null ? "—" : d === 0 ? "invariati" : `${d > 0 ? "+" : ""}${d}${unita}`);
@@ -2053,8 +2055,8 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
         <>
           <div className="flex gap-3 text-[11px] text-slate-600">
             <span><i className="inline-block w-2 h-2 rounded-full bg-sky-500 mr-1" />Proteine</span>
-            <span><i className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1" />Carboidrati</span>
-            <span><i className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-1" />Grassi</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-sky-500 mr-1" />Carboidrati</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-slate-500 mr-1" />Grassi</span>
           </div>
           <div style={{ width: "100%", height: 170 }}>
             <ResponsiveContainer>
@@ -2064,8 +2066,8 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
                 <YAxis tick={{ fontSize: 10 }} width={34} domain={["dataMin - 10", "dataMax + 10"]} />
                 <Tooltip />
                 <Line type="monotone" dataKey="Proteine" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                <Line type="monotone" dataKey="Carboidrati" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                <Line type="monotone" dataKey="Grassi" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="Carboidrati" stroke="#27466D" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="Grassi" stroke="#94a3b8" strokeWidth={2} dot={{ r: 3 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -2106,7 +2108,7 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
                     return <span className="text-slate-500 text-xs text-right">P{r.proteine_g ?? "—"}<Freccia d={pr ? delta(num(r.proteine_g), num(pr.proteine_g)) : null} /> C{r.carboidrati_g ?? "—"}<Freccia d={pr ? delta(num(r.carboidrati_g), num(pr.carboidrati_g)) : null} /> G{r.grassi_g ?? "—"}<Freccia d={pr ? delta(num(r.grassi_g), num(pr.grassi_g)) : null} /></span>;
                   })()}
                 </Riga>
-                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-red-500 px-1.5 flex-shrink-0">🗑</button>}
+                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-slate-800 px-1.5 flex-shrink-0">🗑</button>}
               </li>
             );
           })}
@@ -2132,8 +2134,8 @@ function ClientNutrizione({ piano, storico }) {
   }
   const macro = [
     { label: "Proteine", val: piano.proteine_g, color: "bg-sky-500" },
-    { label: "Carboidrati", val: piano.carboidrati_g, color: "bg-emerald-500" },
-    { label: "Grassi", val: piano.grassi_g, color: "bg-amber-500" },
+    { label: "Carboidrati", val: piano.carboidrati_g, color: "bg-sky-500" },
+    { label: "Grassi", val: piano.grassi_g, color: "bg-slate-500" },
   ];
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
@@ -2424,10 +2426,10 @@ function LibreriaEserciziCoach() {
           <CampoEs edit={edit} setEdit={setEdit} label="Movimento e ROM" k="movimento" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Errori comuni" k="errori" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Parole chiave" k="parole_chiave" righe={2} hint="Separate da virgola. Servono a collegare l'esercizio al nome scritto nella scheda della cliente." />
-          {errore && <p className="text-rose-600 text-sm">{errore}</p>}
+          {errore && <p className="text-slate-800 text-sm">{errore}</p>}
           <div className="flex gap-2">
             <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-3 text-sm font-medium disabled:opacity-50">{salvando ? "Salvo..." : "Salva"}</button>
-            {edit.id && <button onClick={elimina} className="px-4 rounded-xl border border-rose-200 text-rose-600 text-sm">Elimina</button>}
+            {edit.id && <button onClick={elimina} className="px-4 rounded-xl border border-slate-300 text-slate-800 text-sm">Elimina</button>}
           </div>
         </Card>
       </div>
@@ -2437,15 +2439,15 @@ function LibreriaEserciziCoach() {
   return (
     <div className="space-y-3">
       {nuove.length > 0 && (
-        <Card className="p-4 space-y-2 border-amber-200 bg-amber-50">
-          <p className="text-sm font-semibold text-amber-800">Video richiesti dalle clienti ({nuove.length})</p>
+        <Card className="p-4 space-y-2 border-slate-200 bg-slate-100">
+          <p className="text-sm font-semibold text-slate-800">Video richiesti dalle clienti ({nuove.length})</p>
           {nuove.map((r) => (
             <div key={r.id} className="bg-white rounded-xl px-3 py-2 text-sm">
               <p className="text-slate-800">{r.testo}</p>
               <p className="text-[11px] text-slate-400">{r.clients ? `${r.clients.nome} ${r.clients.cognome || ""}` : ""} · {new Date(r.created_at).toLocaleDateString("it-IT")}</p>
               <div className="flex gap-3 mt-1">
                 <button onClick={() => nuovo(r.testo)} className="text-xs text-sky-600 font-medium">Aggiungi alla libreria</button>
-                <button onClick={() => segnaFatta(r.id)} className="text-xs text-emerald-600 font-medium">Fatto</button>
+                <button onClick={() => segnaFatta(r.id)} className="text-xs text-sky-600 font-medium">Fatto</button>
                 <button onClick={() => eliminaRichiesta(r.id)} className="text-xs text-slate-400">Elimina</button>
               </div>
             </div>
@@ -2464,8 +2466,8 @@ function LibreriaEserciziCoach() {
             <p className="text-xs text-slate-400">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
           </div>
           <span className="flex flex-col items-end gap-1 flex-shrink-0">
-            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : e.senza_video ? "video non necessario" : "senza video"}</span>
-            {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">descrizioni da completare</span>}
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : e.senza_video ? "video non necessario" : "senza video"}</span>
+            {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">descrizioni da completare</span>}
           </span>
         </button>
       ))}
@@ -2491,7 +2493,7 @@ function RichiediVideoEsercizio({ clientId }) {
       <p className="text-xs text-slate-500">Scrivi il nome dell'esercizio e Morgana lo aggiungerà.</p>
       <input value={testo} onChange={(e) => { setTesto(e.target.value); setMsg(""); }} placeholder="Es. Hip thrust al multipower" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
       <button onClick={invia} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Richiedi video</button>
-      {msg && <p className="text-xs text-emerald-600">{msg}</p>}
+      {msg && <p className="text-xs text-sky-600">{msg}</p>}
     </Card>
   );
 }
@@ -2649,7 +2651,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
                   ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-white/70 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
                 </div>
-                {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+                {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-slate-800 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
               </div>
             );
           })}
@@ -2700,7 +2702,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       {isAdmin && <>
                       <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
                       <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
-                      <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
+                      <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-slate-800 px-0.5 flex-shrink-0"><X size={14} /></button>
                       </>}
                     </div>
                     {(es.serie || es.ripetizioni) && (
@@ -2821,7 +2823,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
                             className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
                         ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-teal-50/60 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
                       </div>
-                      {isAdmin && <button onClick={() => elimina(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+                      {isAdmin && <button onClick={() => elimina(es.id)} className="text-slate-300 hover:text-slate-800 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
                     </div>
                   );
                 })}
@@ -3060,7 +3062,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                 {etichetta}
               </button>
               {isAdmin && (
-                <button onClick={() => eliminaGiorno(g.id)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-rose-500 flex items-center justify-center">
+                <button onClick={() => eliminaGiorno(g.id)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-800 flex items-center justify-center">
                   <X size={9} />
                 </button>
               )}
@@ -3078,7 +3080,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
             {importando ? "Importo..." : "📥 Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)"}
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
           </label>
-          <label className={`w-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+          <label className={`w-full border border-slate-200 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
             🔄 Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) sostituisciConNuovaScheda(e.target.files[0]); e.target.value = ""; }} />
           </label>
@@ -3179,11 +3181,11 @@ function NotificheCliente({ client }) {
               {n.messaggio && <p className="text-slate-500 text-xs">{n.messaggio}</p>}
               {n.stato === "inviata" ? (
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => accetta(n)} className="flex-1 bg-emerald-500 text-white text-xs font-medium rounded-lg py-2">Accetta</button>
-                  <button onClick={() => rifiuta(n)} className="flex-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                  <button onClick={() => accetta(n)} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">Accetta</button>
+                  <button onClick={() => rifiuta(n)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
                 </div>
               ) : (
-                <Badge className={n.stato === "accettata" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}>{n.stato === "accettata" ? "Accettata" : "Rifiutata"}</Badge>
+                <Badge className={n.stato === "accettata" ? "bg-sky-100 text-sky-700" : "bg-slate-200 text-slate-800"}>{n.stato === "accettata" ? "Accettata" : "Rifiutata"}</Badge>
               )}
             </>
           ) : (
@@ -3236,10 +3238,10 @@ function LeMieLezioni({ client }) {
   };
 
   const STATO_LEZIONE = {
-    richiesta: { t: "Da confermare", c: "bg-amber-100 text-amber-700" },
-    confermato: { t: "Confermata", c: "bg-emerald-100 text-emerald-700" },
+    richiesta: { t: "Da confermare", c: "bg-slate-100 text-slate-700" },
+    confermato: { t: "Confermata", c: "bg-sky-100 text-sky-700" },
     annullata: { t: "Annullata", c: "bg-slate-100 text-slate-500" },
-    persa: { t: "Persa", c: "bg-rose-100 text-rose-700" },
+    persa: { t: "Persa", c: "bg-slate-200 text-slate-800" },
   };
 
   if (caricando) return <Spinner />;
@@ -3264,7 +3266,7 @@ function LeMieLezioni({ client }) {
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
               {e.stato === "confermato" && <button onClick={() => setSheet(e)} className="text-sky-600 text-xs font-medium flex-shrink-0">Sposta</button>}
-              <button onClick={() => annulla(e)} className="text-rose-500 text-xs font-medium flex-shrink-0">Annulla</button>
+              <button onClick={() => annulla(e)} className="text-slate-800 text-xs font-medium flex-shrink-0">Annulla</button>
             </Card>
           ))}
         </div>
@@ -3346,7 +3348,7 @@ function ChatBolla({ chiave, conteggio = 0, titolo, onChiudi, children }) {
           style={{ position: "fixed", left: pos.x, top: pos.y, width: DIM, height: DIM, zIndex: 60, touchAction: "none" }}
           className="rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/40 flex items-center justify-center">
           <MessageCircle size={26} strokeWidth={1.75} />
-          {conteggio > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center border-2 border-slate-50">{conteggio}</span>}
+          {conteggio > 0 && <span className="absolute -top-1 -right-1 bg-slate-800 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center border-2 border-slate-50">{conteggio}</span>}
         </button>
       )}
       {aperta && (
@@ -3458,6 +3460,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
     ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
+    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
 
   return (
@@ -3482,6 +3485,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
+        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
         {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioAllenamento clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
@@ -3490,11 +3494,6 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
-      {!anteprima && client && (
-        <ChatBolla chiave={`c_${client.id}`} conteggio={chatNonLetti} titolo="Chat con Morgana" onChiudi={contaChat}>
-          <ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} />
-        </ChatBolla>
-      )}
     </div>
   );
 }
@@ -3603,7 +3602,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
         <label className="text-xs text-slate-500 block mb-1">Foto progressi</label>
         <FotoInputs files={files} setFiles={setFiles} />
       </div>
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : checkin ? "Salva modifiche" : "Salva check"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -3745,9 +3744,9 @@ function AnteprimaCliente({ client }) {
       <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">👁 Vedi l’app come la vede {client.nome}</button>
       {aperta && createPortal(
         <div className="fixed inset-0 z-[90] bg-slate-200 flex flex-col">
-          <div className="flex-shrink-0 bg-amber-100 text-amber-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
+          <div className="flex-shrink-0 bg-slate-100 text-slate-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
             <span>👁 Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
-            <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-amber-300 rounded-lg px-3 py-1 font-medium">Esci</button>
+            <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-slate-300 rounded-lg px-3 py-1 font-medium">Esci</button>
           </div>
           <div className="flex-1 min-h-0 [&>div]:!h-full"><ClientApp session={null} anteprima={client} /></div>
         </div>,
@@ -3782,7 +3781,7 @@ function NotificheDellaCliente({ client }) {
   if (righe === null) return <Spinner />;
   const m = (n) => n.proposta_luogo || "";
   const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : m(n).startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : m(n).startsWith("promemoria_check") ? "Promemoria: check in arrivo" : m(n).startsWith("auto_check") ? "Check ricevuto ✨" : m(n).startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : m(n).startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : m(n).startsWith("auto_traguardo_streak") ? "Costanza 🔥" : m(n).startsWith("auto_") ? "Messaggio automatico" : m(n).startsWith("lez_prom") ? "Promemoria lezione" : m(n).startsWith("lez_mod") ? "Lezione spostata" : m(n).startsWith("lez_nuova") ? "Nuova lezione" : "Nota";
-  const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-emerald-100 text-emerald-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-rose-100 text-rose-700" } : { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+  const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-slate-100 text-slate-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-sky-100 text-sky-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-slate-200 text-slate-800" } : { t: "Vista", c: "bg-sky-100 text-sky-700" };
   const nuove = righe.filter((n) => n.stato === "inviata");
   const vecchie = righe.filter((n) => n.stato !== "inviata");
   const Riga = ({ n }) => {
@@ -4098,8 +4097,8 @@ function AccontoDaSaldare({ p, onSalvato }) {
   return (
     <div className="flex items-center gap-1 flex-shrink-0">
       <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="acconto €"
-        className="w-20 border border-amber-300 rounded-lg px-1.5 py-1 text-[11px]" />
-      <button onClick={registra} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={14} /></button>
+        className="w-20 border border-slate-300 rounded-lg px-1.5 py-1 text-[11px]" />
+      <button onClick={registra} disabled={salvando} className="text-sky-600 flex-shrink-0"><Check size={14} /></button>
     </div>
   );
 }
@@ -4214,7 +4213,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
       <button onClick={registra} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
         {salvando ? "Registro..." : isGratuito ? "Imposta come gratuito" : "Registra pagamento"}
       </button>
-      {fatto && <p className="text-emerald-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : aggiornaScadenza ? "Pagamento registrato e scadenza aggiornata." : "Pagamento registrato."}</p>}
+      {fatto && <p className="text-sky-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : aggiornaScadenza ? "Pagamento registrato e scadenza aggiornata." : "Pagamento registrato."}</p>}
       {pagamenti.length > 0 && (
         <div className="pt-2 border-t border-slate-100">
           <p className="text-slate-400 text-xs mb-1">Storico pagamenti</p>
@@ -4225,11 +4224,11 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                   <span className="flex-1 min-w-0">
                     <span className="font-medium">{p.data_pagamento}</span> — {p.tipo_piano}
                     {p.importo != null && ` · ${Number(p.importo).toFixed(2)}€`}
-                    {p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" && p.importo != null ? <span className="text-amber-600"> · metodo mancante</span> : null)}
+                    {p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" && p.importo != null ? <span className="text-slate-600"> · metodo mancante</span> : null)}
                     {p.note && <span className="text-slate-400"> — {p.note}</span>}
                   </span>
                   {p.stato && (
-                    <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                    <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-700"}`}>
                       {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                     </button>
                   )}
@@ -4237,12 +4236,12 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                   {p.importo != null && p.stato !== "spesa" && (
                     <button onClick={() => setRicevutaPer(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-500 px-0.5"><FileText size={13} /></button>
                   )}
-                  <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
+                  <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-800 px-0.5"><X size={13} /></button>
                 </div>
                 {p.stato === "da_saldare" && p.importo != null && (
                   <div className="flex items-center gap-2 pl-1">
                     {Number(p.importo_saldato) > 0 && (
-                      <span className="text-[11px] text-emerald-600">saldati {Number(p.importo_saldato).toFixed(2)}€, restano {(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€</span>
+                      <span className="text-[11px] text-sky-600">saldati {Number(p.importo_saldato).toFixed(2)}€, restano {(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€</span>
                     )}
                     <AccontoDaSaldare p={p} onSalvato={onRegistrato} />
                   </div>
@@ -4320,7 +4319,7 @@ function InvitaClienteForm({ client, onInvitato }) {
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="grid grid-cols-1 gap-2">
-        <button onClick={() => { setMostraImposta((v) => !v); setErrore(""); setLink(""); }} className="bg-emerald-500 text-white text-sm font-medium rounded-lg py-2">
+        <button onClick={() => { setMostraImposta((v) => !v); setErrore(""); setLink(""); }} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
           {mostraImposta ? "Annulla" : "Imposta tu la password (senza link)"}
         </button>
         <button onClick={() => generaLink("crea")} disabled={!!generando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
@@ -4331,15 +4330,15 @@ function InvitaClienteForm({ client, onInvitato }) {
         </button>
       </div>
       {mostraImposta && (
-        <form onSubmit={impostaPassword} className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+        <form onSubmit={impostaPassword} className="bg-sky-50 border border-sky-200 rounded-lg p-3 space-y-2">
           <input type="password" placeholder="Nuova password (almeno 6 caratteri)" value={nuovaPassword} onChange={(e) => setNuovaPassword(e.target.value)}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           <input type="password" placeholder="Ripeti la password" value={confermaPassword} onChange={(e) => setConfermaPassword(e.target.value)}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          <button disabled={generando === "imposta"} className="w-full bg-emerald-600 text-white text-sm font-medium rounded-lg py-2">
+          <button disabled={generando === "imposta"} className="w-full bg-sky-600 text-white text-sm font-medium rounded-lg py-2">
             {generando === "imposta" ? "Salvo..." : "Salva questa password per la cliente"}
           </button>
-          <p className="text-emerald-700 text-[11px]">Funziona sia se la cliente ha già un account con questa email (le cambia la password), sia se non ce l'ha ancora (glielo crea). Comunicagliela tu, di persona o come preferisci: qui non parte nessuna email.</p>
+          <p className="text-sky-700 text-[11px]">Funziona sia se la cliente ha già un account con questa email (le cambia la password), sia se non ce l'ha ancora (glielo crea). Comunicagliela tu, di persona o come preferisci: qui non parte nessuna email.</p>
         </form>
       )}
       {!mostraImposta && (
@@ -4347,11 +4346,11 @@ function InvitaClienteForm({ client, onInvitato }) {
           "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
         </p>
       )}
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-      {fattoImposta && <p className="text-emerald-600 text-xs">Password salvata ✓ — comunicala alla cliente.</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
+      {fattoImposta && <p className="text-sky-600 text-xs">Password salvata ✓ — comunicala alla cliente.</p>}
       {link && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
-          <p className="text-emerald-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
+        <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 space-y-2">
+          <p className="text-sky-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
           <p className="text-slate-600 text-xs break-all bg-white border border-slate-200 rounded-lg p-2">{link}</p>
           <button onClick={copia} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
             {copiato ? "Copiato ✓" : "Copia link"}
@@ -4404,8 +4403,8 @@ function CambiaPasswordPropria() {
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         <input type="password" placeholder="Ripeti la nuova password" value={conferma} onChange={(e) => setConferma(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-        {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-        {fatto && <p className="text-emerald-600 text-xs">Password aggiornata ✓</p>}
+        {errore && <p className="text-slate-800 text-xs">{errore}</p>}
+        {fatto && <p className="text-sky-600 text-xs">Password aggiornata ✓</p>}
         <div className="flex gap-2">
           <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-lg py-2">{salvando ? "Salvo..." : "Salva nuova password"}</button>
           <button type="button" onClick={() => setAperto(false)} className="px-4 rounded-lg border border-slate-200 text-sm text-slate-500">Chiudi</button>
@@ -4580,8 +4579,8 @@ function SchedaPdfUpload({ client, onCaricato }) {
       <input type="file" accept="application/pdf" onChange={carica} disabled={caricando}
         className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-600" />
       {caricando && <p className="text-slate-400 text-xs">Caricamento...</p>}
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-      {client.scheda_pdf_path && <p className="text-emerald-600 text-xs">PDF caricato ✓ (sostituiscilo caricandone un altro)</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
+      {client.scheda_pdf_path && <p className="text-sky-600 text-xs">PDF caricato ✓ (sostituiscilo caricandone un altro)</p>}
     </div>
   );
 }
@@ -4598,13 +4597,13 @@ function EliminaClienteBottone({ client, onEliminato }) {
   };
 
   if (!confermare) {
-    return <button onClick={() => setConfermare(true)} className="text-rose-500 text-sm font-medium">Elimina cliente</button>;
+    return <button onClick={() => setConfermare(true)} className="text-slate-800 text-sm font-medium">Elimina cliente</button>;
   }
   return (
-    <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-2">
-      <p className="text-rose-700 text-sm">Eliminare <strong>{client.nome} {client.cognome}</strong>? Tutti i suoi check, note e dati nutrizionali verranno cancellati per sempre.</p>
+    <div className="bg-slate-100 border border-slate-300 rounded-xl p-3 space-y-2">
+      <p className="text-slate-800 text-sm">Eliminare <strong>{client.nome} {client.cognome}</strong>? Tutti i suoi check, note e dati nutrizionali verranno cancellati per sempre.</p>
       <div className="flex gap-2">
-        <button onClick={elimina} disabled={eliminando} className="bg-rose-600 text-white text-sm font-medium rounded-lg px-4 py-2">
+        <button onClick={elimina} disabled={eliminando} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">
           {eliminando ? "Elimino..." : "Sì, elimina definitivamente"}
         </button>
         <button onClick={() => setConfermare(false)} className="text-slate-500 text-sm px-3">Annulla</button>
@@ -4661,7 +4660,7 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
     <Card className="p-3 space-y-2">
       <div className="flex items-center gap-3">
         <button onClick={() => onFattaCambiata(lezione.id, !lezione.fatta)}
-          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${lezione.fatta ? "bg-emerald-500" : "border-2 border-slate-300"}`}>
+          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${lezione.fatta ? "bg-sky-500" : "border-2 border-slate-300"}`}>
           {lezione.fatta && <CheckCircle2 size={16} className="text-white" />}
         </button>
         <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
@@ -4677,11 +4676,11 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
         </button>
         {(lezione.data || lezione.calendar_event_id) && (
           <button onClick={() => { setData(""); setOra(""); salva({ data: "", ora: "" }); }} disabled={salvando}
-            className="rounded-lg py-2 px-3 text-xs font-medium bg-rose-50 text-rose-600 flex-shrink-0">
+            className="rounded-lg py-2 px-3 text-xs font-medium bg-slate-100 text-slate-800 flex-shrink-0">
             Elimina appuntamento
           </button>
         )}
-        {salvato && !modificato && <span className="text-emerald-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
+        {salvato && !modificato && <span className="text-sky-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
       </div>
     </Card>
   );
@@ -4887,9 +4886,9 @@ function RigaStato({ label, valore, presente }) {
   return (
     <div className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
       <span className="text-slate-500 text-sm">{label}</span>
-      <span className={`text-sm font-medium flex items-center gap-1.5 ${presente ? "text-slate-700" : "text-amber-600"}`}>
+      <span className={`text-sm font-medium flex items-center gap-1.5 ${presente ? "text-slate-700" : "text-slate-600"}`}>
         {presente ? valore : "Mancante"}
-        {presente ? <CheckCircle2 size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-amber-500" />}
+        {presente ? <CheckCircle2 size={14} className="text-sky-500" /> : <AlertCircle size={14} className="text-slate-500" />}
       </span>
     </div>
   );
@@ -5347,7 +5346,7 @@ function EsercizioSchedaRiga({ es, onCambia, onElimina, onMuovi }) {
         <div className="flex gap-1 flex-shrink-0">
           <button onClick={() => onMuovi(-1)} className="text-slate-300 hover:text-slate-600 px-1">▲</button>
           <button onClick={() => onMuovi(1)} className="text-slate-300 hover:text-slate-600 px-1">▼</button>
-          <button onClick={onElimina} className="text-slate-300 hover:text-rose-500 px-1"><X size={16} /></button>
+          <button onClick={onElimina} className="text-slate-300 hover:text-slate-800 px-1"><X size={16} /></button>
         </div>
       </div>
       {mostraLibreria && (
@@ -5503,7 +5502,7 @@ function GiornoScheda({ giorno, client, onEliminaGiorno, onRinominaGiorno, onMuo
         <input defaultValue={giorno.nome} onBlur={(e) => onRinominaGiorno(giorno.id, e.target.value)} className="flex-1 font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
         <button onClick={() => onMuoviGiorno(giorno.id, -1)} className="text-slate-300 hover:text-slate-600 px-1">▲</button>
         <button onClick={() => onMuoviGiorno(giorno.id, 1)} className="text-slate-300 hover:text-slate-600 px-1">▼</button>
-        <button onClick={() => onEliminaGiorno(giorno.id)} className="text-slate-300 hover:text-rose-500 px-1"><X size={16} /></button>
+        <button onClick={() => onEliminaGiorno(giorno.id)} className="text-slate-300 hover:text-slate-800 px-1"><X size={16} /></button>
       </div>
       <div className="space-y-2">
         {esercizi.map((es) => (
@@ -5809,7 +5808,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <div className="flex flex-wrap gap-2">
           {CONDIZIONI_SALUTE.map((c) => (
             <button key={c.value} onClick={() => toggleCondizione(c.value)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium ${(client.problematiche_salute || []).includes(c.value) ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${(client.problematiche_salute || []).includes(c.value) ? "bg-slate-500 text-white" : "bg-slate-100 text-slate-600"}`}>
               {c.label}
             </button>
           ))}
@@ -5817,9 +5816,9 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <textarea value={condizioniAltroTesto} onChange={(e) => setCondizioniAltroTesto(e.target.value)} onBlur={salvaCondizioniAltro}
           placeholder="Altro (testo libero)..." rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         {(client.problematiche_salute || []).length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+          <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 space-y-1">
             {CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).map((c) => (
-              <p key={c.value} className="text-amber-700 text-xs"><strong>{c.label}:</strong> {c.avviso}</p>
+              <p key={c.value} className="text-slate-700 text-xs"><strong>{c.label}:</strong> {c.avviso}</p>
             ))}
           </div>
         )}
@@ -5843,7 +5842,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {Object.keys(VOLUME_LANDMARKS).map((gr) => (
                   <button key={gr} onClick={() => salvaCliente({ focus_crescita: (client.focus_crescita || []).includes(gr) ? (client.focus_crescita || []).filter((x) => x !== gr) : [...(client.focus_crescita || []), gr] })}
-                    className={`px-2.5 py-1 rounded-full text-xs ${(client.focus_crescita || []).includes(gr) ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+                    className={`px-2.5 py-1 rounded-full text-xs ${(client.focus_crescita || []).includes(gr) ? "bg-sky-500 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
                     {gr}
                   </button>
                 ))}
@@ -5867,7 +5866,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
               <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <input value={g.nome} onChange={(e) => rinominaGiornoGenerator(idx, e.target.value)} className="flex-1 border-0 bg-transparent font-medium text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
-                  {giorniGenerator.length > 1 && <button onClick={() => rimuoviGiornoGenerator(idx)} className="text-slate-300 hover:text-rose-500"><X size={16} /></button>}
+                  {giorniGenerator.length > 1 && <button onClick={() => rimuoviGiornoGenerator(idx)} className="text-slate-300 hover:text-slate-800"><X size={16} /></button>}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {gruppiDisponibili.map((gr) => (
@@ -5908,7 +5907,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           )}
 
           <div className="flex gap-2">
-            <button onClick={generaSchedaAutomatica} disabled={generando || gruppiUsatiNelGeneratore.length === 0} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2 disabled:opacity-50">
+            <button onClick={generaSchedaAutomatica} disabled={generando || gruppiUsatiNelGeneratore.length === 0} className="flex-1 bg-sky-500 text-white text-sm font-medium rounded-xl py-2 disabled:opacity-50">
               {generando ? "Genero..." : "Genera bozza"}
             </button>
             <button onClick={() => setMostraGeneratore(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -5922,7 +5921,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isBozza ? "Bozza in corso" : "Scheda attuale (finale)"}</p>
             {!isBozza && (
               <div className="flex gap-3">
-                <button onClick={() => setMostraGeneratore(true)} className="text-emerald-600 text-xs font-medium">✨ Genera fase successiva</button>
+                <button onClick={() => setMostraGeneratore(true)} className="text-sky-600 text-xs font-medium">✨ Genera fase successiva</button>
                 <button onClick={() => creaNuovaBozza(schedaCorrente)} className="text-sky-600 text-xs font-medium">Duplica e modifica →</button>
               </div>
             )}
@@ -5948,7 +5947,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           {isBozza && (
             <div className="flex gap-2">
               <button onClick={aggiungiGiorno} className="flex-1 border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-xl py-2">+ Giorno</button>
-              <button onClick={finalizzaScheda} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2">Finalizza scheda</button>
+              <button onClick={finalizzaScheda} className="flex-1 bg-sky-500 text-white text-sm font-medium rounded-xl py-2">Finalizza scheda</button>
             </div>
           )}
           <button onClick={() => apriStampaScheda(client, schedaCorrente, trend, feedback)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">Stampa / Salva PDF</button>
@@ -5959,7 +5958,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Segnali dai check</p>
         <Card className="p-4 space-y-2">
           <p className="text-sm text-slate-700">{segnaliCheck.segnale}</p>
-          {segnaliCheck.avvisoDistanza && <p className="text-amber-600 text-xs">{segnaliCheck.avvisoDistanza}</p>}
+          {segnaliCheck.avvisoDistanza && <p className="text-slate-600 text-xs">{segnaliCheck.avvisoDistanza}</p>}
           {calibrazioneCheck(checkOrdinati[0], checkOrdinati[1]).map((c, i) => (
             <p key={i} className="text-slate-600 text-xs border-t border-slate-100 pt-2 first:border-0 first:pt-0">{c}</p>
           ))}
@@ -6118,6 +6117,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [nutrizioneStorico, setNutrizioneStorico] = useState([]);
   const [pagamenti, setPagamenti] = useState([]);
   const [tab, setTab] = useState("riepilogo");
+  const [chatAperta, setChatAperta] = useState(false);
   const [schedaRiass, setSchedaRiass] = useState(false);
   const [esportazioneInCorso, setEsportazioneInCorso] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -6164,13 +6164,12 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "kcal", label: "Alimentazione" },
     ...(client.kcal_attivo !== false ? [{ key: "analisi", label: "Cosa mangia" }] : []),
     ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
-    { key: "chat", label: "Chat" },
     { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
   ];
 
   return (
-    <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5 overflow-x-hidden">
+    <div className="px-6 pt-6 pb-16 max-w-3xl lg:max-w-5xl mx-auto space-y-5 overflow-x-hidden">
       <button onClick={onBack} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti i clienti</button>
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
@@ -6194,8 +6193,27 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         ))}
       </div>
 
-      {tab === "riepilogo" && <RiepilogoCliente client={client} checkins={checkins} onVaiADati={() => setTab("dati")} />}
-      {tab === "riepilogo" && <Card className="p-4"><p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Messaggio per WhatsApp</p><MessaggioPronto client={client} chiuso={false} /></Card>}
+      {tab === "riepilogo" && (
+        <div className="space-y-4">
+          <QuadroGenerale client={client} checkins={checkins} />
+          <div className="grid lg:grid-cols-2 gap-4 items-start">
+            <div className="space-y-4 min-w-0">
+              <AttivitaClienti clients={[client]} singola />
+              {client.kcal_attivo !== false && <AnalisiCibo client={client} />}
+              <RiepilogoCliente client={client} checkins={checkins} onVaiADati={() => setTab("dati")} />
+            </div>
+            <div className="space-y-4 min-w-0">
+              <Card className="p-4 space-y-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Note</p>
+                <MessaggioPronto client={client} chiuso={false} soloCopia />
+                <NoteRapide client={client} />
+              </Card>
+              <ConfrontoFoto checkins={checkins} isAdmin />
+            </div>
+          </div>
+          <TraguardiENotifiche client={client} />
+        </div>
+      )}
 
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
@@ -6273,7 +6291,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
               <span className="text-sm text-slate-700">Diario allenamento visibile alla cliente</span>
               <button onClick={() => salvaCliente({ log_visibile_cliente: !client.log_visibile_cliente })}
-                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.log_visibile_cliente ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.log_visibile_cliente ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
                 <span className="w-5 h-5 bg-white rounded-full block" />
               </button>
             </div>
@@ -6282,7 +6300,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
               <span className="text-sm text-slate-700">Video degli esercizi per la cliente</span>
               <button onClick={() => salvaCliente({ video_attivi: client.video_attivi === false })}
-                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.video_attivi !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.video_attivi !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
                 <span className="w-5 h-5 bg-white rounded-full block" />
               </button>
             </div>
@@ -6290,14 +6308,14 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Sezione nutrizione visibile alla cliente</span>
             <button onClick={() => salvaCliente({ nutrizione_attiva: client.nutrizione_attiva === false })}
-              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
           </div>
           <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Diario Kcal visibile alla cliente</span>
             <button onClick={() => salvaCliente({ kcal_attivo: client.kcal_attivo === false })}
-              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.kcal_attivo !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.kcal_attivo !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
           </div>
@@ -6312,7 +6330,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               className="mt-1" />
             {client.data_scadenza && (
               <button onClick={() => { if (confirm("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
-                className="mt-2 text-rose-600 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
+                className="mt-2 text-slate-800 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
             )}
           </div>
           <div>
@@ -6406,7 +6424,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           {salvando && <p className="text-slate-400 text-xs col-span-2">Salvataggio...</p>}
           <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
             {client.user_id && (
-              <p className="text-emerald-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
+              <p className="text-sky-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
             )}
             <InvitaClienteForm client={client} onInvitato={carica} />
           </div>
@@ -6422,7 +6440,14 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </Card>
       )}
 
-      {tab === "chat" && <ChatMessaggi clientId={clientId} ruolo="coach" onLetti={() => onChanged?.()} />}
+      {chatAperta && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={() => setChatAperta(false)}>
+          <div className="w-full max-w-md bg-white h-full overflow-y-auto p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-800">Chat con {client.nome}</p><button onClick={() => setChatAperta(false)} className="text-slate-500 text-lg px-2" aria-label="Chiudi">✕</button></div>
+            <ChatMessaggi clientId={clientId} ruolo="coach" onLetti={() => onChanged?.()} />
+          </div>
+        </div>
+      )}
       {tab === "lezioni" && <LezioniPacchetto client={client} onCompletato={carica} />}
 
       {tab === "scheda" && <SchedaCoach client={client} checkins={checkins} salvaCliente={salvaCliente} />}
@@ -6456,7 +6481,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                           await supabase.from("checkins").delete().eq("id", r.id);
                           carica();
                         }}
-                        className="flex-shrink-0 text-slate-300 hover:text-rose-500 p-1"
+                        className="flex-shrink-0 text-slate-300 hover:text-slate-800 p-1"
                         title="Elimina check"
                       >
                         <X size={15} />
@@ -6504,7 +6529,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               if (error) { alert("Non sono riuscita a eliminarlo."); return; }
               setNutrizioneModifica(null);
               carica();
-            }} className="w-full border border-red-100 bg-red-50 text-red-600 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
+            }} className="w-full border border-slate-200 bg-slate-100 text-slate-800 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
           )}
         </div>
       )}
@@ -6613,7 +6638,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
           <option value="gratuito">gratuito</option>
         </select>
       </div>
-      {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+      {errore && <p className="text-slate-800 text-sm">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -6666,7 +6691,7 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-orange-500" };
+const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: "bg-slate-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-slate-500" };
 const ORDINE_TIPO_DOT = { compleanno: 7, check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
 const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
 
@@ -6817,7 +6842,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva modifiche"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
       </div>
-      <button onClick={elimina} className="w-full text-rose-500 text-xs font-medium">Elimina evento</button>
+      <button onClick={elimina} className="w-full text-slate-800 text-xs font-medium">Elimina evento</button>
     </Card>
   );
 }
@@ -6959,11 +6984,11 @@ function CalendarioAgenda({ clients, onSelect }) {
 
       <div className="flex flex-wrap gap-3 px-1 text-xs text-slate-500">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Check</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Scadenza</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Scadenza</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" /> Lezione 1:1</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Personale/extra</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Promemoria</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Promemoria</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-pink-400" /> Compleanni</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400" /> Messaggi clienti</span>
       </div>
@@ -7066,7 +7091,7 @@ function SelettoreMessaggiPronti({ nome, onScegli }) {
 }
 
 // Coach: cosa ha compilato ogni cliente (allenamento, cibo, ciclo, check) e da quanti giorni, con reminder gentile
-function AttivitaClienti({ clients }) {
+function AttivitaClienti({ clients, singola = false }) {
   const [d, setD] = useState(null);
   const [aperta, setAperta] = useState(true);
   const [invio, setInvio] = useState(null);
@@ -7094,7 +7119,7 @@ function AttivitaClienti({ clients }) {
     const g = giorniFa(ds);
     return { nome, testo: g <= 0 ? "oggi" : g === 1 ? "ieri" : `${g} gg`, stato: g <= verde ? "g" : g <= giallo ? "a" : "r" };
   };
-  const righe = clients.filter((c) => !c.archiviato && c.stato_pacchetto !== "scaduto" && c.tipo_servizio !== "presenza").map((c) => {
+  const righe = clients.filter((c) => singola || (!c.archiviato && c.stato_pacchetto !== "scaduto" && c.tipo_servizio !== "presenza")).map((c) => {
     const v = [];
     v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log", intro: "il Log allenamento 💪🏻 Apri \"Log allenamento\", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci" });
     if (c.kcal_attivo !== false) { const vc = voce("Cibo", d.kc[c.id], 2, 5); v.push({ ...vc, stato: vc.testo === "mai" ? "n" : vc.stato, chiave: "cibo", frase: "l'alimentazione nel diario" }); }
@@ -7102,7 +7127,7 @@ function AttivitaClienti({ clients }) {
     if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "", soloInfo: true });
     return { c, v, rossi: v.filter((x) => x.stato === "r" && !x.soloInfo) };
   }).sort((x, y) => y.rossi.length - x.rossi.length || `${x.c.nome}`.localeCompare(`${y.c.nome}`));
-  const colori = { g: "bg-emerald-50 text-emerald-700", a: "bg-amber-50 text-amber-700", r: "bg-rose-50 text-rose-700", n: "bg-slate-100 text-slate-500" };
+  const colori = { g: "bg-sky-50 text-sky-700", a: "bg-slate-100 text-slate-600", r: "bg-slate-800 text-white", n: "bg-slate-100 text-slate-400" };
   const manda = async ({ c, rossi }) => {
     const nuove = rossi.filter((x) => x.testo === "mai");
     const ferme = rossi.filter((x) => x.testo !== "mai");
@@ -7136,13 +7161,13 @@ function AttivitaClienti({ clients }) {
       {aperta && <p className="text-[11px] text-slate-400">Giorni dall'ultima volta · in cima chi ha più bisogno di un reminder</p>}
       {aperta && righe.map((r) => (
         <div key={r.c.id} className="py-3 border-b border-slate-100 last:border-0">
-          <p className="text-[15px] font-semibold text-slate-800 mb-2"><NomeCl c={r.c} /></p>
+          {!singola && <p className="text-[15px] font-semibold text-slate-800 mb-2"><NomeCl c={r.c} /></p>}
           <div className="flex flex-wrap gap-1.5">
             {r.v.map((x) => <span key={x.chiave} className={`${colori[x.stato]} rounded-full px-2.5 py-1 text-xs whitespace-nowrap`}>{x.nome} <b>{x.testo}</b></span>)}
           </div>
-          <MessaggioPronto client={r.c} />
+          {!singola && <MessaggioPronto client={r.c} />}
           {r.rossi.length > 0 && (inviati[r.c.id]
-            ? <p className="text-emerald-600 text-xs mt-2">Reminder inviato ✓</p>
+            ? <p className="text-sky-700 text-xs mt-2">Reminder inviato ✓</p>
             : <button onClick={() => manda(r)} disabled={invio === r.c.id} className="mt-2 text-sky-700 text-[13px] font-medium disabled:opacity-50">✨ Manda reminder →</button>)}
         </div>
       ))}
@@ -7195,11 +7220,11 @@ function DaCompletareClienti({ clients, onSelect }) {
         <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Da completare per cliente ({righe.length})</span>
         <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
       </button>
-      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
+      {aperta && righe.length === 0 && <p className="text-sky-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
       {aperta && righe.map(({ c, manca }) => (
         <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
           <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
-          {manca.map((m) => <span key={m.k} className="block text-xs text-rose-600">• {m.t}</span>)}
+          {manca.map((m) => <span key={m.k} className="block text-xs text-slate-800">• {m.t}</span>)}
         </button>
       ))}
       {aperta && <p className="text-[11px] text-slate-400 pt-1">Se una cliente segue la nutrizione con un altro professionista, disattiva "nutrizione" nella sua scheda e non comparirà più qui.</p>}
@@ -7273,12 +7298,12 @@ function EserciziMancantiClienti({ clients, onSelect }) {
         <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
       </button>
       {!aperta && <p className="text-[11px] text-slate-400">{totMancano === 0 ? "Tutto coperto ✓" : `${totMancano} esercizi senza video o spiegazioni`}{totVarianti > 0 ? ` · ${totVarianti} varianti con video generico` : ""}. Include mobilità e attivazione.</p>}
-      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
+      {aperta && righe.length === 0 && <p className="text-sky-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
       {aperta && righe.map(({ c, mancano, varianti }) => (
         <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
           <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
-          {mancano.map((m) => <span key={m.t} className="block text-xs text-rose-600">• {m.t}: {m.m}</span>)}
-          {varianti.map((m) => <span key={m.t} className="block text-xs text-amber-600">• {m.t}: {m.m}</span>)}
+          {mancano.map((m) => <span key={m.t} className="block text-xs text-slate-800">• {m.t}: {m.m}</span>)}
+          {varianti.map((m) => <span key={m.t} className="block text-xs text-slate-600">• {m.t}: {m.m}</span>)}
         </button>
       ))}
       {aperta && <p className="text-[11px] text-slate-400 pt-1">In rosso manca qualcosa. In arancione c'è un video generico: valuta se serve il video della variante. Le spiegazioni scritte nel programma contano come spiegazioni.</p>}
@@ -7400,7 +7425,7 @@ function OggiCoach({ clients, onSelect, vai }) {
   const Voce = ({ n, label, onClick }) => (
     <button onClick={onClick} className="w-full flex items-center justify-between py-2 text-left">
       <span className="text-sm text-slate-700">{label}</span>
-      <span className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${n > 0 ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-400"}`}>{n}</span>
+      <span className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${n > 0 ? "bg-slate-200 text-slate-800" : "bg-slate-100 text-slate-400"}`}>{n}</span>
     </button>
   );
 
@@ -7420,79 +7445,21 @@ function OggiCoach({ clients, onSelect, vai }) {
         ))}
       </Card>
 
-      {nuoveClienti.length > 0 && (
-        <Card className="p-4 space-y-1">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Nuove clienti: scheda da creare</p>
-          <p className="text-[11px] text-slate-400 pb-1">Entro 7 giorni dall'invio dei dati</p>
-          {nuoveClienti.map((n) => {
-            const g = -giorniDa(n.scad);
-            const testo = g > 0 ? `tra ${g} ${g === 1 ? "giorno" : "giorni"}` : g === 0 ? "scade oggi" : `scaduta da ${-g} ${g === -1 ? "giorno" : "giorni"}`;
-            return (
-              <button key={n.c.id} onClick={() => onSelect(n.c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-                <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-slate-700 font-medium truncate"><NomeCl c={n.c} /></span>
-                  <span className={`text-xs font-semibold flex-shrink-0 ${g < 0 ? "text-rose-600" : g <= 2 ? "text-amber-600" : "text-slate-500"}`}>{testo}</span>
-                </span>
-                <span className="block text-xs text-slate-500">Check inviato il {fmt(n.check)} · scheda entro il {fmt(n.scad)} · {n.pagato ? "pagamento ricevuto ✓" : "pagamento da verificare"}</span>
-              </button>
-            );
-          })}
-        </Card>
-      )}
 
-      <Card className="p-4 divide-y divide-slate-100">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-2">Da fare</p>
-        <Voce n={dati.richieste} label="Richieste di lezione da confermare" onClick={() => vai("notifiche")} />
-        <Voce n={dati.checkDaEsaminare} label="Check ricevuti da esaminare" onClick={() => vai("notifiche")} />
-        <Voce n={msgSenzaRisposta.length} label="Chat in attesa di risposta" onClick={() => vai("chat")} />
-      </Card>
 
-      {scadenze.length > 0 && (
-        <Card className="p-4 space-y-1">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Pacchetti scaduti</p>
-          {scadenze.map((s, i) => (
-            <button key={i} onClick={() => onSelect(s.c.id)} className="w-full flex items-center justify-between py-1.5 text-left">
-              <span className="text-sm text-slate-700 font-medium"><NomeCl c={s.c} /></span>
-              <span className="text-xs text-amber-600">{s.testo}</span>
-            </button>
-          ))}
-        </Card>
-      )}
 
-      <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Reminder rinnovi ✨</p>
-        {mesiRinnovi.map((m) => (
-          <div key={m.k} className="space-y-1">
-            <p className="text-sm font-semibold text-slate-700 capitalize">{m.titolo} <span className="text-slate-400 font-normal">({m.righe.length})</span></p>
-            {m.righe.length === 0 && <p className="text-slate-400 text-sm">Nessun rinnovo in scadenza.</p>}
-            {m.righe.map((c) => {
-              const n = giorniAlla(c.data_scadenza);
-              return (
-                <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-1.5 text-left border-b border-slate-100 last:border-0">
-                  <span>
-                    <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
-                    <span className="block text-[11px] text-slate-400">{c.piano || "—"} · scade il {c.data_scadenza.split("-").reverse().slice(0, 2).join("/")}</span>
-                  </span>
-                  <span className={`text-xs ${n < 0 ? "text-rose-500" : n <= 7 ? "text-amber-600" : "text-slate-500"}`}>{testoGiorni(n)}</span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </Card>
 
       <Card className="p-4 space-y-1">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Clienti da seguire</p>
-        {daSeguire.length === 0 && <p className="text-emerald-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
+        {daSeguire.length === 0 && <p className="text-sky-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
         {daSeguire.map(({ c, motivi }) => (
           <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
             <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
-            <span className="block text-xs text-rose-500">{motivi.join(" · ")}</span>
+            <span className="block text-xs text-slate-800">{motivi.join(" · ")}</span>
           </button>
         ))}
       </Card>
 
-      <EserciziMancantiClienti clients={clients} onSelect={onSelect} />
 
       <AttivitaClienti clients={clients} />
 
@@ -7527,7 +7494,7 @@ function InviaNotaForm({ clients, onFatto }) {
       <SelettoreMessaggiPronti nome={(() => { const c = clients.find((x) => x.id === clientId); return c ? c.nome : ""; })()} onScegli={(t) => { setMessaggio(t); setFatto(false); }} />
       <textarea placeholder="Scrivi la nota..." value={messaggio} onChange={(e) => { setMessaggio(e.target.value); setFatto(false); }} rows={3} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia nota"}</button>
-      {fatto && <p className="text-emerald-600 text-xs">Nota inviata!</p>}
+      {fatto && <p className="text-sky-600 text-xs">Nota inviata!</p>}
     </Card>
   );
 }
@@ -7584,23 +7551,23 @@ function PromemoriaMessaggi({ clients }) {
         </div>
         <Card className="p-1 divide-y divide-slate-100">
           {elenco.length === 0 && <p className="text-center text-slate-400 text-sm py-3">Nessuna cliente in questo gruppo.</p>}
-          {elenco.length > 0 && daContattare.length === 0 && !mostraFatte && <p className="text-center text-emerald-600 text-sm py-3">Tutte le clienti contattate questa settimana ✓</p>}
+          {elenco.length > 0 && daContattare.length === 0 && !mostraFatte && <p className="text-center text-sky-600 text-sm py-3">Tutte le clienti contattate questa settimana ✓</p>}
           {visibili.map((c) => {
             const fatto = !!stato[c.id];
             return (
               <button key={c.id} onClick={() => toggle(c.id, fatto)} className="w-full flex items-center gap-3 px-2 py-2.5 text-left">
-                <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-emerald-500 border-emerald-500" : "border-slate-300"}`}>
+                <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-sky-500 border-sky-500" : "border-slate-300"}`}>
                   {fatto && <Check size={13} className="text-white" />}
                 </span>
                 <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}><NomeCl c={c} /></span>
-                {!fatto && <span className="text-[10px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
+                {!fatto && <span className="text-[10px] font-medium text-slate-600 bg-slate-100 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
               </button>
             );
           })}
         </Card>
         <div className="flex items-center justify-between mt-1 px-1">
           {daContattare.length > 0 ? (
-            <p className="text-[11px] text-amber-600">{daContattare.length} da contattare questa settimana</p>
+            <p className="text-[11px] text-slate-600">{daContattare.length} da contattare questa settimana</p>
           ) : <span />}
           {contattate.length > 0 && (
             <button onClick={() => setMostraFatte((v) => !v)} className="text-[11px] text-slate-400 underline">
@@ -7671,7 +7638,7 @@ function ChatCoach({ clients, onChanged }) {
                     {u ? `${u.ultimo.mittente === "coach" ? "Tu: " : ""}${u.ultimo.testo || "📷 Foto"}` : "Nessun messaggio"}
                   </p>
                 </div>
-                {u?.nuovi > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
+                {u?.nuovi > 0 && <span className="bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
                 <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
               </button>
             </Card>
@@ -7723,7 +7690,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   const altro = ruolo === "coach" ? "cliente" : "coach";
 
   const carica = async () => {
-    const { data, error } = await supabase.from("messaggi").select("*").eq("client_id", clientId).order("created_at", { ascending: true });
+    const { data, error } = await supabase.from("messaggi").select("*").eq("client_id", clientId).eq(ruolo === "coach" ? "nascosto_coach" : "nascosto_cliente", false).order("created_at", { ascending: true });
     if (error) { setErrore("La chat non è ancora attiva: serve completare l'attivazione nel database."); setCaricato(true); return; }
     setErrore("");
     setMsgs(data || []);
@@ -7779,8 +7746,15 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
     return `${d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })} ${d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
   };
 
+  const cancellaChat = async () => {
+    if (!confirm("Cancello questa chat dalla tua vista? L'altra persona continua a vedere i suoi messaggi.")) return;
+    const { error } = await supabase.rpc("nascondi_chat", { p_client_id: clientId });
+    if (error) { setErrore("Non sono riuscita a cancellare la chat, riprova."); return; }
+    setMsgs([]);
+  };
   return (
     <div className="space-y-3">
+      {msgs.length > 0 && <div className="flex justify-end"><button onClick={cancellaChat} className="text-[11px] text-slate-400 hover:text-slate-700">Cancella chat</button></div>}
       <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
         {caricato && msgs.length === 0 && !errore && <Card className="p-4 text-center text-slate-400 text-sm">Nessun messaggio ancora. Scrivi il primo!</Card>}
         {msgs.map((m) => {
@@ -7799,7 +7773,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
         })}
         <div ref={fineRef} />
       </div>
-      {errore && <p className="text-rose-500 text-xs px-1">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs px-1">{errore}</p>}
       {foto && (
         <div className="flex items-center justify-between bg-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600">
           <span className="truncate">Foto: {foto.name}</span>
@@ -7856,7 +7830,7 @@ function CommentoCoach({ n, onSalvato }) {
   return (
     <div className="space-y-1.5">
       <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={3} placeholder="Scrivi il tuo commento per la cliente..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white" />
-      {errore && <p className="text-rose-500 text-[11px]">{errore}</p>}
+      {errore && <p className="text-slate-800 text-[11px]">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando || !testo.trim()} className="flex-1 bg-slate-800 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{salvando ? "Invio..." : "Invia alla cliente"}</button>
         <button onClick={() => setAperto(false)} className="px-3 text-xs text-slate-500">Annulla</button>
@@ -7883,10 +7857,10 @@ function StoricoNotifiche({ clients }) {
   const nomeCliente = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
   const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota";
   const badge = (n) => {
-    if (n.stato === "inviata") return { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" };
-    if (n.stato === "accettata") return { t: "Accettata", c: "bg-emerald-100 text-emerald-700" };
-    if (n.stato === "rifiutata") return { t: "Rifiutata", c: "bg-rose-100 text-rose-700" };
-    return { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+    if (n.stato === "inviata") return { t: "Non ancora vista", c: "bg-slate-100 text-slate-700" };
+    if (n.stato === "accettata") return { t: "Accettata", c: "bg-sky-100 text-sky-700" };
+    if (n.stato === "rifiutata") return { t: "Rifiutata", c: "bg-slate-200 text-slate-800" };
+    return { t: "Vista", c: "bg-sky-100 text-sky-700" };
   };
   const filtrate = righe.filter((n) => filtro === "tutte" || (filtro === "non_viste" ? n.stato === "inviata" : n.stato !== "inviata"));
 
@@ -7946,7 +7920,7 @@ function CompleanniClienti({ clients }) {
       <div className="space-y-2">
         {prossimi.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun compleanno nei prossimi 90 giorni.</Card>}
         {prossimi.map((x) => (
-          <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-amber-50/60 border-amber-200" : ""}`}>
+          <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-slate-100/60 border-slate-200" : ""}`}>
             <div className="min-w-0">
               <p className="font-medium text-slate-700 text-sm"><NomeCl c={x.c} /></p>
               <p className="text-slate-500 text-xs">Compie {x.prossimo.getFullYear() - x.y} anni · {dm(x.prossimo)}</p>
@@ -8058,7 +8032,7 @@ function ClientiDaRiattivare({ clients, onSelect }) {
                   <p className="font-medium text-slate-700 text-sm truncate"><NomeCl c={c} /></p>
                   <p className="text-slate-400 text-[11px]">{giorni === null ? "Nessuna attività registrata" : `Ultima attività ${giorni} giorni fa`}{wa !== null ? ` · scritto su WhatsApp ${wa === 0 ? "oggi" : wa + " giorni fa"}` : ""}</p>
                 </button>
-                {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-emerald-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
+                {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-sky-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
               </Card>
             );
           })}
@@ -8079,7 +8053,7 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
     const n = !aperto; setAperto(n);
     if (ricorda) { try { localStorage.setItem(chiave, n ? "1" : "0"); } catch { /* ignora */ } }
   };
-  const colori = { slate: "text-slate-600", amber: "text-amber-700", sky: "text-sky-700" };
+  const colori = { slate: "text-slate-600", amber: "text-slate-700", sky: "text-sky-700" };
   const acceso = evidenzia && conteggio > 0;
   return (
     <div>
@@ -8087,7 +8061,7 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
         <button onClick={cambia} aria-expanded={aperto} className="flex-1 min-w-0 flex items-center gap-2 px-3 py-3 text-left">
           <ChevronRight size={16} className={`flex-shrink-0 text-slate-400 transition-transform ${aperto ? "rotate-90" : ""}`} />
           <span className={`text-xs uppercase tracking-wide font-medium truncate ${colori[tono] || colori.slate}`}>{titolo}</span>
-          {conteggio !== null && <span className={`flex-shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5 ${acceso ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{conteggio}</span>}
+          {conteggio !== null && <span className={`flex-shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5 ${acceso ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500"}`}>{conteggio}</span>}
         </button>
         {aperto && destra}
       </div>
@@ -8157,7 +8131,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
                 <CommentoCoach n={n} onSalvato={carica} />
                 <div className="flex items-center justify-between pt-1">
                   <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
-                  <button onClick={() => segnaAutoViste([n.id])} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
+                  <button onClick={() => segnaAutoViste([n.id])} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
                 </div>
               </Card>
             ))}
@@ -8182,12 +8156,12 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
         <Sezione id="nuove_clienti" titolo="Nuove clienti da completare" conteggio={nuoveDaCompletare.length} aperta={nuoveDaCompletare.length>0} ricorda={false}  tono="amber" evidenzia>
           <div className="space-y-2">
             {nuoveDaCompletare.map((c) => (
-              <Card key={c.id} className="p-3 flex items-center gap-3 bg-amber-50/60 border-amber-200">
+              <Card key={c.id} className="p-3 flex items-center gap-3 bg-slate-100/60 border-slate-200">
                 <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 text-left">
                     <p className="font-medium text-slate-700 text-sm"><NomeCl c={c} /></p>
                     <p className="text-slate-500 text-xs">Si è registrata da sola — manca ancora pacchetto e prezzo</p>
                 </button>
-                <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
+                <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
               </Card>
             ))}
           </div>
@@ -8201,7 +8175,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
             <Card key={r.id} className="p-3 space-y-2">
               <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
                 <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
-                {r.sostituisce_id && <p className="text-amber-600 text-xs font-medium">🔁 Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
+                {r.sostituisce_id && <p className="text-slate-600 text-xs font-medium">🔁 Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
                 <p className="text-slate-500 text-xs">{r.sostituisce_id ? "Nuova data: " : ""}{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
                 {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
               </button>
@@ -8209,9 +8183,9 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
                 <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={() => approva(r.id)} className="flex-1 bg-emerald-500 text-white text-xs font-medium rounded-lg py-2">Approva</button>
-                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-amber-500 text-white text-xs font-medium rounded-lg py-2">Proponi altro</button>
-                  <button onClick={() => rifiuta(r.id)} className="flex-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                  <button onClick={() => approva(r.id)} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">Approva</button>
+                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-slate-500 text-white text-xs font-medium rounded-lg py-2">Proponi altro</button>
+                  <button onClick={() => rifiuta(r.id)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
                 </div>
               )}
             </Card>
@@ -8228,7 +8202,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
                 <p className="font-medium text-slate-700 text-sm">{c.clients?.nome} {c.clients?.cognome}</p>
                 <p className="text-slate-500 text-xs">{c.data_check?.split("-").reverse().join("/")} — {c.peso_kg ? `${c.peso_kg} kg` : "check inviato"}</p>
               </button>
-              <button onClick={() => segnaRevisionato(c.id)} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna rivisto</button>
+              <button onClick={() => segnaRevisionato(c.id)} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna rivisto</button>
             </Card>
           ))}
         </div>
@@ -8781,7 +8755,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
         <button onClick={() => apri("guadagno")} className="flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
           <Plus size={16} /> Nuovo pagamento
         </button>
-        <button onClick={() => apri("spesa")} className="flex items-center justify-center gap-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl py-2.5 text-sm font-medium">
+        <button onClick={() => apri("spesa")} className="flex items-center justify-center gap-2 bg-slate-100 text-slate-800 border border-slate-300 rounded-xl py-2.5 text-sm font-medium">
           <Plus size={16} /> Nuova spesa
         </button>
       </div>
@@ -8794,7 +8768,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
         <button onClick={() => setModo("guadagno")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "guadagno" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
           + Guadagno
         </button>
-        <button onClick={() => setModo("spesa")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "spesa" ? "bg-white text-rose-600 shadow-sm" : "text-slate-500"}`}>
+        <button onClick={() => setModo("spesa")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "spesa" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
           − Spesa
         </button>
       </div>
@@ -8865,7 +8839,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
               <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
               <option value="Altro">Altro (non tocca la scadenza)</option>
             </select>
-            {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
+            {aggiornaScadenza && <p className="text-[11px] text-sky-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
           </div>
           {tipoPiano === "Altro" && (
             <div>
@@ -8879,10 +8853,10 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
           </div>
         </>
       )}
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={() => { setAperto(false); setErrore(""); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
-        <button onClick={salva} disabled={salvando} className={`flex-1 text-white rounded-xl py-2 text-sm font-medium ${modo === "spesa" ? "bg-rose-600" : "bg-slate-800"}`}>
+        <button onClick={salva} disabled={salvando} className={`flex-1 text-white rounded-xl py-2 text-sm font-medium ${modo === "spesa" ? "bg-slate-800" : "bg-slate-800"}`}>
           {salvando ? "Salvo..." : modo === "spesa" ? "Salva spesa" : "Salva"}
         </button>
       </div>
@@ -9063,7 +9037,7 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
               <label className="text-xs text-slate-500">{pag.stato === "spesa" ? "Descrizione" : "Nota"}</label>
               <input value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
             </div>
-            {erroreMod && <p className="text-rose-500 text-xs">{erroreMod}</p>}
+            {erroreMod && <p className="text-slate-800 text-xs">{erroreMod}</p>}
             <div className="flex gap-2">
               <button onClick={() => setModifica(false)} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
               <button onClick={salvaModifiche} disabled={salvandoMod} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium disabled:opacity-50">{salvandoMod ? "Salvo..." : "Salva modifiche"}</button>
@@ -9077,11 +9051,11 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
           <div className="flex justify-between"><span className="text-slate-400">Importo totale</span><span className="text-slate-800 font-semibold">{pag.importo != null ? `${Number(pag.importo).toFixed(2)}€` : "—"}</span></div>
           {pag.stato === "da_saldare" && giaSaldato > 0 && (
             <>
-              <div className="flex justify-between"><span className="text-slate-400">Già saldato</span><span className="text-emerald-600 font-medium">{giaSaldato.toFixed(2)}€</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Ancora da saldare</span><span className="text-amber-600 font-medium">{residuo.toFixed(2)}€</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Già saldato</span><span className="text-sky-600 font-medium">{giaSaldato.toFixed(2)}€</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Ancora da saldare</span><span className="text-slate-600 font-medium">{residuo.toFixed(2)}€</span></div>
             </>
           )}
-          <div className="flex justify-between"><span className="text-slate-400">Metodo</span>{pag.metodo_pagamento ? <span className="text-slate-700">{labelMetodo(pag.metodo_pagamento)}</span> : <span className="text-amber-600 font-medium">da indicare</span>}</div>
+          <div className="flex justify-between"><span className="text-slate-400">Metodo</span>{pag.metodo_pagamento ? <span className="text-slate-700">{labelMetodo(pag.metodo_pagamento)}</span> : <span className="text-slate-600 font-medium">da indicare</span>}</div>
           <div className="flex justify-between"><span className="text-slate-400">Stato</span><span className="text-slate-700 capitalize">{pag.stato === "spesa" ? "Spesa" : pag.stato === "saldato" ? "Saldato" : "Da saldare"}</span></div>
           {pag.note && <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">Nota</span><span className="text-slate-700 text-right">{pag.note}</span></div>}
         </div>
@@ -9097,11 +9071,11 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
             <div className="flex gap-2">
               <input type="number" step="0.01" value={acconto} onChange={(e) => setAcconto(e.target.value)} placeholder={`es. ${Math.min(residuo, 20).toFixed(0)}`}
                 className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-              <button onClick={registraAcconto} disabled={salvandoAcconto} className="bg-emerald-600 text-white text-sm font-medium rounded-lg px-4 disabled:opacity-50">
+              <button onClick={registraAcconto} disabled={salvandoAcconto} className="bg-sky-600 text-white text-sm font-medium rounded-lg px-4 disabled:opacity-50">
                 {salvandoAcconto ? "..." : "Registra"}
               </button>
             </div>
-            {erroreAcconto && <p className="text-rose-500 text-xs">{erroreAcconto}</p>}
+            {erroreAcconto && <p className="text-slate-800 text-xs">{erroreAcconto}</p>}
             <p className="text-[11px] text-slate-400">L'importo totale resta {Number(pag.importo).toFixed(2)}€ — qui aggiorni solo quanto è già stato incassato, e "da saldare" si ricalcola da solo.</p>
           </div>
         )}
@@ -9135,8 +9109,8 @@ function ImportoMancante({ p, onSalvato }) {
   return (
     <div className="flex items-center gap-1 flex-shrink-0">
       <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="€"
-        className="w-16 border border-amber-300 rounded-lg px-1.5 py-1 text-xs" />
-      <button onClick={salva} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={16} /></button>
+        className="w-16 border border-slate-300 rounded-lg px-1.5 py-1 text-xs" />
+      <button onClick={salva} disabled={salvando} className="text-sky-600 flex-shrink-0"><Check size={16} /></button>
     </div>
   );
 }
@@ -9151,7 +9125,7 @@ function MetodoMancante({ p, onSalvato }) {
     onSalvato();
   };
   return (
-    <select defaultValue="" disabled={salvando} onChange={(e) => imposta(e.target.value)} className="border border-amber-300 rounded-lg px-2 py-1 text-xs bg-white flex-shrink-0">
+    <select defaultValue="" disabled={salvando} onChange={(e) => imposta(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white flex-shrink-0">
       <option value="">Metodo…</option>
       {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
     </select>
@@ -9437,7 +9411,7 @@ function StatisticheCoach({ clients }) {
         <p className="text-[11px] text-slate-400">Contati una volta per cliente al mese, anche se paga a rate. Per Bulb conta il mese in cui torna a pagare lezioni o pacchetti, non ogni singolo pagamento.</p>
         {attesiTot === 0 ? <p className="text-slate-400 text-sm pt-1">Nessuna scadenza prevista in questo mese.</p> : (
           <>
-            <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-emerald-600 ml-2">{retention}%</span>}</p>
+            <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-sky-600 ml-2">{retention}%</span>}</p>
             <p className="text-xs text-slate-500">Coaching online: {rinnovatiOnline} su {attesiOnline} · Pacchetti lezioni: {rinnovatiLez} su {completati.length}</p>
           </>
         )}
@@ -9461,7 +9435,7 @@ function StatisticheCoach({ clients }) {
                   <Tooltip />
                   <Line type="monotone" dataKey="tot" name="Totale" stroke="#334155" strokeWidth={2} dot={{ r: 2 }} />
                   <Line type="monotone" dataKey="onl" name="Online" stroke="#4F8FD0" strokeWidth={2} dot={{ r: 2 }} />
-                  <Line type="monotone" dataKey="bulb" name="Bulb" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="bulb" name="Bulb" stroke="#27466D" strokeWidth={2} dot={{ r: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -9482,7 +9456,7 @@ function StatisticheCoach({ clients }) {
                   <p className="text-sm text-slate-700 font-medium">{l.nome}{l.archiviata ? " (archiviata)" : ""}</p>
                   <p className="text-[11px] text-slate-500">{labMese(l.da)} → {l.inCorso ? "oggi" : labMese(l.a)} · {l.durata} {l.durata === 1 ? "mese" : "mesi"} con te</p>
                 </div>
-                <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700 flex-shrink-0">{l.rO + l.rB} {l.rO + l.rB === 1 ? "rinnovo" : "rinnovi"}{l.rO > 0 && l.rB > 0 ? ` (${l.rO} online, ${l.rB} Bulb)` : l.rB > 0 ? " Bulb" : " online"}</span>
+                <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-sky-100 text-sky-700 flex-shrink-0">{l.rO + l.rB} {l.rO + l.rB === 1 ? "rinnovo" : "rinnovi"}{l.rO > 0 && l.rB > 0 ? ` (${l.rO} online, ${l.rB} Bulb)` : l.rB > 0 ? " Bulb" : " online"}</span>
               </div>
             ))}
           </div>
@@ -9707,7 +9681,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Totale netto da inizio anno</p>
-          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleNetto.toFixed(2)}€</p>
+          <p className="text-lg font-semibold text-sky-600 mt-0.5">{totaleNetto.toFixed(2)}€</p>
         </Card>
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -9717,11 +9691,11 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Spese (affitto ecc.)</p>
-          <p className="text-base font-semibold text-rose-600 mt-0.5">{totaleSpese.toFixed(2)}€</p>
+          <p className="text-base font-semibold text-slate-800 mt-0.5">{totaleSpese.toFixed(2)}€</p>
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Da saldare</p>
-          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldareConPrevisti.toFixed(2)}€</p>
+          <p className="text-base font-semibold text-slate-600 mt-0.5">{totaleDaSaldareConPrevisti.toFixed(2)}€</p>
           {totalePrevisti > 0 && <p className="text-[10px] text-slate-400 leading-tight">di cui {totalePrevisti.toFixed(2)}€ rinnovi previsti</p>}
         </Card>
       </div>
@@ -9729,7 +9703,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         <Card className="p-4">
           <div className="flex items-baseline justify-between mb-2">
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi previsti questo mese</p>
-            <span className="text-xs font-semibold text-amber-600">{totalePrevisti.toFixed(2)}€</span>
+            <span className="text-xs font-semibold text-slate-600">{totalePrevisti.toFixed(2)}€</span>
           </div>
           <div className="divide-y divide-slate-100">
             {previsti.map((v) => (
@@ -9738,7 +9712,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
                   <p className="text-sm text-slate-700 font-medium truncate"><NomeCl c={v.cliente} /></p>
                   <p className="text-xs text-slate-400">{v.titolo}{v.data ? ` · ${v.data.split("-").reverse().join("/")}` : ""}</p>
                 </div>
-                {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-amber-600 flex-shrink-0">importo da definire</span>}
+                {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-slate-600 flex-shrink-0">importo da definire</span>}
               </button>
             ))}
           </div>
@@ -9751,21 +9725,21 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           <div className="flex justify-between"><span className="text-slate-500">Già incassato nel mese</span><span className="font-medium text-slate-700">{incassatoMese.toFixed(2)}€</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Da saldare (già registrati)</span><span className="font-medium text-slate-700">{totaleDaSaldare.toFixed(2)}€</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Rinnovi previsti</span><span className="font-medium text-slate-700">{totalePrevisti.toFixed(2)}€</span></div>
-          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Entrate previste</span><span className="font-semibold text-emerald-600">{previsioneEntrate.toFixed(2)}€</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Spese del mese</span><span className="font-medium text-rose-600">{speseMese.toFixed(2)}€</span></div>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Entrate previste</span><span className="font-semibold text-sky-600">{previsioneEntrate.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Spese del mese</span><span className="font-medium text-slate-800">{speseMese.toFixed(2)}€</span></div>
           <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Previsione netta</span><span className="font-semibold text-slate-800">{(previsioneEntrate + speseMese).toFixed(2)}€</span></div>
         </div>
-        {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-amber-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
+        {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-slate-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
       </Card>
 
       {senzaMetodo.length > 0 && (
-        <Card className="p-4 border border-amber-200 bg-amber-50/40">
+        <Card className="p-4 border border-slate-200 bg-slate-100/40">
           <div className="flex items-baseline justify-between mb-1">
-            <p className="text-xs uppercase tracking-wide text-amber-700 font-medium">Metodo di pagamento mancante</p>
-            <span className="text-xs font-semibold text-amber-700">{totaleSenzaMetodo.toFixed(2)}€</span>
+            <p className="text-xs uppercase tracking-wide text-slate-700 font-medium">Metodo di pagamento mancante</p>
+            <span className="text-xs font-semibold text-slate-700">{totaleSenzaMetodo.toFixed(2)}€</span>
           </div>
           <p className="text-[11px] text-slate-500 mb-2">{senzaMetodo.length} pagament{senzaMetodo.length === 1 ? "o" : "i"} senza metodo. Scegli il metodo qui e si salva subito: poi le statistiche e il file si aggiornano da soli.</p>
-          <div className="divide-y divide-amber-100">
+          <div className="divide-y divide-slate-100">
             {senzaMetodo.map(({ p, imp }) => (
               <div key={p.id} className="flex items-center gap-2 py-2">
                 <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
@@ -9819,7 +9793,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           {mesi.map((m) => (
             <div key={m.chiave} className="flex justify-between text-xs">
               <span className="text-slate-500 capitalize">{new Date(m.chiave + "-01").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</span>
-              <span className={`font-medium ${m.totale < 0 ? "text-rose-600" : "text-slate-700"}`}>{m.totale.toFixed(2)}€</span>
+              <span className={`font-medium ${m.totale < 0 ? "text-slate-800" : "text-slate-700"}`}>{m.totale.toFixed(2)}€</span>
             </div>
           ))}
         </div>
@@ -9855,7 +9829,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
                       {b?.metodo_pagamento_abituale ? ` · ${labelMetodo(b.metodo_pagamento_abituale)}` : ""}
                     </p>
                   </div>
-                  <span className={`text-xs font-medium flex-shrink-0 ${c.stato_pacchetto === "in scadenza" ? "text-amber-600" : "text-slate-400"}`}>{c.data_scadenza?.split("-").reverse().join("/")}</span>
+                  <span className={`text-xs font-medium flex-shrink-0 ${c.stato_pacchetto === "in scadenza" ? "text-slate-600" : "text-slate-400"}`}>{c.data_scadenza?.split("-").reverse().join("/")}</span>
                 </button>
               );
             })}
@@ -9875,30 +9849,30 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
             <div key={p.id} className="flex items-center gap-2 px-3 py-2.5">
               <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
                 <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
-                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" ? <span className="text-amber-600"> · metodo mancante</span> : "")}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
+                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" ? <span className="text-slate-600"> · metodo mancante</span> : "")}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
                 {p.stato === "da_saldare" && Number(p.importo_saldato) > 0 && (
-                  <p className="text-[11px] text-emerald-600">Acconto ricevuto: {Number(p.importo_saldato).toFixed(2)}€</p>
+                  <p className="text-[11px] text-sky-600">Acconto ricevuto: {Number(p.importo_saldato).toFixed(2)}€</p>
                 )}
               </button>
               {p.importo != null ? (
                 p.stato === "da_saldare" && Number(p.importo_saldato) > 0 ? (
-                  <span className="text-sm font-medium flex-shrink-0 text-amber-600">{(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€ <span className="text-slate-300 font-normal">/ {Number(p.importo).toFixed(2)}€</span></span>
+                  <span className="text-sm font-medium flex-shrink-0 text-slate-600">{(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€ <span className="text-slate-300 font-normal">/ {Number(p.importo).toFixed(2)}€</span></span>
                 ) : (
-                  <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{Number(p.importo).toFixed(2)}€</span>
+                  <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-slate-800" : "text-slate-700"}`}>{Number(p.importo).toFixed(2)}€</span>
                 )
               ) : (
                 <ImportoMancante p={p} onSalvato={carica} />
               )}
               {p.stato && (
                 p.stato === "spesa" ? (
-                  <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-rose-100 text-rose-700">Spesa</span>
+                  <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-slate-200 text-slate-800">Spesa</span>
                 ) : (
-                  <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-700"}`}>
                     {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                   </button>
                 )
               )}
-              <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
+              <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-800 px-0.5"><X size={13} /></button>
             </div>
           ))}
         </Card>
@@ -9951,7 +9925,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
   const Pallino = ({ stato }) => {
     // stato: true = presente, false = mancante, null = non applicabile a questo cliente
     if (stato === null) return <span className="text-slate-300 text-xs">n/d</span>;
-    return <span className={stato ? "text-emerald-500" : "text-rose-400"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
+    return <span className={stato ? "text-sky-500" : "text-slate-600"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
   };
 
   // Solo clienti online/ibrido: i clienti BULB (in presenza) non seguono scadenze a cadenza
@@ -9990,7 +9964,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
                     ) : c.data_scadenza ? (
                       <span className="text-slate-600 whitespace-nowrap">{formattaDataBreve(c.data_scadenza)}</span>
                     ) : (
-                      <span className="text-rose-400">○ mancante</span>
+                      <span className="text-slate-600">○ mancante</span>
                     )}
                   </td>
                   <td className="px-2 py-2 text-center"><Pallino stato={schedaStato} /></td>
@@ -10005,7 +9979,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
                   <td className="px-2 py-2 text-center">
                     {c.prossimo_check ? (
                       <>
-                        <span className={`font-medium whitespace-nowrap ${giorniMancantiCheck < 0 ? "text-rose-500" : giorniMancantiCheck <= 3 ? "text-amber-500" : "text-slate-600"}`}>
+                        <span className={`font-medium whitespace-nowrap ${giorniMancantiCheck < 0 ? "text-slate-800" : giorniMancantiCheck <= 3 ? "text-slate-500" : "text-slate-600"}`}>
                           {giorniMancantiCheck < 0 ? `${Math.abs(giorniMancantiCheck)}g di ritardo` : giorniMancantiCheck === 0 ? "oggi" : `tra ${giorniMancantiCheck}g`}
                         </span>
                         <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(c.prossimo_check)}</div>
@@ -10024,8 +9998,8 @@ function GrigliaCompletezza({ clients, onSelect }) {
         </table>
       </div>
       <div className="flex flex-wrap gap-3 text-[11px] text-slate-400 px-3 py-2 border-t border-slate-100">
-        <span className="flex items-center gap-1 text-emerald-500">● presente</span>
-        <span className="flex items-center gap-1 text-rose-400">○ mancante</span>
+        <span className="flex items-center gap-1 text-sky-500">● presente</span>
+        <span className="flex items-center gap-1 text-slate-600">○ mancante</span>
         <span>n/d = non si applica (pacchetto senza scadenza fissa)</span>
       </div>
     </Card>
@@ -10096,7 +10070,7 @@ function CandidatureCoach({ onClientiCambiati }) {
               </p>
             </div>
             {c.stato === "contattata" && <Badge className="bg-sky-50 text-sky-600">Contattata</Badge>}
-            {c.stato === "convertita" && <Badge className="bg-emerald-50 text-emerald-600">Diventata cliente</Badge>}
+            {c.stato === "convertita" && <Badge className="bg-sky-50 text-sky-600">Diventata cliente</Badge>}
             {c.stato === "archiviata" && <Badge className="bg-slate-100 text-slate-500">Archiviata</Badge>}
           </div>
 
@@ -10115,7 +10089,7 @@ function CandidatureCoach({ onClientiCambiati }) {
             {c.citta && <p>Città: {c.citta}</p>}
             {c.tipo_lavoro && <p>Lavoro: {c.tipo_lavoro}</p>}
             {c.problematiche_salute?.length > 0 && (
-              <p className="text-amber-700">⚠ {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
+              <p className="text-slate-700">⚠ {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
             )}
             {c.note && <p className="italic text-slate-500">"{c.note}"</p>}
             <p className="text-[11px] text-slate-400">Candidatura del {new Date(c.created_at).toLocaleDateString("it-IT")}</p>
@@ -10227,7 +10201,7 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
           <option value="gratuito">gratuito</option>
         </select>
       </div>
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -10336,8 +10310,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const statoScad = (d) => {
     if (!d) return { classe: "", testo: "" };
     const g = Math.round((new Date(d + "T00:00:00") - new Date(new Date().toISOString().slice(0, 10) + "T00:00:00")) / 86400000);
-    if (g < 0) return { classe: "text-rose-500 font-medium", testo: " (scaduto da " + Math.abs(g) + "g)" };
-    if (g <= 7) return { classe: "text-amber-500 font-medium", testo: g === 0 ? " (oggi)" : " (tra " + g + "g)" };
+    if (g < 0) return { classe: "text-slate-800 font-medium", testo: " (scaduto da " + Math.abs(g) + "g)" };
+    if (g <= 7) return { classe: "text-slate-500 font-medium", testo: g === 0 ? " (oggi)" : " (tra " + g + "g)" };
     return { classe: "text-slate-600", testo: " (tra " + g + "g)" };
   };
 
@@ -10380,7 +10354,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
               <span className="text-sky-500 text-lg leading-none">☰</span>
               <span className="font-semibold text-slate-800 text-sm">{corrente ? corrente.l : "Menu"}</span>
               <span className="ml-auto flex items-center gap-2">
-                {totale > 0 && !menuAperto && <span className="bg-rose-500 text-white text-[10px] font-bold rounded-full px-1.5 min-w-[20px] h-5 flex items-center justify-center">{totale}</span>}
+                {totale > 0 && !menuAperto && <span className="bg-slate-800 text-white text-[10px] font-bold rounded-full px-1.5 min-w-[20px] h-5 flex items-center justify-center">{totale}</span>}
                 <span className="text-slate-400 text-xs">{menuAperto ? "▲" : "▼"}</span>
               </span>
             </button>
@@ -10390,7 +10364,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
                   <button key={v.k} onClick={() => { setVista(v.k); setMenuAperto(false); }}
                     className={`relative py-2.5 rounded-xl text-xs font-medium ${vista === v.k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
                     {v.l}
-                    {v.b > 0 && <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{v.b}</span>}
+                    {v.b > 0 && <span className="absolute -top-1.5 -right-1.5 bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{v.b}</span>}
                   </button>
                 ))}
               </div>
@@ -10414,8 +10388,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
 
       <div className="grid grid-cols-3 gap-3">
-        {filtriBtn("da_fare", "Check da fare", daFare.length, "bg-amber-50 text-amber-700")}
-        {filtriBtn("in_scadenza", "In scadenza", inScadenza.length, "bg-rose-50 text-rose-700")}
+        {filtriBtn("da_fare", "Check da fare", daFare.length, "bg-slate-100 text-slate-700")}
+        {filtriBtn("in_scadenza", "In scadenza", inScadenza.length, "bg-slate-100 text-slate-800")}
         {filtriBtn("scaduti", "Scaduti", scaduti.length, "bg-slate-100 text-slate-600")}
       </div>
       <div className="flex gap-2">
@@ -10454,7 +10428,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         {vistaLista === "schede" && (
         <div className="space-y-2">
           {visibili.map((c) => (
-            <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50 border-rose-100" : ""}`}>
+            <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-slate-100/50 border-slate-200" : ""}`}>
               {riordinabile && (
                 <div className="flex flex-col flex-shrink-0">
                   <button onClick={() => spostaOrdine(c.id, -1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none py-0.5">▲</button>
@@ -10465,7 +10439,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="font-medium text-slate-700 "><NomeCl c={c} /></p>
-                    <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
+                    <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-sky-100 text-sky-700" : "bg-sky-100 text-sky-700"}`}>
                       {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
                     {c.archiviato && <Badge className="flex-shrink-0 bg-slate-200 text-slate-500">ARCHIVIATO</Badge>}
@@ -10690,16 +10664,16 @@ function AdminApp({ onVistaCliente }) {
         </div>
       </div>
       {selectedId ? (
-        <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
+        <div className="lg:flex lg:items-start">
+          <ElencoLaterale clients={clients} attivoId={selectedId} onSelect={setSelectedId} />
+          <div className="flex-1 min-w-0"><AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} /></div>
+        </div>
       ) : (
         <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} vista={vista} setVista={setVista}
           backupInCorso={backupInCorso} onBackup={() => esportaBackupCompleto(setBackupInCorso)} />
       )}
     </div>
     </PullToRefresh>
-    <ChatBolla chiave="coach" conteggio={chatCoachNuove} titolo="Chat" onChiudi={contaChatCoach}>
-      <ChatCoach clients={clients.filter((c) => !c.archiviato)} onChanged={contaChatCoach} />
-    </ChatBolla>
     </ApriClienteCtx.Provider>
   );
 }
@@ -10739,7 +10713,7 @@ function ImpostaPassword({ onFatto }) {
             className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
           <input type="password" placeholder="Ripeti la password" value={conferma} onChange={(e) => setConferma(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
-          {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+          {errore && <p className="text-slate-600 text-xs">{errore}</p>}
           <button disabled={salvando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
             {salvando ? "Salvo..." : "Crea password ed entra"}
           </button>

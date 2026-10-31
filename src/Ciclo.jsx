@@ -27,9 +27,9 @@ function fmtCorta(s) { return parseDate(s).toLocaleDateString("it-IT", { day: "n
 
 const FASI = ["mestruale", "follicolare", "ovulatoria", "luteale", "premestruale"];
 const STILE = {
-  mestruale: { bg: "bg-rose-100", testo: "text-rose-700", punto: "bg-rose-400", barra: "bg-rose-50 border-rose-100" },
-  follicolare: { bg: "bg-emerald-100", testo: "text-emerald-700", punto: "bg-emerald-400", barra: "bg-emerald-50 border-emerald-100" },
-  ovulatoria: { bg: "bg-amber-100", testo: "text-amber-700", punto: "bg-amber-400", barra: "bg-amber-50 border-amber-100" },
+  mestruale: { bg: "bg-slate-200", testo: "text-slate-800", punto: "bg-slate-600", barra: "bg-slate-100 border-slate-200" },
+  follicolare: { bg: "bg-sky-100", testo: "text-sky-700", punto: "bg-sky-400", barra: "bg-sky-50 border-sky-100" },
+  ovulatoria: { bg: "bg-slate-100", testo: "text-slate-700", punto: "bg-slate-400", barra: "bg-slate-100 border-slate-100" },
   luteale: { bg: "bg-indigo-100", testo: "text-indigo-700", punto: "bg-indigo-400", barra: "bg-indigo-50 border-indigo-100" },
   premestruale: { bg: "bg-slate-200", testo: "text-slate-700", punto: "bg-slate-500", barra: "bg-slate-50 border-slate-200" },
 };
@@ -267,7 +267,7 @@ export default function CicloCliente({ client, isAdmin = false }) {
           <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Calendario ciclo visibile alla cliente</span>
             <button onClick={() => salvaImpostazioni({ attivo: !attivo })}
-              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${attivo ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${attivo ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
           </div>

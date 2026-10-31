@@ -143,8 +143,8 @@ export default function AnalisiCibo({ client }) {
   const ok = a.compilati.length > 0 && err.length === 0;
 
   const datiGrafico = a.tutti.map((g) => ({ data: breve(g.data), Proteine: g.kcal ? n0(g.p) : null, Carboidrati: g.kcal ? n0(g.c) : null, Grassi: g.kcal ? n0(g.g) : null, kcal: g.kcal ? n0(g.kcal) : null }));
-  const colori = { r: "bg-rose-50 text-rose-700", a: "bg-amber-50 text-amber-700", g: "bg-emerald-50 text-emerald-700" };
-  const icone = { r: "🔴", a: "🟡", g: "🟢" };
+  const colori = { r: "bg-slate-800 text-white", a: "bg-slate-100 text-slate-700", g: "bg-sky-50 text-sky-700" };
+  const icone = { r: "●", a: "◐", g: "✓" };
 
   const scrivi = async () => {
     const nome1 = (client.nome || "").trim().split(" ")[0];
@@ -173,7 +173,7 @@ export default function AnalisiCibo({ client }) {
         <p className="text-[11px] text-slate-400 -mt-2">Solo per te, la cliente non lo vede.</p>
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-700">In prep gara</span>
-          <button onClick={() => salvaImp({ prep: !prep })} className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${prep ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}><span className="w-5 h-5 bg-white rounded-full shadow" /></button>
+          <button onClick={() => salvaImp({ prep: !prep })} className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${prep ? "bg-sky-600 justify-end" : "bg-slate-300 justify-start"}`}><span className="w-5 h-5 bg-white rounded-full shadow" /></button>
         </div>
         <div>
           <p className="text-xs text-slate-500 mb-1">Fase</p>
@@ -193,8 +193,8 @@ export default function AnalisiCibo({ client }) {
         <Card className="p-4 space-y-3">
           <div className="flex gap-3 text-[11px] text-slate-600">
             <span><i className="inline-block w-2 h-2 rounded-full bg-sky-500 mr-1" />Proteine</span>
-            <span><i className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1" />Carbo</span>
-            <span><i className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-1" />Grassi</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-slate-800 mr-1" />Carbo</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-slate-400 mr-1" />Grassi</span>
             <span className="text-slate-400">grammi al giorno</span>
           </div>
           <div style={{ width: "100%", height: 180 }}>
@@ -205,16 +205,16 @@ export default function AnalisiCibo({ client }) {
                 <YAxis tick={{ fontSize: 10 }} width={34} />
                 <Tooltip />
                 <Line type="monotone" dataKey="Proteine" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 2 }} connectNulls />
-                <Line type="monotone" dataKey="Carboidrati" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} connectNulls />
-                <Line type="monotone" dataKey="Grassi" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                <Line type="monotone" dataKey="Carboidrati" stroke="#1e293b" strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                <Line type="monotone" dataKey="Grassi" stroke="#94a3b8" strokeWidth={2} dot={{ r: 2 }} connectNulls />
               </LineChart>
             </ResponsiveContainer>
           </div>
           <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pt-1">Media al giorno{piano ? " vs piano" : ""}</p>
           <Barra etichetta="Kcal" valore={n0(a.mk)} target={piano ? Number(piano.kcal) : null} colore="bg-slate-500" />
           <Barra etichetta="Proteine g" valore={n0(a.mp)} target={piano ? Number(piano.proteine_g) : null} colore="bg-sky-500" />
-          <Barra etichetta="Carboidrati g" valore={n0(a.mc)} target={piano ? Number(piano.carboidrati_g) : null} colore="bg-emerald-500" />
-          <Barra etichetta="Grassi g" valore={n0(a.mg)} target={piano ? Number(piano.grassi_g) : null} colore="bg-amber-500" />
+          <Barra etichetta="Carboidrati g" valore={n0(a.mc)} target={piano ? Number(piano.carboidrati_g) : null} colore="bg-slate-800" />
+          <Barra etichetta="Grassi g" valore={n0(a.mg)} target={piano ? Number(piano.grassi_g) : null} colore="bg-slate-400" />
           {!piano && <p className="text-[11px] text-slate-400">Nessun piano attivo: vedi solo cosa mangia, senza confronto.{peso ? ` Proteine: ${(a.mp / peso).toFixed(1)} g per kg.` : ""}</p>}
         </Card>
       )}
@@ -222,9 +222,9 @@ export default function AnalisiCibo({ client }) {
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cosa non va</p>
         {err.map((e, i) => <div key={i} className={`${colori[e.livello]} rounded-xl px-3 py-2 text-[13px] leading-snug`}>{icone[e.livello]} {e.testo}</div>)}
-        {ok && <div className={`${colori.g} rounded-xl px-3 py-2 text-[13px]`}>🟢 Tutto in linea nel periodo ✨</div>}
+        {ok && <div className={`${colori.g} rounded-xl px-3 py-2 text-[13px]`}>✓ Tutto in linea nel periodo ✨</div>}
         {err.length > 0 && (inviato
-          ? <p className="text-emerald-600 text-xs pt-1">Messaggio inviato ✓</p>
+          ? <p className="text-sky-700 text-xs pt-1">Messaggio inviato ✓</p>
           : <button onClick={scrivi} disabled={invio} className="text-sky-700 text-[13px] font-medium pt-1 disabled:opacity-50">✨ Scrivi un messaggio su questo →</button>)}
       </Card>
 

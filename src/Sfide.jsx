@@ -166,7 +166,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0"><Trophy size={20} /></div>
+        <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0"><Trophy size={20} /></div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-slate-800 text-sm">{sfida.titolo}</p>
           <p className="text-xs text-slate-500 mt-0.5">{descriviSfida(sfida)}</p>
@@ -174,7 +174,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
       </div>
       {sfida.descrizione && <p className="text-sm text-slate-600 whitespace-pre-wrap">{sfida.descrizione}</p>}
       {sfida.premio && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-sm text-amber-800">
+        <div className="flex items-center gap-2 bg-slate-100 border border-slate-100 rounded-xl px-3 py-2 text-sm text-slate-800">
           <Gift size={16} className="flex-shrink-0" /> <span>Premio: {sfida.premio}</span>
         </div>
       )}
@@ -194,7 +194,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
       )}
 
       {adesione && adesione.stato === "completata" && (
-        <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 rounded-xl px-3 py-3 text-sm">
+        <div className="bg-sky-50 border border-sky-100 text-sky-700 rounded-xl px-3 py-3 text-sm">
           Sfida completata, che brava! 🏆🔥
           {sfida.premio && <p className="mt-1">{adesione.premio_consegnato ? "Il tuo premio è già stato consegnato ✨" : "Il tuo premio ti aspetta: Morgana ti scrive presto 🫶🏻"}</p>}
         </div>
@@ -211,7 +211,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
           <p className="text-sm text-slate-600">Carichi raggiunti: <span className="font-semibold">{av.fatti}</span> su {av.totale}. Quando li hai tutti, vinci! 🏆</p>
           <div className="space-y-2">
             {av.voci.map((v) => (
-              <div key={v.nome} className={`rounded-xl border px-3 py-2 ${v.ok ? "bg-emerald-50 border-emerald-100" : "bg-white border-slate-200"}`}>
+              <div key={v.nome} className={`rounded-xl border px-3 py-2 ${v.ok ? "bg-sky-50 border-sky-100" : "bg-white border-slate-200"}`}>
                 <div className="flex justify-between gap-2 text-sm">
                   <span className="font-medium text-slate-800">{v.ok ? "✅ " : ""}{v.nome}</span>
                   <span className="text-slate-600">{fmtNum(v.kg)} kg{v.rip ? ` × ${v.rip}` : ""}</span>
@@ -233,7 +233,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
           </div>
           <input type="text" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)"
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+          {errore && <p className="text-slate-800 text-sm">{errore}</p>}
         </div>
       )}
 
@@ -243,7 +243,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
             <>
               <div className="flex gap-1.5 flex-wrap">
                 {Array.from({ length: av.totale }).map((_, i) => (
-                  <span key={i} className={`w-7 h-7 rounded-lg text-[11px] font-semibold flex items-center justify-center ${i < av.fatti ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-400"}`}>{i + 1}</span>
+                  <span key={i} className={`w-7 h-7 rounded-lg text-[11px] font-semibold flex items-center justify-center ${i < av.fatti ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-400"}`}>{i + 1}</span>
                 ))}
               </div>
               <p className="text-sm text-slate-600">
@@ -266,7 +266,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
             <input type="text" value={video} onChange={(e) => setVideo(e.target.value)} placeholder="Link al video della prova (obbligatorio) 🎥"
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-            {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+            {errore && <p className="text-slate-800 text-sm">{errore}</p>}
             <button onClick={salva} disabled={lavoro} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
               {lavoro ? "Salvo..." : oggiReg ? "Aggiorna il risultato di oggi" : "Salva il risultato"}
             </button>
@@ -294,7 +294,7 @@ function SchedaSfidaCliente({ sfida, adesione, regs, client, onCambiato, onAbban
             <div className="space-y-2 pt-2">
               <p className="text-sm text-slate-600">Vuoi davvero lasciare questa sfida? 🫶🏻 I risultati che hai salvato verranno cancellati, ma potrai ricominciare quando vorrai.</p>
               <div className="flex gap-2">
-                <button onClick={abbandona} disabled={lavoro} className="flex-1 bg-rose-500 text-white rounded-xl py-2 text-sm font-medium">{lavoro ? "Un attimo..." : "Sì, abbandono"}</button>
+                <button onClick={abbandona} disabled={lavoro} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{lavoro ? "Un attimo..." : "Sì, abbandono"}</button>
                 <button onClick={() => setConfermaAbb(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-600">Continuo</button>
               </div>
             </div>
@@ -359,20 +359,20 @@ export function SfideCliente({ client }) {
         const av = ad ? avanzamento(s, regs.filter((r) => r.adesione_id === ad.id)) : null;
         let etichetta = "Nuova ✨";
         let colore = "bg-sky-100 text-sky-700";
-        if (ad && ad.stato === "completata") { etichetta = "Completata 🏆"; colore = "bg-emerald-100 text-emerald-700"; }
-        else if (ad && ad.stato === "da_approvare") { etichetta = "In verifica"; colore = "bg-amber-100 text-amber-700"; }
+        if (ad && ad.stato === "completata") { etichetta = "Completata 🏆"; colore = "bg-sky-100 text-sky-700"; }
+        else if (ad && ad.stato === "da_approvare") { etichetta = "In verifica"; colore = "bg-slate-100 text-slate-700"; }
         else if (ad) { etichetta = av && av.tipo !== "obiettivo" ? `In corso · ${av.fatti}/${av.totale}` : "In corso"; colore = "bg-slate-100 text-slate-600"; }
         return (
           <Card key={s.id} className="p-4 space-y-2">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0"><Trophy size={20} /></div>
+              <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0"><Trophy size={20} /></div>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-slate-800 text-sm">{s.titolo}</p>
                 <p className="text-xs text-slate-500 mt-0.5">{descriviSfida(s)}</p>
               </div>
               <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${colore}`}>{etichetta}</span>
             </div>
-            {s.premio && <p className="text-xs text-amber-700">🎁 Premio: {s.premio}</p>}
+            {s.premio && <p className="text-xs text-slate-700">🎁 Premio: {s.premio}</p>}
             <button onClick={() => { setAperta(s.id); window.scrollTo(0, 0); }} className={`w-full rounded-xl py-2 text-sm font-medium ${!ad ? "bg-sky-500 text-white" : "bg-slate-100 text-slate-700"}`}>
               {!ad ? "Scopri la sfida" : ad.stato === "in_corso" ? "Apri la sfida" : "Apri"}
             </button>
@@ -450,7 +450,7 @@ export function CodiceAmicaCliente({ client, onAggiornato }) {
               <span className="text-base font-bold tracking-widest text-slate-800">{client.codice_amica}</span>
             </div>
             <button onClick={copia} className="p-2 rounded-lg border border-slate-200 text-slate-600" aria-label="Copia il codice">
-              {copiato ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} />}
+              {copiato ? <Check size={16} className="text-sky-500" /> : <Copy size={16} />}
             </button>
           </div>
           <p className="text-xs text-slate-600">Regalalo a una tua amica: quando si iscrive con il tuo codice, <span className="font-semibold">10 € di sconto per lei e 10 € di sconto per te</span> 🫶🏻</p>
@@ -461,7 +461,7 @@ export function CodiceAmicaCliente({ client, onAggiornato }) {
       {sconti.length > 0 && (
         <div className="space-y-2 pt-1">
           {daUsare.map((s) => (
-            <div key={s.id} className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2 text-sm text-emerald-800">
+            <div key={s.id} className="flex items-center justify-between bg-sky-50 border border-sky-100 rounded-xl px-3 py-2 text-sm text-sky-800">
               <span>🎁 Sconto di {fmtNum(s.importo)} € {s.motivo === "invito" ? "perché un'amica ha usato il tuo codice" : "per aver usato un codice amica"}</span>
               <span className="text-[11px] font-medium">da usare</span>
             </div>
@@ -625,7 +625,7 @@ function FormSfida({ iniziale, clienti, onSalvato, onAnnulla }) {
           </div>
         )}
       </div>
-      {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+      {errore && <p className="text-slate-800 text-sm">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={lavoro} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{lavoro ? "Salvo..." : "Salva sfida"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -714,7 +714,7 @@ function SfideCoachTab({ clienti, onCambiato }) {
             return (
               <Card key={ad.id} className="p-4 space-y-2">
                 <p className="text-sm font-semibold text-slate-800">{nomeCompleto(ad.clients)} · {s?.titolo}</p>
-                {s?.premio && <p className="text-xs text-amber-700">Premio: {s.premio}</p>}
+                {s?.premio && <p className="text-xs text-slate-700">Premio: {s.premio}</p>}
                 <div className="space-y-0.5">
                   {mie.map((r) => (
                     <p key={r.id} className="text-xs text-slate-600">
@@ -726,7 +726,7 @@ function SfideCoachTab({ clienti, onCambiato }) {
                 <input type="text" value={messaggi[ad.id] || ""} onChange={(e) => setMessaggi((m) => ({ ...m, [ad.id]: e.target.value }))}
                   placeholder="Un pensiero per lei (facoltativo)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                 <div className="flex gap-2">
-                  <button onClick={() => conferma(ad)} disabled={lavoro === ad.id} className="flex-1 bg-emerald-500 text-white rounded-xl py-2 text-sm font-medium">Conferma e assegna il premio ✨</button>
+                  <button onClick={() => conferma(ad)} disabled={lavoro === ad.id} className="flex-1 bg-sky-500 text-white rounded-xl py-2 text-sm font-medium">Conferma e assegna il premio ✨</button>
                   <button onClick={() => nonAncora(ad)} disabled={lavoro === ad.id} className="px-3 rounded-xl border border-slate-200 text-sm text-slate-600">Non ancora</button>
                 </div>
               </Card>
@@ -769,15 +769,15 @@ function SfideCoachTab({ clienti, onCambiato }) {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-slate-800">{s.titolo}</p>
                   <p className="text-xs text-slate-500">{descriviSfida(s)}</p>
-                  {s.premio && <p className="text-xs text-amber-700 mt-0.5">Premio: {s.premio}</p>}
+                  {s.premio && <p className="text-xs text-slate-700 mt-0.5">Premio: {s.premio}</p>}
                   <p className="text-xs text-slate-400 mt-0.5">{s.client_ids ? `${s.client_ids.length} clienti scelte` : "Per tutte le clienti"} · {mie.length} partecipanti · {fatte} completate</p>
                 </div>
-                <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 ${s.attiva ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{s.attiva ? "attiva" : "in pausa"}</span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 ${s.attiva ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500"}`}>{s.attiva ? "attiva" : "in pausa"}</span>
               </div>
               <div className="flex gap-3 text-xs font-medium">
                 <button onClick={() => setForm({ id: s.id, titolo: s.titolo, descrizione: s.descrizione || "", tipo: s.tipo, unita: s.unita || "", giorni: s.giorni != null ? String(s.giorni) : "", tappe: s.tappe || "", voci: s.voci || "", traguardo: s.traguardo != null ? String(s.traguardo) : "", premio: s.premio || "", tutte: !s.client_ids, client_ids: s.client_ids || [] })} className="text-sky-600">Modifica</button>
                 <button onClick={() => cambiaAttiva(s)} className="text-slate-600">{s.attiva ? "Metti in pausa" : "Riattiva"}</button>
-                <button onClick={() => elimina(s)} className="text-rose-500">Elimina</button>
+                <button onClick={() => elimina(s)} className="text-slate-800">Elimina</button>
               </div>
               {mie.length > 0 && (
                 <div className="pt-1 space-y-0.5">
@@ -872,12 +872,12 @@ function CodiciAmicaCoachTab({ onCambiato }) {
               <div key={c.id} className="px-4 py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm text-slate-800">{nomeCompleto(c)}</p>
-                  {invitate.length > 0 && <p className="text-xs text-emerald-700">Ha invitato: {invitate.map(nomeCompleto).join(", ")}</p>}
+                  {invitate.length > 0 && <p className="text-xs text-sky-700">Ha invitato: {invitate.map(nomeCompleto).join(", ")}</p>}
                   {c.codice_usato && <p className="text-xs text-slate-400">È arrivata con il codice {c.codice_usato}</p>}
                 </div>
                 <button onClick={async () => { if (await copiaTesto(c.codice_amica)) { setCopiato(c.id); setTimeout(() => setCopiato(""), 1500); } }}
                   className="flex items-center gap-1.5 text-xs font-semibold tracking-wider bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 flex-shrink-0">
-                  {c.codice_amica} {copiato === c.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} className="text-slate-400" />}
+                  {c.codice_amica} {copiato === c.id ? <Check size={13} className="text-sky-500" /> : <Copy size={13} className="text-slate-400" />}
                 </button>
               </div>
             );

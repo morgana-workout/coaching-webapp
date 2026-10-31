@@ -128,7 +128,7 @@ function numeroWhatsApp(tel) {
   return n;
 }
 
-export default function MessaggioPronto({ client, chiuso = true }) {
+export default function MessaggioPronto({ client, chiuso = true, soloCopia = false }) {
   const [aperto, setAperto] = useState(!chiuso);
   const [dati, setDati] = useState(null);
   const [seme, setSeme] = useState(0);
@@ -175,16 +175,16 @@ export default function MessaggioPronto({ client, chiuso = true }) {
       {carico && <p className="text-xs text-slate-500">Preparo il messaggio...</p>}
       {!carico && (
         <>
-          {motivo && <p className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold">Perché scriverle: {motivo}</p>}
+          {motivo && !soloCopia && <p className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold">Perché scriverle: {motivo}</p>}
           <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={9} className="w-full text-[13px] leading-relaxed text-slate-800 bg-white border border-slate-200 rounded-xl px-3 py-2" />
           <div className="flex gap-2">
             <button onClick={copia} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-[13px] font-medium">{copiato ? "Copiato ✓" : "Copia"}</button>
-            {num
-              ? <a href={`https://wa.me/${num}?text=${encodeURIComponent(testo)}`} target="_blank" rel="noreferrer" className="flex-1 text-center bg-emerald-600 text-white rounded-xl py-2 text-[13px] font-medium">Apri WhatsApp</a>
-              : <span className="flex-1 text-center bg-slate-100 text-slate-400 rounded-xl py-2 text-[12px]">Numero non salvato</span>}
+            {!soloCopia && (num
+              ? <a href={`https://wa.me/${num}?text=${encodeURIComponent(testo)}`} target="_blank" rel="noreferrer" className="flex-1 text-center bg-sky-700 text-white rounded-xl py-2 text-[13px] font-medium">Apri WhatsApp</a>
+              : <span className="flex-1 text-center bg-slate-100 text-slate-400 rounded-xl py-2 text-[12px]">Numero non salvato</span>)}
             <button onClick={rigenera} className="border border-slate-300 text-slate-600 rounded-xl px-3 py-2 text-[13px]" aria-label="Altra versione">↻</button>
           </div>
-          <button onClick={() => setAperto(false)} className="text-[11px] text-slate-400">Chiudi</button>
+          {!soloCopia && <button onClick={() => setAperto(false)} className="text-[11px] text-slate-400">Chiudi</button>}
         </>
       )}
     </div>

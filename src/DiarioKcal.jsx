@@ -166,7 +166,7 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
         <button onClick={salva} disabled={salvando || n(kcal) == null} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-40">{salvando ? "Salvo..." : "Salva totali"}</button>
         <button onClick={onChiudi} className="px-4 text-sm text-slate-500 border border-slate-200 rounded-xl">Annulla</button>
       </div>
-      {esistente?.id && <button onClick={elimina} className="text-xs text-rose-500 underline">Elimina i totali di questo giorno</button>}
+      {esistente?.id && <button onClick={elimina} className="text-xs text-slate-800 underline">Elimina i totali di questo giorno</button>}
     </Card>
   );
 }
@@ -215,11 +215,11 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
           <div className="bg-slate-50 rounded-xl px-3 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.c)} g</div><div className="text-slate-400 text-xs">Carboidrati</div></div>
           <div className="bg-slate-50 rounded-xl px-3 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.g)} g</div><div className="text-slate-400 text-xs">Grassi</div></div>
         </div>
-        {totaleMacro.mancanti > 0 && <p className="text-amber-600 text-xs">Macro parziali: {totaleMacro.mancanti} alimento/i senza valori inseriti.</p>}
+        {totaleMacro.mancanti > 0 && <p className="text-slate-600 text-xs">Macro parziali: {totaleMacro.mancanti} alimento/i senza valori inseriti.</p>}
 
         {obiettivo ? (
           <div>
-            <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${sopra ? "bg-amber-500" : "bg-sky-500"}`} style={{ width: pct + "%" }} /></div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${sopra ? "bg-slate-500" : "bg-sky-500"}`} style={{ width: pct + "%" }} /></div>
             <div className="mt-1.5">
               <span className="text-slate-500 text-xs">{sopra ? `Sopra di ${Math.round(totaleKcal - obiettivo)}` : `Restano ${Math.round(obiettivo - totaleKcal)}`} kcal su {num(obiettivo)} (dal tuo piano)</span>
             </div>
@@ -400,7 +400,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
             <div className="flex gap-2">
               <button onClick={conferma} disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-50">{salvando ? "Salvo..." : sheet.entryId ? "Salva modifica" : `Aggiungi a ${nomeTitolo}`}</button>
               {sheet.entryId
-                ? <button onClick={elimina} disabled={salvando} className="px-4 border border-rose-200 text-rose-600 text-sm font-medium rounded-xl">Elimina</button>
+                ? <button onClick={elimina} disabled={salvando} className="px-4 border border-slate-300 text-slate-800 text-sm font-medium rounded-xl">Elimina</button>
                 : <button onClick={() => setFood(null)} className="px-4 border border-slate-200 text-slate-500 text-sm font-medium rounded-xl">Cambia</button>}
             </div>
           </>
@@ -506,7 +506,7 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
         <div><label className="text-slate-400 text-xs">Quantità abituale (facoltativa)</label><input type="number" inputMode="decimal" step="any" min="0" value={f.quantita_abituale} onChange={set("quantita_abituale")} placeholder="Compare già pronta quando lo aggiungi" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
         <div className="flex gap-2 pt-1">
           <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-50">{salvando ? "Salvo..." : "Salva alimento"}</button>
-          {alimento?.id && <button type="button" onClick={elimina} disabled={salvando} className="px-4 border border-rose-200 text-rose-600 text-sm font-medium rounded-xl">Elimina</button>}
+          {alimento?.id && <button type="button" onClick={elimina} disabled={salvando} className="px-4 border border-slate-300 text-slate-800 text-sm font-medium rounded-xl">Elimina</button>}
         </div>
         {alimento?.id && <p className="text-slate-400 text-[11px]">Se modifichi le kcal, le voci già registrate nel diario restano com'erano.</p>}
       </form>
@@ -578,7 +578,7 @@ function StoricoKcal({ voci, obiettivo, onVaiAGiorno }) {
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
             <YAxis tick={{ fontSize: 12, fill: "#64748b" }} />
             <Tooltip formatter={(v) => [v + " kcal", periodo === "giorno" ? "Totale" : "Media/giorno"]} />
-            {obiettivo && <ReferenceLine y={obiettivo} stroke="#f59e0b" strokeDasharray="4 4" />}
+            {obiettivo && <ReferenceLine y={obiettivo} stroke="#94a3b8" strokeDasharray="4 4" />}
             <Bar dataKey="kcal" fill="#0ea5e9" radius={[4, 4, 0, 0]} cursor={periodo === "giorno" ? "pointer" : "default"} />
           </BarChart>
         </ResponsiveContainer>
@@ -638,7 +638,7 @@ function AnalisiCoach({ voci, obiettivo }) {
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} interval={6} />
             <YAxis tick={{ fontSize: 12, fill: "#64748b" }} domain={["auto", "auto"]} />
             <Tooltip />
-            {obiettivo && <ReferenceLine y={obiettivo} stroke="#f59e0b" strokeDasharray="4 4" />}
+            {obiettivo && <ReferenceLine y={obiettivo} stroke="#94a3b8" strokeDasharray="4 4" />}
             <Line type="monotone" dataKey="kcal" stroke="#0ea5e9" strokeWidth={2} dot={false} connectNulls />
           </LineChart>
         </ResponsiveContainer>
