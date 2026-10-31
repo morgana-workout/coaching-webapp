@@ -39,7 +39,11 @@ export function QuadroGenerale({ client, checkins }) {
   const incluse = client.pacchetto_lezioni ? Number(client.pacchetto_lezioni) : 0;
   useEffect(() => {
     if (isBulb && incluse) {
-      supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("fatta", true).then(({ count }) => setLezioni(count ?? 0));
+      supabase.from("lezioni_svolte").select("fatta, data").eq("client_id", client.id).then(({ data }) => {
+        const oggi = new Date(); const o = oggi.getFullYear() + "-" + String(oggi.getMonth() + 1).padStart(2, "0") + "-" + String(oggi.getDate()).padStart(2, "0");
+        // conta come svolta anche una lezione con data già passata (se viene annullata la data si toglie)
+        setLezioni((data || []).filter((l) => l.fatta || (l.data && l.data < o)).length);
+      });
     } else setLezioni(null);
     setInizioReale(null);
     if (!client.data_inizio) {
