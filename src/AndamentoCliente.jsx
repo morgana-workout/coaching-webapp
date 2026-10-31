@@ -42,8 +42,8 @@ function calcola(client, d) {
   const trCorr = giorniTr(rangeCorr), trPrec = giorniTr(rangePrec);
   if (trCorr > 0 || trPrec > 0) {
     const sc = prog === null ? costanza(rangeCorr) : costanza(rangeCorr) * 0.6 + prog * 0.4;
-    aree.push({ k: "Allenamento", v: Math.round(sc), p: trPrec > 0 ? Math.round(costanza(rangePrec)) : null, nota: giorniTr(rangeCorr) + " allenamenti in 30 gg" + (prog !== null ? " · carichi " + (prog >= 55 ? "in salita" : prog <= 45 ? "in calo" : "stabili") : "") });
-  } else aree.push({ k: "Allenamento", v: 0, p: null, nota: "nessun allenamento segnato" });
+    aree.push({ k: "Aderenza all'allenamento", v: Math.round(sc), p: trPrec > 0 ? Math.round(costanza(rangePrec)) : null, nota: giorniTr(rangeCorr) + " sedute in 30 gg" + (prog !== null ? " · carico di lavoro " + (prog >= 55 ? "in progressione" : prog <= 45 ? "in regressione" : "stabile") : "") });
+  } else aree.push({ k: "Aderenza all'allenamento", v: 0, p: null, nota: "nessuna seduta registrata" });
 
   // CORPO: peso e ombelico (ultimo check vs quello di circa 30 giorni prima), letti in base alla fase
   const ck = [...d.ck].filter((c) => c.data_check).sort((a, b) => b.data_check.localeCompare(a.data_check));
@@ -62,13 +62,13 @@ function calcola(client, d) {
     else if (fase === "recomp") { if (dp !== null) parti.push(clamp(100 - Math.abs(dp) * 50)); if (dv !== null) parti.push(comp(-dv, 2)); }
     else { if (dv !== null) parti.push(comp(-dv, 2)); }
     if (!parti.length) return null;
-    return { v: Math.round(media(parti)), nota: [dp !== null ? (dp > 0 ? "+" : "") + dp.toFixed(1).replace(".", ",") + "% peso" : null, dv !== null ? (dv > 0 ? "+" : "") + dv.toFixed(1).replace(".", ",") + " cm ombelico" : null].filter(Boolean).join(" · ") };
+    return { v: Math.round(media(parti)), nota: [dp !== null ? (dp > 0 ? "+" : "") + dp.toFixed(1).replace(".", ",") + "% massa corporea" : null, dv !== null ? (dv > 0 ? "+" : "") + dv.toFixed(1).replace(".", ",") + " cm circonferenza addominale" : null].filter(Boolean).join(" · ") };
   };
   if (online) {
     const att = confronta(ck[0], 20, 50);
     const pre = ck[1] ? confronta(ck[1], 20, 50) : null;
-    if (att) aree.push({ k: "Corpo", v: att.v, p: pre ? pre.v : null, nota: att.nota + " (ultimo mese)" });
-    else aree.push({ k: "Corpo", v: null, p: null, nota: ck.length < 2 ? "servono almeno 2 check" : "nessun check recente da confrontare" });
+    if (att) aree.push({ k: "Composizione corporea", v: att.v, p: pre ? pre.v : null, nota: att.nota + " (30 gg)" });
+    else aree.push({ k: "Composizione corporea", v: null, p: null, nota: ck.length < 2 ? "servono almeno 2 rilevazioni (check)" : "nessuna rilevazione recente confrontabile" });
   }
 
   // ALIMENTAZIONE: giorni di diario compilati (obiettivo 70% dei giorni) 50% + proteine vs piano 50%
@@ -82,23 +82,23 @@ function calcola(client, d) {
       return { v: pr === null ? dia : dia * 0.5 + pr * 0.5, n, pr: media(Object.values(m)) };
     };
     const a = sc(rangeCorr), b = sc(rangePrec);
-    if (a) aree.push({ k: "Alimentazione", v: Math.round(a.v), p: b ? Math.round(b.v) : null, nota: "diario " + a.n + "/30 gg" + (d.piano && Number(d.piano.proteine_g) ? " · proteine " + Math.round(a.pr) + " g (piano " + d.piano.proteine_g + ")" : "") });
-    else aree.push({ k: "Alimentazione", v: 0, p: null, nota: "diario non compilato" });
+    if (a) aree.push({ k: "Aderenza nutrizionale", v: Math.round(a.v), p: b ? Math.round(b.v) : null, nota: "registrazione dieta " + a.n + "/30 gg" + (d.piano && Number(d.piano.proteine_g) ? " · apporto proteico " + Math.round(a.pr) + " g/die (target " + d.piano.proteine_g + ")" : "") });
+    else aree.push({ k: "Aderenza nutrizionale", v: 0, p: null, nota: "nessuna registrazione dieta" });
   }
 
   // PUNTUALITÀ CHECK: ≤30 gg dall'ultimo = 100, 45 gg o più = 0
   if (online) {
     if (ck[0]) {
       const x = -gg(ck[0].data_check);
-      aree.push({ k: "Puntualità check", v: Math.round(clamp(100 - ((x - 30) / 15) * 100)), p: null, nota: "ultimo check " + x + " gg fa" });
-    } else aree.push({ k: "Puntualità check", v: 0, p: null, nota: "nessun check ancora" });
+      aree.push({ k: "Aderenza al monitoraggio", v: Math.round(clamp(100 - ((x - 30) / 15) * 100)), p: null, nota: "ultima rilevazione " + x + " gg fa" });
+    } else aree.push({ k: "Aderenza al monitoraggio", v: 0, p: null, nota: "nessuna rilevazione" });
   }
 
   // CICLO: ultimo inizio segnato entro 35 gg = 100, 70 gg o più = 0
   if (client.sesso !== "M" && d.cicloAttivo !== false) {
     const ult = d.ci.map((x) => x.data_inizio).filter(Boolean).sort().pop();
-    if (ult) { const x = -gg(ult); aree.push({ k: "Ciclo", v: Math.round(clamp(100 - ((x - 35) / 35) * 100)), p: null, nota: "ultimo inizio " + x + " gg fa" }); }
-    else aree.push({ k: "Ciclo", v: 0, p: null, nota: "mai segnato" });
+    if (ult) { const x = -gg(ult); aree.push({ k: "Monitoraggio ciclo", v: Math.round(clamp(100 - ((x - 35) / 35) * 100)), p: null, nota: "ultimo inizio ciclo " + x + " gg fa" }); }
+    else aree.push({ k: "Monitoraggio ciclo", v: 0, p: null, nota: "mai registrato" });
   }
 
   const conDati = aree.filter((a) => a.v !== null);
@@ -150,36 +150,36 @@ export default function AndamentoCliente({ client, checkins }) {
   return (
     <div className="bg-white border border-sky-200 rounded-2xl p-4 flex flex-col lg:flex-row gap-5">
       <div className="lg:w-64 bg-sky-100 rounded-xl p-4 flex-shrink-0">
-        <p className="text-[11px] text-slate-600">Indice andamento · ultimi 30 giorni</p>
+        <p className="text-[11px] text-slate-600">Indice di aderenza e progressione · ultimi 30 giorni</p>
         <p className="text-4xl font-bold text-sky-700 leading-tight my-1">{r.tot === null ? "—" : r.tot + "%"}</p>
-        <p className="text-[13px] font-semibold text-sky-700">{r.delta === null ? "dati ancora pochi per il confronto" : freccia(r.delta).replace("▲ +", "▲ +").replace(/(\d+)$/, "$1 punti rispetto al mese prima")}</p>
+        <p className="text-[13px] font-semibold text-sky-700">{r.delta === null ? "dati insufficienti per il confronto" : freccia(r.delta).replace("▲ +", "▲ +").replace(/(\d+)$/, "$1 punti vs 30 giorni precedenti")}</p>
         <Linea valori={r.sett} />
-        <p className="text-[11px] text-slate-600">ultime 8 settimane (allenamenti e diario)</p>
+        <p className="text-[11px] text-slate-600">ultime 8 settimane (frequenza allenamenti e registrazione dieta)</p>
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Per area</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Per dominio</p>
         {r.aree.map((a) => {
           const dd = a.v !== null && a.p !== null ? a.v - a.p : null;
           const basso = a.v !== null && (a.v < 40 || (dd !== null && dd < -1));
           return (
             <div key={a.k} className="mb-2.5">
-              <div className="grid grid-cols-[110px_1fr_40px_64px] gap-2.5 items-center text-[13px]">
+              <div className="grid grid-cols-[170px_1fr_40px_64px] gap-2.5 items-center text-[13px]">
                 <span className="text-slate-700">{a.k}</span>
                 <div className="h-2 bg-sky-100 rounded"><div className={`h-2 rounded ${basso ? "bg-slate-800" : "bg-sky-600"}`} style={{ width: (a.v ?? 0) + "%" }} /></div>
                 <b className="text-slate-800">{a.v === null ? "—" : a.v + "%"}</b>
                 <span className={`text-xs ${dd !== null && dd < -1 ? "text-slate-800" : "text-sky-700"}`}>{dd === null ? "" : freccia(dd)}</span>
               </div>
-              <p className="text-[11px] text-slate-500 pl-[118px]">{a.nota}</p>
+              <p className="text-[11px] text-slate-500 pl-[178px]">{a.nota}</p>
             </div>
           );
         })}
       </div>
       <div className="lg:w-56 flex-shrink-0 space-y-2">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Da guardare</p>
-        {su && su.d > 1 && <p className="bg-sky-100 text-sky-700 rounded-xl px-3 py-2 text-[13px]">▲ Più migliorata: {su.k} +{su.d}</p>}
-        {giu && giu.d < -1 && <p className="bg-slate-800 text-white rounded-xl px-3 py-2 text-[13px]">▼ Più calata: {giu.k} {giu.d}</p>}
-        {r.aree.filter((a) => a.v !== null && a.v < 40).slice(0, 2).map((a) => <p key={a.k} className="bg-slate-100 text-slate-600 rounded-xl px-3 py-2 text-[13px]">Da lavorare: {a.k} ({a.v}%)</p>)}
-        {!conDelta.length && <p className="text-[12px] text-slate-400">Il confronto col mese prima compare quando ci sono dati in entrambi i periodi.</p>}
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Variazioni rilevanti</p>
+        {su && su.d > 1 && <p className="bg-sky-100 text-sky-700 rounded-xl px-3 py-2 text-[13px]">▲ Maggior miglioramento: {su.k} +{su.d}</p>}
+        {giu && giu.d < -1 && <p className="bg-slate-800 text-white rounded-xl px-3 py-2 text-[13px]">▼ Maggior peggioramento: {giu.k} {giu.d}</p>}
+        {r.aree.filter((a) => a.v !== null && a.v < 40).slice(0, 2).map((a) => <p key={a.k} className="bg-slate-100 text-slate-600 rounded-xl px-3 py-2 text-[13px]">Area critica: {a.k} ({a.v}%)</p>)}
+        {!conDelta.length && <p className="text-[12px] text-slate-400">Il confronto con i 30 giorni precedenti richiede dati in entrambi i periodi.</p>}
       </div>
     </div>
   );

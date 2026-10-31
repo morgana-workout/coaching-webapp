@@ -113,30 +113,30 @@ export default function AnalisiCibo({ client }) {
   const push = (livello, testo) => err.push({ livello, testo });
   const soglia = prep ? 0.05 : 0.1;
   const quotaGiorni = a.compilati.length / giorni;
-  if (a.compilati.length === 0) push("r", "Nessun giorno compilato nel periodo: non riesco a valutare cosa mangia.");
+  if (a.compilati.length === 0) push("r", "Nessuna registrazione nel periodo: valutazione dell'intake non possibile.");
   else {
     if (quotaGiorni < (prep ? 0.9 : 0.6)) push(prep ? "r" : "a", `Diario compilato ${a.compilati.length} giorni su ${giorni}${prep ? ": in prep serve tutti i giorni" : ""}.`);
-    if (a.incompleti.length >= Math.max(2, a.compilati.length * 0.3)) push("a", `${a.incompleti.length} giorni con meno di 3 pasti segnati: i totali potrebbero essere sottostimati.`);
-    if (a.senzaCena.length >= Math.max(2, a.compilati.length * 0.3)) push("a", `Cena mancante in ${a.senzaCena.length} giorni.`);
+    if (a.incompleti.length >= Math.max(2, a.compilati.length * 0.3)) push("a", `${a.incompleti.length} giorni con meno di 3 pasti registrati: intake probabilmente sottostimato (under-reporting).`);
+    if (a.senzaCena.length >= Math.max(2, a.compilati.length * 0.3)) push("a", `Cena non registrata in ${a.senzaCena.length} giorni: dato incompleto.`);
     if (a.weekend.length && a.feriali.length) {
       const diff = a.mkW - a.mkF;
-      if (diff > a.mkF * (prep ? 0.1 : 0.15)) push("r", `Weekend fuori controllo: sabato e domenica +${n0(diff)} kcal rispetto ai giorni feriali.`);
-      else if (-diff > a.mkF * 0.2) push("a", `Nel weekend mangia molto meno (-${n0(-diff)} kcal): rischio di recupero con le abbuffate.`);
+      if (diff > a.mkF * (prep ? 0.1 : 0.15)) push("r", `Aderenza ridotta nel weekend: intake +${n0(diff)} kcal rispetto ai giorni feriali.`);
+      else if (-diff > a.mkF * 0.2) push("a", `Restrizione nel weekend (−${n0(-diff)} kcal): rischio di compenso con episodi di iperalimentazione.`);
     }
-    if (a.quota > 0.45) push("a", `La cena pesa il ${Math.round(a.quota * 100)}% delle kcal giornaliere.`);
+    if (a.quota > 0.45) push("a", `Distribuzione sbilanciata: la cena apporta il ${Math.round(a.quota * 100)}% dell'energia giornaliera.`);
     if (piano) {
       const tk = Number(piano.kcal), tp = Number(piano.proteine_g), tc = Number(piano.carboidrati_g), tg = Number(piano.grassi_g);
       const dk = (a.mk - tk) / tk;
-      if (fase === "cut" && dk > 0.03) push("r", `In cut ma mangia ${n0(a.mk - tk)} kcal sopra il piano in media.`);
-      else if (fase === "leanbulk" && dk < -0.03) push("r", `In lean bulk ma mangia ${n0(tk - a.mk)} kcal sotto il piano: non sta crescendo come dovrebbe.`);
+      if (fase === "cut" && dk > 0.03) push("r", `In fase di deficit (cut): intake medio +${n0(a.mk - tk)} kcal rispetto al piano, bilancio energetico non negativo.`);
+      else if (fase === "leanbulk" && dk < -0.03) push("r", `In fase di surplus (lean bulk): intake medio −${n0(tk - a.mk)} kcal rispetto al piano, surplus insufficiente per l'ipertrofia.`);
       else if (Math.abs(dk) > soglia) push(dk > 0 ? "r" : "a", `Media ${dk > 0 ? "sopra" : "sotto"} il piano di ${n0(Math.abs(a.mk - tk))} kcal.`);
-      if (tp && a.mp < tp * (prep ? 0.95 : 0.9)) push("r", `Proteine basse: ${Math.round((a.mp / tp) * 100)}% del target.`);
-      if (tc && Math.abs(a.mc - tc) / tc > (prep ? 0.12 : 0.2)) push("a", `Carboidrati ${a.mc > tc ? "sopra" : "sotto"} il piano di ${n0(Math.abs(a.mc - tc))} g.`);
-      if (tg && a.mg > tg * (prep ? 1.1 : 1.2)) push("a", `Grassi sopra il piano di ${n0(a.mg - tg)} g.`);
+      if (tp && a.mp < tp * (prep ? 0.95 : 0.9)) push("r", `Apporto proteico insufficiente: ${Math.round((a.mp / tp) * 100)}% del target.`);
+      if (tc && Math.abs(a.mc - tc) / tc > (prep ? 0.12 : 0.2)) push("a", `Apporto di carboidrati ${a.mc > tc ? "superiore" : "inferiore"} al piano di ${n0(Math.abs(a.mc - tc))} g/die.`);
+      if (tg && a.mg > tg * (prep ? 1.1 : 1.2)) push("a", `Apporto lipidico superiore al piano di ${n0(a.mg - tg)} g/die.`);
     } else if (peso) {
       const gk = a.mp / peso;
       const minimo = prep || fase === "cut" ? 2.0 : 1.6;
-      if (gk < minimo) push("r", `Proteine basse: ${gk.toFixed(1)} g per kg (ne servirebbero almeno ${minimo.toFixed(1)}).`);
+      if (gk < minimo) push("r", `Apporto proteico insufficiente: ${gk.toFixed(1)} g/kg di peso corporeo (minimo indicato ${minimo.toFixed(1)} g/kg).`);
     }
   }
   if (err.length && !err.some((e) => e.livello === "r" || e.livello === "a")) err.length = 0;

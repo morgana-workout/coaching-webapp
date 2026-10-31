@@ -10543,7 +10543,7 @@ function tempoRelativo(iso) {
   return g === 1 ? "ieri" : `${g} giorni fa`;
 }
 
-function FeedCoach({ onSelect }) {
+function FeedCoach({ onSelect, aperto = true, setAperto }) {
   const [righe, setRighe] = useState([]);
   const [pronto, setPronto] = useState(false);
   const [entrate, setEntrate] = useState({});
@@ -10596,11 +10596,12 @@ function FeedCoach({ onSelect }) {
 
   const icone = { allenamento: Dumbbell, lezione: Clock, check: ClipboardList, messaggio: MessageCircle };
   if (!pronto) return null;
+  if (!aperto) return createPortal(<button onClick={() => setAperto?.(true)} className="hidden lg:flex fixed top-4 right-4 z-30 items-center gap-1.5 bg-white border border-sky-200 rounded-full shadow-sm px-3 py-1.5 text-xs text-slate-600"><Bell size={12} /> Notifiche{righe.some((r) => !visti.has(r.chiave)) && <span className="w-2 h-2 rounded-full bg-sky-500" />}</button>, document.body);
   return createPortal(
     <div className="hidden lg:block fixed top-4 right-4 w-64 z-30">
       <style>{"@keyframes feedEntra{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}"}</style>
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
-        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche</p>
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche<button onClick={() => setAperto?.(false)} className="ml-auto text-slate-400 text-sm px-1" aria-label="Chiudi notifiche">✕</button></p>
         {righe.length === 0 && <p className="text-xs text-slate-400 px-1 py-2">Ancora nessuna attività dalle clienti.</p>}
         <div className="space-y-1">
           {righe.map((r) => {
@@ -10643,6 +10644,8 @@ function AdminApp({ onVistaCliente }) {
   };
   useEffect(() => { carica(); }, []);
 
+  const [feedAperto, setFeedAperto] = useState(() => { try { return localStorage.getItem("feed_coach_aperto") !== "no"; } catch { return true; } });
+  const cambiaFeed = (v) => { setFeedAperto(v); try { localStorage.setItem("feed_coach_aperto", v ? "si" : "no"); } catch { /* ignora */ } };
   const [chatCoachNuove, setChatCoachNuove] = useState(0);
   const contaChatCoach = async () => {
     try {
@@ -10657,8 +10660,8 @@ function AdminApp({ onVistaCliente }) {
   return (
     <ApriClienteCtx.Provider value={setSelectedId}>
     <PullToRefresh onRefresh={carica}>
-    <div className="min-h-screen bg-slate-50 lg:pr-[17rem]">
-      <FeedCoach onSelect={setSelectedId} />
+    <div className={`min-h-screen bg-slate-50 ${feedAperto ? "lg:pr-[17rem]" : ""}`}>
+      <FeedCoach onSelect={setSelectedId} aperto={feedAperto} setAperto={cambiaFeed} />
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
         <div className="flex items-center gap-4">
