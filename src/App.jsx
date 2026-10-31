@@ -5,6 +5,7 @@ import DiarioKcal from "./DiarioKcal";
 import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
 import MessaggioPronto from "./MessaggioPronto";
+import AndamentoCliente from "./AndamentoCliente";
 import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale, PrimoEUltimoCheck } from "./QuadroCliente";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
@@ -6196,6 +6197,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "riepilogo" && (
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
+          <AndamentoCliente client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="space-y-3 min-w-0">
               <AttivitaClienti clients={[client]} singola />
