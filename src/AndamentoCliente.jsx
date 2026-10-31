@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 
 /* Solo coach: indice di andamento in % per cliente, ultimi 30 giorni vs i 30 prima. Calcolo con soglie semplici (vedi commenti). */
 
@@ -35,7 +36,8 @@ function calcola(client, d) {
   // ALLENAMENTO: giorni allenati (obiettivo 12 in 30 gg = 3 a settimana) 60% + progressione carichi 40%
   const giorniTr = (r) => new Set(d.tr.filter((x) => dentro(x.data, r)).map((x) => x.data)).size;
   const costanza = (r) => clamp((giorniTr(r) / 12) * 100);
-  const mediaKg = (r) => { const m = {}; d.tr.filter((x) => dentro(x.data, r) && Number(x.kg) > 0).forEach((x) => { (m[x.exercise_id] = m[x.exercise_id] || []).push(Number(x.kg)); }); return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.reduce((s, y) => s + y, 0) / v.length])); };
+  // per ogni esercizio: media dei massimali di sessione (la serie piu' pesante di ogni giorno), cosi' le serie di avvicinamento non pesano
+  const mediaKg = (r) => { const sessioni = {}; d.tr.filter((x) => dentro(x.data, r) && Number(x.kg) > 0).forEach((x) => { const e = (sessioni[x.exercise_id] = sessioni[x.exercise_id] || {}); e[x.data] = Math.max(e[x.data] || 0, Number(x.kg)); }); return Object.fromEntries(Object.entries(sessioni).map(([k, v]) => { const m = Object.values(v); return [k, m.reduce((a, b) => a + b, 0) / m.length]; })); };
   const kgC = mediaKg(rangeCorr), kgP = mediaKg(rangePrec);
   const comuni = Object.keys(kgC).filter((k) => kgP[k]);
   const prog = comuni.length >= 2 ? clamp(50 + (media(comuni.map((k) => ((kgC[k] - kgP[k]) / kgP[k]) * 100)) / 5) * 50) : null; // +5% medio = 100, 0 = 50, -5% = 0
@@ -109,7 +111,7 @@ function calcola(client, d) {
     const k = kcalOn ? clamp((new Set(d.kc.filter((x) => dentro(x.data, r)).map((x) => x.data)).size / 5) * 100) : null;
     settT.push(t); settK.push(k);
   }
-  return { aree, settT, settK };
+  return { aree, settT, settK, fase: d.fase || null };
 }
 
 function Linea({ valori }) {
@@ -136,10 +138,71 @@ function Segmento({ opzioni, valore, onScegli }) {
   );
 }
 
+
+const NOME_FASE = { cut: "deficit energetico (cut)", leanbulk: "surplus controllato (lean bulk)", recomp: "ricomposizione corporea (recomp)" };
+
+function DettaglioCorpo({ checkins, fase, punteggio, onChiudi }) {
+  const ck = [...(checkins || [])].filter((c) => c.data_check && (c.peso_kg || c.ombelico_cm)).sort((a, b) => a.data_check.localeCompare(b.data_check));
+  const dati = ck.map((c) => ({ data: c.data_check.slice(8, 10) + "/" + c.data_check.slice(5, 7), peso: c.peso_kg ? Number(c.peso_kg) : null, vita: c.ombelico_cm ? Number(c.ombelico_cm) : null }));
+  const primo = ck[0], ultimo = ck[ck.length - 1];
+  const d1 = (a, b) => (a !== null && a !== undefined && b !== null && b !== undefined && a !== "" && b !== "" ? Math.round((Number(b) - Number(a)) * 10) / 10 : null);
+  const dPeso = primo && ultimo && primo !== ultimo ? d1(primo.peso_kg, ultimo.peso_kg) : null;
+  const dVita = primo && ultimo && primo !== ultimo ? d1(primo.ombelico_cm, ultimo.ombelico_cm) : null;
+  const sg = (n) => (n > 0 ? "+" : "") + String(n).replace(".", ",");
+  const criteri = {
+    cut: "Fase di deficit: l'esito atteso è una riduzione della massa corporea di circa 0,5–1% a settimana (target 3% in 30 giorni) con calo della circonferenza addominale (target −2 cm in 30 giorni).",
+    leanbulk: "Fase di surplus controllato: l'esito atteso è un incremento di massa corporea di circa 0,25–0,5% a settimana (target +1,2% in 30 giorni), con circonferenza addominale sostanzialmente stabile (incrementi fino a +0,5 cm tollerati).",
+    recomp: "Fase di ricomposizione: l'esito atteso è una massa corporea stabile (±1%) con riduzione della circonferenza addominale (target −2 cm in 30 giorni), indice di perdita di massa grassa con mantenimento della massa magra.",
+    none: "Fase non indicata (Impostazioni nella scheda \"Cosa mangia\"): valuto solo la circonferenza addominale, con target −2 cm in 30 giorni.",
+  }[fase || "none"];
+  const lettura = punteggio === null ? "Dati insufficienti: servono almeno due rilevazioni (check) distanti 20–50 giorni."
+    : punteggio >= 70 ? "Risposta favorevole: la variazione osservata è coerente con l'obiettivo della fase."
+    : punteggio >= 45 ? "Risposta neutra o lenta: i parametri sono sostanzialmente stabili (possibile plateau) rispetto al target della fase."
+    : "Risposta sfavorevole: la variazione osservata è opposta o molto inferiore al target della fase.";
+  const azioni = (punteggio !== null && punteggio < 70 ? {
+    cut: ["Verificare l'aderenza reale all'apporto energetico (registrazione completa di condimenti, bevande e pasti fuori programma).", "Controllare l'apporto proteico (indicativamente 1,6–2,2 g/kg) per preservare la massa magra.", "Valutare il livello di attività quotidiana (passi/NEAT) e la qualità del sonno.", "Se aderenza e misurazioni sono affidabili da 2–3 settimane, considerare una riduzione energetica modesta (5–10%) o un aumento dell'attività, non entrambe insieme."],
+    leanbulk: ["Verificare che il surplus sia effettivamente raggiunto (kcal e carboidrati registrati vs piano).", "Controllare la progressione dei carichi: senza stimolo allenante il surplus tende a tradursi in massa grassa.", "Se il peso non sale da 2–3 settimane, valutare un incremento energetico del 5–10%; se la vita cresce più del peso, ridurre il surplus."],
+    recomp: ["Verificare apporto proteico (1,6–2,2 g/kg) e distribuzione nell'arco della giornata.", "Controllare la progressione dei carichi: la ricomposizione richiede uno stimolo allenante crescente.", "Valutare sonno, stress e passi giornalieri; la ricomposizione è lenta e va letta su 6–8 settimane."],
+    none: ["Indicare la fase nella scheda \"Cosa mangia\" per una lettura più precisa.", "Verificare l'aderenza al piano nutrizionale e all'allenamento (vedi gli altri domini)."],
+  }[fase || "none"] : ["Mantenere l'impostazione attuale e proseguire con le rilevazioni a cadenza regolare.", "Confermare il dato con le foto di confronto e con le prestazioni in allenamento."]);
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" onClick={onChiudi}>
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5 space-y-4 text-[13px] text-slate-700" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div><p className="text-lg font-semibold text-slate-800">Composizione corporea</p><p className="text-xs text-slate-500">Approfondimento del dato{punteggio !== null ? " · punteggio " + punteggio + "%" : ""}</p></div>
+          <button onClick={onChiudi} className="text-slate-500 text-lg px-2" aria-label="Chiudi">✕</button>
+        </div>
+        <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Cosa significa</p>
+          <p>Descrive come cambiano massa corporea (peso) e circonferenza addominale (misura all'ombelico) tra una rilevazione e l'altra. Sono indicatori indiretti: non misurano direttamente massa grassa o massa magra, ma le loro variazioni combinate permettono di stimare se la composizione corporea si sta muovendo nella direzione voluta.</p></section>
+        <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Come viene valutato</p>
+          <p>{criteri}</p><p className="mt-1 text-slate-500">Scala: 50% = nessuna variazione, 100% = target raggiunto o superato, 0% = variazione opposta al target.</p></section>
+        <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Dati rilevati</p>
+          {dati.length === 0 ? <p className="text-slate-400">Nessun check con peso o circonferenza.</p> : (
+            <>
+              <div className="h-44"><ResponsiveContainer width="100%" height="100%"><LineChart data={dati} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}><CartesianGrid stroke="#e0f2fe" /><XAxis dataKey="data" tick={{ fontSize: 10 }} /><YAxis yAxisId="p" domain={["auto", "auto"]} tick={{ fontSize: 10 }} /><YAxis yAxisId="v" orientation="right" domain={["auto", "auto"]} tick={{ fontSize: 10 }} /><Tooltip /><Line yAxisId="p" type="monotone" dataKey="peso" name="Peso (kg)" stroke="#27466D" strokeWidth={2} connectNulls /><Line yAxisId="v" type="monotone" dataKey="vita" name="Circonferenza addominale (cm)" stroke="#4F8FD0" strokeWidth={2} connectNulls /></LineChart></ResponsiveContainer></div>
+              <table className="w-full mt-2 text-xs"><thead><tr className="text-slate-500 text-left"><th className="py-1">Data</th><th>Peso</th><th>Circ. addominale</th><th>Fase ciclo</th></tr></thead><tbody>
+                {ck.map((c) => <tr key={c.id} className="border-t border-sky-100"><td className="py-1">{c.data_check.split("-").reverse().join("/")}</td><td>{c.peso_kg ? c.peso_kg + " kg" : "—"}</td><td>{c.ombelico_cm ? c.ombelico_cm + " cm" : "—"}</td><td>{c.fase_mestruale || "—"}</td></tr>)}
+              </tbody></table>
+              {(dPeso !== null || dVita !== null) && <p className="mt-2">Dal primo all'ultimo check: {dPeso !== null ? "peso " + sg(dPeso) + " kg" : ""}{dPeso !== null && dVita !== null ? " · " : ""}{dVita !== null ? "circonferenza addominale " + sg(dVita) + " cm" : ""}.</p>}
+            </>
+          )}
+        </section>
+        <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Lettura</p>
+          <p>{lettura}{fase ? " Fase impostata: " + NOME_FASE[fase] + "." : ""}</p></section>
+        <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Su cosa lavorare</p>
+          <ul className="list-disc pl-5 space-y-1">{azioni.map((a, i) => <li key={i}>{a}</li>)}</ul></section>
+        <section><p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Limiti del dato</p>
+          <p>Il peso varia di 1–2 kg per ritenzione idrica, contenuto intestinale e fase del ciclo mestruale; la circonferenza ha un errore di misura di circa ±1 cm se non rilevata con la stessa tecnica. Una singola rilevazione non è significativa: conta la tendenza su più check.</p></section>
+      </div>
+    </div>
+  );
+}
+
 export default function AndamentoCliente({ client, checkins }) {
   const [raw, setRaw] = useState(null);
   const [imp, setImp] = useState({});
   const [aperte, setAperte] = useState(false);
+  const [dettaglio, setDettaglio] = useState(false);
   useEffect(() => {
     let vivo = true; setRaw(null); setImp({});
     (async () => {
@@ -209,7 +272,7 @@ export default function AndamentoCliente({ client, checkins }) {
           return (
             <div key={a.k} className="mb-2.5">
               <div className="grid grid-cols-[170px_1fr_40px_64px] gap-2.5 items-center text-[13px]">
-                <span className="text-slate-700">{a.k}</span>
+                {a.k === "Composizione corporea" ? <button onClick={() => setDettaglio(true)} className="text-left text-sky-700 underline decoration-dotted underline-offset-2">{a.k} ›</button> : <span className="text-slate-700">{a.k}</span>}
                 <div className="h-2 bg-sky-100 rounded"><div className={`h-2 rounded ${basso ? "bg-slate-800" : "bg-sky-600"}`} style={{ width: (a.v ?? 0) + "%" }} /></div>
                 <b className="text-slate-800">{a.v === null ? "—" : a.v + "%"}</b>
                 <span className={`text-xs ${dd !== null && dd < -1 ? "text-slate-800" : "text-sky-700"}`}>{dd === null ? "" : freccia(dd)}</span>
@@ -248,6 +311,7 @@ export default function AndamentoCliente({ client, checkins }) {
         </div>
       )}
     </div>
+    {dettaglio && <DettaglioCorpo checkins={checkins} fase={raw.fase} punteggio={aree.find((x) => x.k === "Composizione corporea")?.v ?? null} onChiudi={() => setDettaglio(false)} />}
     </div>
   );
 }

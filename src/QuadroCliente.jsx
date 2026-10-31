@@ -192,7 +192,7 @@ export function PrimoEUltimoCheck({ checkins, onApriConfronto }) {
   const Lato = ({ c, titolo }) => (
     <div className="flex-1 min-w-0">
       <div className="h-48 rounded-xl bg-sky-50 border border-sky-100 overflow-hidden flex items-center justify-center">
-        {urls[c.id] ? <img src={urls[c.id]} alt={titolo} className="w-full h-full object-cover" /> : <span className="text-[11px] text-sky-700 px-2 text-center">{c[angolo] ? "Carico…" : "Nessuna foto"}</span>}
+        {urls[c.id] ? <ImmagineZoom src={urls[c.id]} alt={titolo} /> : <span className="text-[11px] text-sky-700 px-2 text-center">{c[angolo] ? "Carico…" : "Nessuna foto"}</span>}
       </div>
       <p className="text-[11px] text-slate-500 mt-1">{titolo} · {dmy(c.data_check)}</p>
       <p className="text-[12px] text-slate-700">{c.peso_kg ? c.peso_kg + " kg" : "—"}{c.ombelico_cm ? " · ombelico " + c.ombelico_cm + " cm" : ""}</p>
@@ -208,6 +208,50 @@ export function PrimoEUltimoCheck({ checkins, onApriConfronto }) {
         {ANGOLI.map(([k, l]) => <button key={k} onClick={() => setAngolo(k)} className={`px-2.5 py-1 rounded-full text-[11px] ${angolo === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>)}
         <button onClick={onApriConfronto} className="text-sky-700 text-[12px] font-medium ml-auto">Confronto completo →</button>
       </div>
+    </div>
+  );
+}
+
+// Immagine con zoom a due dita (touch), trackpad/ctrl+rotella e trascinamento; doppio tocco/click per ripristinare.
+export function ImmagineZoom({ src, alt }) {
+  const [v, setV] = useState({ z: 1, x: 0, y: 0 });
+  const box = useRef(null);
+  const punti = useRef(new Map());
+  const base = useRef(null);
+  const limita = (z, x, y) => {
+    const r = box.current?.getBoundingClientRect();
+    const mx = r ? ((z - 1) * r.width) / 2 : 0, my = r ? ((z - 1) * r.height) / 2 : 0;
+    return { z, x: Math.max(-mx, Math.min(mx, x)), y: Math.max(-my, Math.min(my, y)) };
+  };
+  useEffect(() => {
+    const el = box.current; if (!el) return;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setV((o) => { const z = Math.max(1, Math.min(6, o.z * Math.exp(-e.deltaY * 0.01))); return z === 1 ? { z: 1, x: 0, y: 0 } : limita(z, o.x, o.y); });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+  useEffect(() => { setV({ z: 1, x: 0, y: 0 }); }, [src]);
+  const dist = () => { const a = [...punti.current.values()]; return a.length >= 2 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; };
+  const giu = (e) => { e.currentTarget.setPointerCapture?.(e.pointerId); punti.current.set(e.pointerId, { x: e.clientX, y: e.clientY }); base.current = { d: dist(), v, px: e.clientX, py: e.clientY }; };
+  const muovi = (e) => {
+    if (!punti.current.has(e.pointerId)) return;
+    punti.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const b = base.current; if (!b) return;
+    if (punti.current.size >= 2 && b.d > 0) {
+      const z = Math.max(1, Math.min(6, b.v.z * (dist() / b.d)));
+      setV(z === 1 ? { z: 1, x: 0, y: 0 } : limita(z, b.v.x, b.v.y));
+    } else if (punti.current.size === 1 && b.v.z > 1) {
+      setV(limita(b.v.z, b.v.x + (e.clientX - b.px), b.v.y + (e.clientY - b.py)));
+    }
+  };
+  const su = (e) => { punti.current.delete(e.pointerId); base.current = { d: dist(), v: { ...v }, px: e.clientX, py: e.clientY }; };
+  return (
+    <div ref={box} onPointerDown={giu} onPointerMove={muovi} onPointerUp={su} onPointerCancel={su} onDoubleClick={() => setV({ z: 1, x: 0, y: 0 })}
+      style={{ touchAction: "none", overflow: "hidden", cursor: v.z > 1 ? "grab" : "zoom-in" }} className="w-full h-full">
+      <img src={src} alt={alt} draggable={false} className="w-full h-full object-cover select-none" style={{ transform: `translate(${v.x}px, ${v.y}px) scale(${v.z})`, transformOrigin: "center" }} />
     </div>
   );
 }
