@@ -5,7 +5,7 @@ import DiarioKcal from "./DiarioKcal";
 import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
 import MessaggioPronto from "./MessaggioPronto";
-import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale } from "./QuadroCliente";
+import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale, PrimoEUltimoCheck } from "./QuadroCliente";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
@@ -6196,20 +6196,21 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "riepilogo" && (
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
-          <div className="grid lg:grid-cols-2 gap-4 items-start">
-            <div className="space-y-4 min-w-0">
+          <div className="grid lg:grid-cols-3 gap-4 items-start">
+            <div className="space-y-3 min-w-0">
               <AttivitaClienti clients={[client]} singola />
-              {client.kcal_attivo !== false && <AnalisiCibo client={client} />}
-              <RiepilogoCliente client={client} checkins={checkins} onVaiADati={() => setTab("dati")} />
+              {client.kcal_attivo !== false && <button onClick={() => setTab("analisi")} className="w-full bg-sky-50 text-sky-700 rounded-xl py-2 text-[13px] font-medium">Apri analisi alimentazione →</button>}
+              <button onClick={() => setTab("dati")} className="w-full bg-slate-100 text-slate-600 rounded-xl py-2 text-[13px]">Anagrafica e percorso →</button>
             </div>
-            <div className="space-y-4 min-w-0">
-              <Card className="p-4 space-y-3">
-                <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Note</p>
-                <MessaggioPronto client={client} chiuso={false} soloCopia />
-                <NoteRapide client={client} />
-              </Card>
-              <ConfrontoFoto checkins={checkins} isAdmin />
-            </div>
+            <Card className="p-4 space-y-3 min-w-0">
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Note</p>
+              <MessaggioPronto client={client} chiuso={false} soloCopia />
+              <NoteRapide client={client} />
+            </Card>
+            <Card className="p-4 space-y-3 min-w-0">
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Primo e ultimo check</p>
+              <PrimoEUltimoCheck checkins={checkins} onApriConfronto={() => setTab("progressi")} />
+            </Card>
           </div>
           <TraguardiENotifiche client={client} />
         </div>

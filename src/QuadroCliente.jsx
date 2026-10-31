@@ -162,3 +162,48 @@ export function ElencoLaterale({ clients, attivoId, onSelect }) {
     </aside>
   );
 }
+
+export function PrimoEUltimoCheck({ checkins, onApriConfronto }) {
+  const ANGOLI = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale"], ["foto_posteriore_path", "Dietro"]];
+  const [angolo, setAngolo] = useState("foto_frontale_path");
+  const [urls, setUrls] = useState({});
+  const ordinati = [...(checkins || [])].filter((c) => c.data_check).sort((a, b) => a.data_check.localeCompare(b.data_check));
+  const primo = ordinati[0], ultimo = ordinati.length > 1 ? ordinati[ordinati.length - 1] : null;
+  const idKey = (primo?.id || "") + "|" + (ultimo?.id || "") + "|" + angolo;
+  useEffect(() => {
+    let vivo = true; setUrls({});
+    (async () => {
+      const u = {};
+      for (const c of [primo, ultimo]) {
+        if (c && c[angolo]) {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(c[angolo], 3600);
+          if (data?.signedUrl) u[c.id] = data.signedUrl;
+        }
+      }
+      if (vivo) setUrls(u);
+    })();
+    return () => { vivo = false; };
+  }, [idKey]);
+  if (!primo) return <p className="text-sm text-slate-400">Nessun check ancora ricevuto.</p>;
+  const Lato = ({ c, titolo }) => (
+    <div className="flex-1 min-w-0">
+      <div className="h-48 rounded-xl bg-sky-50 border border-sky-100 overflow-hidden flex items-center justify-center">
+        {urls[c.id] ? <img src={urls[c.id]} alt={titolo} className="w-full h-full object-cover" /> : <span className="text-[11px] text-sky-700 px-2 text-center">{c[angolo] ? "Carico…" : "Nessuna foto"}</span>}
+      </div>
+      <p className="text-[11px] text-slate-500 mt-1">{titolo} · {dmy(c.data_check)}</p>
+      <p className="text-[12px] text-slate-700">{c.peso_kg ? c.peso_kg + " kg" : "—"}{c.ombelico_cm ? " · ombelico " + c.ombelico_cm + " cm" : ""}</p>
+    </div>
+  );
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-3">
+        <Lato c={primo} titolo="Primo" />
+        {ultimo ? <Lato c={ultimo} titolo="Ultimo" /> : <div className="flex-1 flex items-center justify-center text-[12px] text-slate-400 border border-dashed border-sky-200 rounded-xl">Un solo check finora</div>}
+      </div>
+      <div className="flex flex-wrap gap-1.5 items-center">
+        {ANGOLI.map(([k, l]) => <button key={k} onClick={() => setAngolo(k)} className={`px-2.5 py-1 rounded-full text-[11px] ${angolo === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>)}
+        <button onClick={onApriConfronto} className="text-sky-700 text-[12px] font-medium ml-auto">Confronto completo →</button>
+      </div>
+    </div>
+  );
+}
