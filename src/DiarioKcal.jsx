@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import { X, Plus } from "lucide-react";
+import { RicetteVista, RicettaDettaglio, PastiVista, SceltaAggiunta, SalvaPastoModal, inserisciPasto } from "./MacrosExtra";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine,
 } from "recharts";
@@ -42,15 +43,19 @@ function mLine(m) { return m ? `P ${num(m.p)} · C ${num(m.c)} · G ${num(m.g)}`
 /* isAdmin, nella scheda cliente lato coach (stesso pattern di         */
 /* DiarioAllenamento).                                                 */
 /* ------------------------------------------------------------------ */
-export default function DiarioKcal({ clientId, isAdmin = false }) {
+export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null, vistaIniziale = "diario", senzaDiario = false }) {
   const [caricando, setCaricando] = useState(true);
   const [foods, setFoods] = useState([]);
   const [voci, setVoci] = useState([]);
   const [obiettivo, setObiettivo] = useState(null);
-  const [vista, setVista] = useState("diario"); // diario | storico | libreria | analisi
+  const [vista, setVista] = useState(senzaDiario ? "piano" : vistaIniziale); // diario | piano | ricette | pasti | storico | libreria | analisi
+  const [ricette, setRicette] = useState([]);
+  const [pasti, setPasti] = useState([]);
+  const [ricettaAperta, setRicettaAperta] = useState(null);
   const [date, setDate] = useState(todayStr());
 
   const carica = async () => {
+    if (senzaDiario) { setCaricando(false); return; }
     // libreria_con: eventuale persona con cui condivido gli alimenti (es. Morgana e Giacomo)
     const { data: cl } = await supabase.from("clients").select("nutrizione_attiva, libreria_con").eq("id", clientId).single();
     const idLibrerie = cl?.libreria_con ? [clientId, cl.libreria_con] : [clientId];
@@ -71,6 +76,13 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
     }
     setFoods(alimenti);
     setVoci(vc || []);
+    try {
+      const [{ data: rc }, { data: ps }] = await Promise.all([
+        supabase.from("kcal_ricette").select("*").or(`client_id.is.null,client_id.eq.${clientId}`).order("nome"),
+        supabase.from("kcal_pasti_standard").select("*").or(`client_id.is.null,client_id.eq.${clientId}`).order("nome"),
+      ]);
+      setRicette(rc || []); setPasti(ps || []);
+    } catch (e) { /* tabelle non disponibili: si continua senza */ }
     // Obiettivo = kcal del piano nutrizionale attivo (se c'è); altrimenti nessun obiettivo
     let ob = null;
     if (cl?.nutrizione_attiva !== false) {
@@ -96,10 +108,12 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
 
   if (caricando) return <Spinner />;
 
+  if (senzaDiario) return <div>{pianoNode}</div>;
+
   return (
     <div className="space-y-4">
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {[["diario", "Diario"], ["storico", "Storico"], ["libreria", "Alimenti"], ...(isAdmin ? [["analisi", "Analisi"]] : [])].map(([k, l]) => (
+        {[["diario", "Diario"], ...(pianoNode ? [["piano", "Piano"]] : []), ["ricette", "Ricette"], ["pasti", "Pasti standard"], ["libreria", "Alimenti"], ["storico", "Storico"], ...(isAdmin ? [["analisi", "Analisi"]] : [])].map(([k, l]) => (
           <button key={k} onClick={() => setVista(k)}
             className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${vista === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
             {l}
@@ -111,9 +125,12 @@ export default function DiarioKcal({ clientId, isAdmin = false }) {
         <DiarioGiorno
           clientId={clientId} isAdmin={isAdmin} date={date} setDate={setDate}
           foods={foods} vociGiorno={vociPerGiorno[date] || []} vociIeri={vociPerGiorno[addDays(date, -1)] || []}
-          obiettivo={obiettivo} onCambiato={carica}
+          obiettivo={obiettivo} onCambiato={carica} ricette={ricette} pasti={pasti}
         />
       )}
+      {vista === "piano" && pianoNode}
+      {vista === "ricette" && <RicetteVista ricette={ricette} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} aperta={ricettaAperta} setAperta={setRicettaAperta} />}
+      {vista === "pasti" && <PastiVista pasti={pasti} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} />}
       {vista === "storico" && <StoricoKcal voci={voci} obiettivo={obiettivo} onVaiAGiorno={(d) => { setDate(d); setVista("diario"); }} />}
       {vista === "libreria" && <LibreriaAlimenti clientId={clientId} foods={foods} onCambiato={carica} />}
       {vista === "analisi" && isAdmin && <AnalisiCoach voci={voci} obiettivo={obiettivo} />}
@@ -171,8 +188,11 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
   );
 }
 
-function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onCambiato }) {
+function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onCambiato, ricette = [], pasti = [] }) {
   const [sheet, setSheet] = useState(null); // { meal } | { meal, food, amt, entryId }
+  const [scelta, setScelta] = useState(null); // { meal } scelta tra pasto standard / ricetta / alimento
+  const [ricettaDa, setRicettaDa] = useState(null); // { r, meal }
+  const [salvaPasto, setSalvaPasto] = useState(null); // { meal, voci }
   const [mostraTotali, setMostraTotali] = useState(false);
   const totaleManuale = vociGiorno.find((v) => v.pasto === "totale");
 
@@ -248,13 +268,16 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
               <div className="flex items-center justify-between border-b-2 border-slate-800 pb-1.5 mb-2">
                 <h3 className="font-semibold text-slate-800">{nome}</h3>
                 <span className="text-slate-400 text-sm">{Math.round(totMeal)} kcal</span>
-                <button onClick={() => setSheet({ meal: key })} className="text-sky-600 text-sm font-medium flex items-center gap-1"><Plus size={14} /> Aggiungi</button>
+                <button onClick={() => setScelta({ meal: key })} className="text-sky-600 text-sm font-medium flex items-center gap-1"><Plus size={14} /> Aggiungi</button>
               </div>
               {!list.length && (
                 <div className="flex items-center justify-between text-slate-400 text-sm py-2">
                   <span>Ancora niente.</span>
                   {!!ieriMeal.length && <button onClick={() => copiaIeri(key)} className="text-sky-600 font-medium">Copia da ieri ({ieriMeal.length})</button>}
                 </div>
+              )}
+              {list.length > 1 && (
+                <button onClick={() => setSalvaPasto({ meal: key, voci: list })} className="text-sky-600 text-xs font-medium py-1.5">Salva come pasto standard</button>
               )}
               {list.map((v) => (
                 <button key={v.id} onClick={() => setSheet({ meal: key, entryId: v.id, food: v, amt: v.quantita })}
@@ -271,6 +294,21 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
         })}
       </div>
 
+      {scelta && (
+        <SceltaAggiunta meal={scelta.meal} pasti={pasti} ricette={ricette}
+          onChiudi={() => setScelta(null)}
+          onAlimento={() => { const m = scelta.meal; setScelta(null); setSheet({ meal: m }); }}
+          onPasto={async (p) => { const m = scelta.meal; setScelta(null); await inserisciPasto(p, { clientId, date, meal: m, isAdmin }); onCambiato(); }}
+          onRicetta={(r) => { const m = scelta.meal; setScelta(null); setRicettaDa({ r, meal: m }); }} />
+      )}
+      {ricettaDa && (
+        <RicettaDettaglio r={ricettaDa.r} mealIniziale={ricettaDa.meal} clientId={clientId} isAdmin={isAdmin} date={date}
+          onChiudi={() => setRicettaDa(null)} onFatto={() => { setRicettaDa(null); onCambiato(); }} />
+      )}
+      {salvaPasto && (
+        <SalvaPastoModal voci={salvaPasto.voci} meal={salvaPasto.meal} clientId={clientId} isAdmin={isAdmin}
+          onChiudi={() => setSalvaPasto(null)} onSalvato={() => { setSalvaPasto(null); onCambiato(); }} />
+      )}
       {sheet && (
         <SchedaAggiungi clientId={clientId} isAdmin={isAdmin} date={date} foods={foods} sheet={sheet} setSheet={setSheet} onSalvato={onCambiato} />
       )}

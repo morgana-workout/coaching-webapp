@@ -3452,9 +3452,8 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
   const nav = [
     { key: "home", label: "Home", icon: Home },
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
-    ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Macros", icon: Apple }] : []),
+    ...(client.nutrizione_attiva !== false || client.kcal_attivo !== false ? [{ key: "kcal", label: "Macros", icon: Apple }] : []),
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
-    ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     ...(cicloAttivoPer(client, cicloImp) ? [{ key: "ciclo", label: "Il mio ciclo", icon: Droplets }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
@@ -3489,8 +3488,13 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
         {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioAllenamento clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
-        {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
-        {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
+        {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false) && (
+          <div className="px-5 pt-6 pb-24">
+            <DiarioKcal clientId={client.id} vistaIniziale={tab === "nutrizione" ? "piano" : "diario"}
+              senzaDiario={client.kcal_attivo === false}
+              pianoNode={client.nutrizione_attiva !== false ? <ClientNutrizione piano={piano} storico={pianoStorico} /> : null} />
+          </div>
+        )}
         {tab === "ciclo" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Il mio ciclo</p><CicloCliente client={client} /></div>}
         {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
@@ -6161,8 +6165,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
     { key: "progressi", label: "Progressi" },
     { key: "allenamento", label: "Allenamento" },
-    { key: "nutrizione", label: "Nutrizione" },
-    { key: "kcal", label: "Alimentazione" },
+    { key: "nutrizione", label: "Macros" },
     ...(client.kcal_attivo !== false ? [{ key: "analisi", label: "Cosa mangia" }] : []),
     ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
     { key: "notifiche", label: "Notifiche" },
@@ -6517,7 +6520,9 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "nutrizione" && (
+      {(tab === "nutrizione" || tab === "kcal") && (
+        <DiarioKcal clientId={clientId} isAdmin
+          pianoNode={
         <div className="space-y-3">
           <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica}
             modifica={nutrizioneModifica} onAnnullaModifica={() => setNutrizioneModifica(null)} />
@@ -6540,9 +6545,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             }} className="w-full border border-slate-200 bg-slate-100 text-slate-800 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
           )}
         </div>
+          } />
       )}
-
-      {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
 
       {tab === "analisi" && client.kcal_attivo !== false && <AnalisiCibo client={client} />}
       {tab === "ciclo" && <CicloCliente client={client} isAdmin />}
