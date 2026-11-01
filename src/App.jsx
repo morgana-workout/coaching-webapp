@@ -788,7 +788,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         <Card className="px-3.5 py-2.5">
           <div className="flex items-center justify-between">
             <span className="text-slate-500 text-[11px] uppercase tracking-wide font-medium">Prossimo check</span>
-            <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Chat</button>
           <StatoBadge stato={client.stato_check} />
           </div>
           <div className="flex items-baseline justify-between mt-0.5">
@@ -6179,6 +6178,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
             {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
           </button>
+          <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Chat</button>
           <StatoBadge stato={client.stato_check} />
         </div>
       </div>

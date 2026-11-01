@@ -171,24 +171,27 @@ export function ValutazioneEstetica({ client, checkins }) {
       {ordinati.length < 1 ? <p className="text-sm text-slate-400">Nessun check con foto da valutare.</p> : (
         <>
           <p className="text-[12px] text-slate-500 mb-2">Guarda le foto e assegna un voto da 1 (scarso) a 5 (ottimo) a ogni aspetto. Il confronto si aggiorna da solo.</p>
-          <div className="grid grid-cols-[1fr_auto_auto_44px] gap-x-3 gap-y-1 items-center text-[13px]">
-            <span />
-            <Sel valore={idA} onChange={setIdA} />
-            {ordinati.length > 1 ? <Sel valore={idB} onChange={setIdB} /> : <span />}
-            <span className="text-[11px] text-slate-500 text-center">Δ</span>
-            {ASPETTI.map(([k, label]) => {
-              const a = Number(val[A?.id]?.[k]) || null, b = Number(val[B?.id]?.[k]) || null;
-              const d = a && b && B && A && A.id !== B.id ? b - a : null;
-              return (
-                <React.Fragment key={k}>
-                  <span className="text-slate-700 py-1">{label}</span>
-                  {A ? <Voti c={A} k={k} /> : <span />}
-                  {B && B.id !== A?.id ? <Voti c={B} k={k} /> : <span />}
-                  <span className={`text-center text-xs font-semibold ${d > 0 ? "text-sky-700" : d < 0 ? "text-slate-800" : "text-slate-400"}`}>{d === null ? "" : d > 0 ? "▲ +" + d : d < 0 ? "▼ " + d : "▬ 0"}</span>
-                </React.Fragment>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px] text-slate-600">
+            <span>Confronta</span><Sel valore={idA} onChange={setIdA} />
+            {ordinati.length > 1 && <><span>con</span><Sel valore={idB} onChange={setIdB} /></>}
           </div>
+          {ASPETTI.map(([k, label]) => {
+            const a = Number(val[A?.id]?.[k]) || null, b = Number(val[B?.id]?.[k]) || null;
+            const doppio = B && A && B.id !== A.id;
+            const d = a && b && doppio ? b - a : null;
+            return (
+              <div key={k} className="py-2 border-b border-sky-100 last:border-0">
+                <div className="flex items-center justify-between text-[13px]">
+                  <span className="text-slate-700">{label}</span>
+                  <span className={`text-xs font-semibold ${d > 0 ? "text-sky-700" : d < 0 ? "text-slate-800" : "text-slate-400"}`}>{d === null ? "" : d > 0 ? "▲ +" + d : d < 0 ? "▼ " + d : "▬ 0"}</span>
+                </div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 mt-1">
+                  {A && <span className="inline-flex items-center gap-2"><span className="text-[11px] text-slate-500 w-12">{dm(A).slice(0, 5)}</span><Voti c={A} k={k} /></span>}
+                  {doppio && <span className="inline-flex items-center gap-2"><span className="text-[11px] text-slate-500 w-12">{dm(B).slice(0, 5)}</span><Voti c={B} k={k} /></span>}
+                </div>
+              </div>
+            );
+          })}
           {(iA !== null || iB !== null) && (
             <div className="mt-3 bg-sky-100 rounded-xl px-3 py-2 text-[13px] text-sky-700 font-semibold">
               Indice estetico {iA !== null ? iA + "%" : "—"}{B && B.id !== A?.id ? " → " + (iB !== null ? iB + "%" : "—") : ""}
