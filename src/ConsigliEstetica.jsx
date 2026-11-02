@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
+import { mappaCanonica } from "./nomiEsercizi";
 
 /* Solo coach: indicazioni sul programma (da carichi, ripetizioni e serie) e valutazione estetica guidata delle foto dei check. */
 
@@ -40,9 +41,10 @@ function analizza(esercizi, giorni, righe) {
   const dateAllenate28 = new Set(finestra28.map((r) => r.data));
 
   // --- per esercizio (ultime 8 settimane): massimale di sessione e ripetizioni a quel carico
+  const canon = mappaCanonica(esercizi, new Set(programma.map((e) => e.id))); // esercizi con nomi simili = un'unica progressione
   const perEs = {};
-  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; (perEs[r.exercise_id] = perEs[r.exercise_id] || {}); const s = (perEs[r.exercise_id][r.data] = perEs[r.exercise_id][r.data] || { kg: 0, reps: 0 }); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
-  const nomeDi = Object.fromEntries(esercizi.map((e) => [e.id, (e.nome || "").replace(/^\+\s*/, "")]));
+  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[r.exercise_id][r.data] || { kg: 0, reps: 0 }); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
+  const nomeDi = canon.nomi;
   const su = [], giu = [], ok = [];
   Object.entries(perEs).forEach(([id, sess]) => {
     const date = Object.keys(sess).sort();
@@ -143,13 +145,47 @@ export const indiceEstetico = (voti) => {
   return v.length === ASPETTI.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length / 5) * 100) : null;
 };
 
+// Legge il blocco [APP-ANALISI] prodotto dalla chat della cliente (righe "chiave: valore")
+const CHIAVI_TESTO = { sintesi: "sintesi", punti_forti: "forti", da_migliorare: "migliorare", suggerimenti: "suggerimenti", suggerimenti_coach: "suggerimenti", qualita_dati: "qualita", osservazioni_coach: "osservazioni" };
+export function leggiBloccoAnalisi(testo) {
+  let t = String(testo || "").replace(/```[a-z]*/gi, "");
+  const m = /\[APP-ANALISI\]([\s\S]*?)(\[\/APP-ANALISI\]|$)/i.exec(t);
+  if (m) t = m[1];
+  const out = { voti: {}, testi: {}, data: null };
+  let ultima = null;
+  t.split(/\r?\n/).forEach((riga) => {
+    const r = riga.replace(/\*\*/g, "").replace(/^\s*[-•*]\s+/, "").trim();
+    const mm = /^([a-z_àèéìòù ]+?)\s*[:=]\s*(.*)$/i.exec(r);
+    const k = mm ? mm[1].trim().toLowerCase().replace(/\s+/g, "_") : null;
+    if (k && (k === "data_check" || k === "data" || ASPETTI.some(([a]) => a === k) || CHIAVI_TESTO[k])) {
+      ultima = k;
+      const v = mm[2].trim();
+      if (k === "data_check" || k === "data") {
+        const d1 = /(\d{4})-(\d{2})-(\d{2})/.exec(v), d2 = /(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/.exec(v);
+        out.data = d1 ? d1[0] : d2 ? d2[3] + "-" + pad(+d2[2]) + "-" + pad(+d2[1]) : null;
+      } else if (ASPETTI.some(([a]) => a === k)) {
+        const n = Math.round(parseFloat(String(v).replace(",", ".")));
+        if (n >= 1 && n <= 5) out.voti[k] = n;
+      } else out.testi[CHIAVI_TESTO[k]] = v;
+    } else if (ultima && CHIAVI_TESTO[ultima] && r) {
+      const kk = CHIAVI_TESTO[ultima];
+      out.testi[kk] = (out.testi[kk] ? out.testi[kk] + "\n" : "") + r;
+    }
+  });
+  return out;
+}
+
 export function ValutazioneEstetica({ client, checkins }) {
   const ordinati = [...(checkins || [])].filter((c) => c.data_check).sort((a, b) => a.data_check.localeCompare(b.data_check));
   const [val, setVal] = useState({}); // checkin_id -> voti
+  const [analisi, setAnalisi] = useState({}); // checkin_id -> testo analisi importata dalla chat
+  const [apriImporta, setApriImporta] = useState(false);
+  const [testoImporta, setTestoImporta] = useState("");
+  const [esitoImporta, setEsitoImporta] = useState("");
   const [idA, setIdA] = useState(""); const [idB, setIdB] = useState("");
   useEffect(() => {
     let vivo = true;
-    supabase.from("valutazione_estetica").select("checkin_id, voti").eq("client_id", client.id).then(({ data }) => { if (vivo) { const m = {}; (data || []).forEach((x) => { m[x.checkin_id] = x.voti || {}; }); setVal(m); } });
+    supabase.from("valutazione_estetica").select("checkin_id, voti, analisi").eq("client_id", client.id).then(({ data }) => { if (vivo) { const m = {}, an = {}; (data || []).forEach((x) => { m[x.checkin_id] = x.voti || {}; if (x.analisi) an[x.checkin_id] = x.analisi; }); setVal(m); setAnalisi(an); } });
     return () => { vivo = false; };
   }, [client.id]);
   useEffect(() => { setIdA(ordinati[0]?.id || ""); setIdB(ordinati.length > 1 ? ordinati[ordinati.length - 1].id : ""); }, [client.id, ordinati.length]);
@@ -157,6 +193,27 @@ export function ValutazioneEstetica({ client, checkins }) {
     const voti = { ...(val[c.id] || {}), [k]: v };
     setVal((p) => ({ ...p, [c.id]: voti }));
     try { await supabase.from("valutazione_estetica").upsert({ client_id: client.id, checkin_id: c.id, data_check: c.data_check, voti, updated_at: new Date().toISOString() }, { onConflict: "client_id,checkin_id" }); window.dispatchEvent(new Event("estetica-aggiornata")); } catch (e) { /* ignora */ }
+  };
+  const importa = async () => {
+    const r = leggiBloccoAnalisi(testoImporta);
+    if (!Object.keys(r.voti).length && !Object.keys(r.testi).length) { setEsitoImporta("Non trovo nessun dato: incolla tutto il blocco [APP-ANALISI] che ti ha scritto la chat."); return; }
+    if (!ordinati.length) { setEsitoImporta("Questa cliente non ha ancora check."); return; }
+    let c = ordinati[ordinati.length - 1];
+    if (r.data) {
+      const t0 = new Date(r.data).getTime();
+      c = ordinati.reduce((best, x) => (Math.abs(new Date(x.data_check).getTime() - t0) < Math.abs(new Date(best.data_check).getTime() - t0) ? x : best), ordinati[0]);
+    }
+    const voti = { ...(val[c.id] || {}), ...r.voti };
+    const an = { ...(analisi[c.id] || {}), ...r.testi, importata_il: new Date().toISOString() };
+    try {
+      const { error } = await supabase.from("valutazione_estetica").upsert({ client_id: client.id, checkin_id: c.id, data_check: c.data_check, voti, analisi: an, updated_at: new Date().toISOString() }, { onConflict: "client_id,checkin_id" });
+      if (error) throw error;
+    } catch (e) { setEsitoImporta("Non sono riuscita a salvare. Riprova."); return; }
+    setVal((p) => ({ ...p, [c.id]: voti })); setAnalisi((p) => ({ ...p, [c.id]: an }));
+    setIdB(c.id);
+    window.dispatchEvent(new Event("estetica-aggiornata"));
+    setEsitoImporta(`Fatto ✨ Analisi salvata nel check del ${c.data_check.split("-").reverse().join("/")}.`);
+    setTestoImporta("");
   };
   const A = ordinati.find((c) => c.id === idA), B = ordinati.find((c) => c.id === idB);
   const dm = (c) => c.data_check.split("-").reverse().join("/");
@@ -199,7 +256,30 @@ export function ValutazioneEstetica({ client, checkins }) {
               <p className="text-[11px] font-normal text-slate-600 mt-0.5">Entra nel dominio "Composizione corporea" del quadro andamento: peso stabile con foto migliori non risulta più come stallo.</p>
             </div>
           )}
+          {[B, A].filter((c, i, arr) => c && analisi[c.id] && arr.findIndex((y) => y?.id === c.id) === i).map((c) => {
+            const a = analisi[c.id];
+            const blocchi = [["sintesi", "Lettura del check"], ["forti", "Punti di forza"], ["migliorare", "Da migliorare"], ["osservazioni", "Osservazioni coach considerate"], ["suggerimenti", "Suggerimenti per te"], ["qualita", "Affidabilità dei dati"]];
+            return (
+              <div key={c.id} className="mt-3 bg-sky-50 border border-sky-200 rounded-xl p-3 text-[12.5px] text-slate-700 space-y-1.5">
+                <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">Analisi AI · check del {dm(c)}</p>
+                {blocchi.filter(([k]) => a[k]).map(([k, l]) => <p key={k} className="whitespace-pre-line"><b className="text-slate-900">{l}: </b>{a[k]}</p>)}
+              </div>
+            );
+          })}
         </>
+      )}
+      {ordinati.length > 0 && (
+        <div className="mt-3">
+          <button onClick={() => { setApriImporta((v) => !v); setEsitoImporta(""); }} className="text-sky-700 text-[12px] font-medium border border-sky-200 rounded-lg px-3 py-1.5">{apriImporta ? "Chiudi" : "Importa analisi dalla chat"}</button>
+          {apriImporta && (
+            <div className="mt-2 space-y-2">
+              <p className="text-[11px] text-slate-500">Copia il blocco [APP-ANALISI] che trovi in fondo alla risposta della chat e incollalo qui. Voti e analisi vanno da soli nel check giusto.</p>
+              <textarea value={testoImporta} onChange={(e) => setTestoImporta(e.target.value)} rows={6} placeholder="[APP-ANALISI] ... [/APP-ANALISI]" className="w-full border border-sky-200 rounded-lg px-3 py-2 text-[12px]" />
+              <button onClick={importa} disabled={!testoImporta.trim()} className="bg-sky-700 text-white text-[12px] font-medium rounded-lg px-4 py-2 disabled:opacity-40">Importa</button>
+              {esitoImporta && <p className="text-[12px] text-slate-700">{esitoImporta}</p>}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
