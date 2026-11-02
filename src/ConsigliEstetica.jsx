@@ -101,7 +101,7 @@ function analizza(esercizi, giorni, righe, sesso) {
   // --- per esercizio (ultime 8 settimane): massimale di sessione e ripetizioni a quel carico
   const canon = mappaCanonica(esercizi, new Set(programma.map((e) => e.id))); // esercizi con nomi simili = un'unica progressione
   const perEs = {};
-  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[r.exercise_id][r.data] || { kg: 0, reps: 0 }); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
+  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[cid][r.data] || { kg: 0, reps: 0 }); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
   const nomeDi = canon.nomi;
   const su = [], giu = [], ok = [];
   Object.entries(perEs).forEach(([id, sess]) => {
