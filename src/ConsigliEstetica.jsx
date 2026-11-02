@@ -26,13 +26,71 @@ const GRUPPI = [
 const gruppoDi = (nome) => { const n = (nome || "").replace(/^\+\s*/, ""); const g = GRUPPI.find(([, re]) => re.test(n)); return g ? g[0] : null; };
 const SPINTA = ["Petto", "Spalle", "Tricipiti"], TRAZIONE = ["Dorso", "Bicipiti"];
 
+// Riferimenti settimanali per distretto: serie, frequenza (sedute/sett.), range di ripetizioni.
+// Donna: tabella di Morgana. Uomo: valori di riferimento da letteratura (modificabili qui).
+const DISTRETTI = {
+  F: [
+    { d: "Glutei e femorali", g: ["Glutei", "Femorali"], serie: [15, 22], freq: [2, 3], rep: [6, 12] },
+    { d: "Quadricipiti", g: ["Quadricipiti"], serie: [12, 15], freq: [2, 2], rep: [8, 15] },
+    { d: "Dorso", g: ["Dorso"], serie: [10, 15], freq: [2, 3], rep: [8, 12] },
+    { d: "Spalle e braccia", g: ["Spalle", "Bicipiti", "Tricipiti"], serie: [8, 12], freq: [2, 3], rep: [12, 20] },
+    { d: "Petto", g: ["Petto"], serie: [6, 10], freq: [1, 2], rep: [8, 12] },
+    { d: "Polpacci", g: ["Polpacci"], serie: [6, 10], freq: [2, 3], rep: [10, 20], facolt: true },
+    { d: "Addome / core", g: ["Addome"], serie: [6, 10], freq: [2, 3], rep: [10, 20], facolt: true },
+  ],
+  M: [
+    { d: "Petto", g: ["Petto"], serie: [10, 16], freq: [2, 2], rep: [6, 12] },
+    { d: "Dorso", g: ["Dorso"], serie: [12, 18], freq: [2, 3], rep: [6, 12] },
+    { d: "Spalle e braccia", g: ["Spalle", "Bicipiti", "Tricipiti"], serie: [14, 22], freq: [2, 3], rep: [8, 15] },
+    { d: "Quadricipiti", g: ["Quadricipiti"], serie: [10, 16], freq: [2, 2], rep: [6, 12] },
+    { d: "Glutei e femorali", g: ["Glutei", "Femorali"], serie: [10, 16], freq: [2, 2], rep: [6, 12] },
+    { d: "Polpacci", g: ["Polpacci"], serie: [8, 12], freq: [2, 3], rep: [8, 15], facolt: true },
+    { d: "Addome / core", g: ["Addome"], serie: [6, 10], freq: [2, 3], rep: [10, 20], facolt: true },
+  ],
+};
+const repRange = (v) => { const n = (String(v ?? "").match(/\d+([.,]\d+)?/g) || []).map((x) => Number(x.replace(",", "."))).filter((x) => x > 0 && x < 100); return n.length ? [Math.min(...n), Math.max(...n)] : null; };
+
+function analisiTarget(programma, sesso) {
+  const tab = DISTRETTI[sesso === "M" ? "M" : "F"];
+  const consigli = [], righe = [];
+  const donna = sesso !== "M";
+  tab.forEach((D) => {
+    const es = programma.filter((e) => D.g.includes(gruppoDi(e.nome)));
+    const serie = es.reduce((a, e) => a + (num(e.serie) || 0), 0);
+    const perSeduta = {};
+    es.forEach((e) => { perSeduta[e.training_day_id] = (perSeduta[e.training_day_id] || 0) + (num(e.serie) || 0); });
+    const freq = Object.values(perSeduta).filter((x) => x > 0).length;
+    let lo = 0, hi = 0, pesi = 0;
+    es.forEach((e) => { const r = repRange(e.ripetizioni), w = num(e.serie) || 0; if (r && w) { lo += r[0] * w; hi += r[1] * w; pesi += w; } });
+    const rep = pesi ? [Math.round(lo / pesi), Math.round(hi / pesi)] : null;
+    const medio = rep ? (rep[0] + rep[1]) / 2 : null;
+    let stato = "ok";
+    if (serie === 0) stato = D.facolt ? "nd" : "manca";
+    else if (serie < D.serie[0]) stato = "basso";
+    else if (serie > D.serie[1] + 2) stato = "alto";
+    righe.push({ d: D.d, serie, freq, rep, rifSerie: D.serie, rifFreq: D.freq, rifRep: D.rep, stato });
+    if (serie === 0) { if (!D.facolt) consigli.push({ t: "up", tit: `${D.d}: nessuno stimolo diretto nel programma`, testo: `Riferimento ${D.serie[0]}–${D.serie[1]} serie/settimana. Se il distretto è un obiettivo, inserire almeno 1–2 esercizi.`, peso: 2 }); return; }
+    if (serie < D.serie[0]) consigli.push({ t: "up", tit: `${D.d}: ${serie} serie/settimana (riferimento ${D.serie[0]}–${D.serie[1]})`, testo: `Volume inferiore al range indicato per ${donna ? "la donna" : "l'uomo"}. Se il distretto è prioritario, valutare +${Math.min(6, D.serie[0] - serie)} serie settimanali, distribuite su ${Math.max(D.freq[0], 2)} sedute.`, peso: D.facolt ? 0 : 2 });
+    else if (serie > D.serie[1] + 2) consigli.push({ t: "dn", tit: `${D.d}: ${serie} serie/settimana (riferimento ${D.serie[0]}–${D.serie[1]})`, testo: "Volume superiore al range: valutare la riduzione se il recupero è scarso, se i carichi non progrediscono o se compare ritenzione/indolenzimento persistente.", peso: 1 });
+    if (freq > 0 && freq < D.freq[0]) consigli.push({ t: "fl", tit: `${D.d}: frequenza ${freq}×/settimana (riferimento ${D.freq[0]}${D.freq[1] > D.freq[0] ? "–" + D.freq[1] : ""}×)`, testo: `Distribuire le ${serie} serie su ${D.freq[0]} sedute migliora la qualità delle serie e il recupero${donna ? "; nella donna la monofrequenza è in genere poco efficiente" : ""}.`, peso: 1 });
+    if (medio !== null && (medio < D.rep[0] - 1 || medio > D.rep[1] + 1)) consigli.push({ t: "fl", tit: `${D.d}: ripetizioni medie ${rep[0]}–${rep[1]} (riferimento ${D.rep[0]}–${D.rep[1]})`, testo: medio < D.rep[0] ? "Range di ripetizioni più basso del riferimento: valutare esercizi/serie a più ripetizioni per aumentare il tempo sotto tensione." : "Range di ripetizioni più alto del riferimento: valutare carichi maggiori su 1–2 esercizi principali per la tensione meccanica.", peso: 0 });
+    const max = Math.max(0, ...Object.values(perSeduta));
+    const soglia = donna ? 10 : 12;
+    if (max > soglia) consigli.push({ t: "fl", tit: `${D.d}: fino a ${max} serie in una sola seduta (soglia ${soglia})`, testo: donna && D.d === "Glutei e femorali"
+      ? "Oltre 10–12 serie per distretto nella stessa seduta il guadagno ipertrofico tende a ridursi (danno muscolare localizzato) e può peggiorare l'infiammazione e la ritenzione agli arti inferiori: frazionare in 3 sedute brevi da 5–6 serie invece di una da 15–18."
+      : `Oltre ${soglia} serie per distretto nella stessa seduta il rendimento marginale cala (volume non produttivo): mantenere ${donna ? "5–10" : "6–12"} serie per seduta e ripetere il distretto in un altro giorno.`, peso: 1 });
+  });
+  return { consigli, righe };
+}
+
 async function leggi(q) {
   let tutto = [], da = 0;
   for (let i = 0; i < 20; i++) { const { data, error } = await q().range(da, da + 999); if (error || !data) break; tutto = tutto.concat(data); if (data.length < 1000) break; da += 1000; }
   return tutto;
 }
 
-function analizza(esercizi, giorni, righe) {
+function analizza(esercizi, giorni, righe, sesso) {
+  let tabella = [];
   const idGiorniAttivi = new Set(giorni.filter((g) => !g.scheda_archiviata).map((g) => g.id));
   const programma = esercizi.filter((e) => idGiorniAttivi.has(e.training_day_id));
   const consigli = [];
@@ -72,13 +130,9 @@ function analizza(esercizi, giorni, righe) {
   programma.forEach((e) => { const g = gruppoDi(e.nome); if (!g) return; const s = num(e.serie) || 0; vol[g] = (vol[g] || 0) + s; (freq[g] = freq[g] || new Set()).add(e.training_day_id); });
   const nSeduteProg = idGiorniAttivi.size;
   if (nSeduteProg > 0) {
-    const basso = Object.entries(vol).filter(([g, v]) => g !== "Addome" && g !== "Polpacci" && v > 0 && v < 10).sort((x, y) => x[1] - y[1]).slice(0, 3).map(([g]) => g);
-    Object.entries(vol).forEach(([g, v]) => {
-      if (g === "Addome" || g === "Polpacci") return;
-      if (v > 0 && v < 10 && basso.includes(g)) consigli.push({ t: "up", tit: `Volume ${g.toLowerCase()}: ${v} serie/settimana previste`, testo: `Inferiore al range indicativo per l'ipertrofia (10–20 serie/settimana per distretto). Se il distretto è prioritario, valutare +2–4 serie settimanali su 1–2 esercizi.`, peso: 1 });
-      else if (v > 22) consigli.push({ t: "dn", tit: `Volume ${g.toLowerCase()}: ${v} serie/settimana previste`, testo: `Superiore al range indicativo (10–20): valutare la riduzione se il recupero è scarso o le prestazioni su questo distretto non progrediscono.`, peso: 1 });
-      if (v >= 10 && freq[g] && freq[g].size === 1 && nSeduteProg >= 2) consigli.push({ t: "fl", tit: `Frequenza ${g.toLowerCase()}: 1 seduta/settimana`, testo: `Con ${v} serie in un'unica seduta, distribuire il volume su 2 sedute (frequenza 2×/settimana) migliora in genere la qualità delle serie e il recupero.`, peso: 0 });
-    });
+    const T = analisiTarget(programma, sesso);
+    T.consigli.sort((x, y) => y.peso - x.peso).forEach((x) => consigli.push(x));
+    tabella = T.righe;
     const sp = SPINTA.reduce((s, g) => s + (vol[g] || 0), 0), tr = TRAZIONE.reduce((s, g) => s + (vol[g] || 0), 0);
     if (tr > 0 && sp / tr > 1.4) consigli.push({ t: "fl", tit: `Rapporto spinta/trazione ${Math.round(sp)}:${Math.round(tr)}`, testo: "Prevalenza del volume di spinta (petto, spalle, tricipiti) rispetto alla trazione: valutare più lavoro di dorso e deltoide posteriore per postura e simmetria scapolare.", peso: 0 });
     if (tr > 0 && sp > 0 && tr / sp > 1.8) consigli.push({ t: "fl", tit: `Rapporto spinta/trazione ${Math.round(sp)}:${Math.round(tr)}`, testo: "Volume di spinta contenuto rispetto alla trazione: se l'obiettivo include spalle e petto, valutare di aumentarlo.", peso: 0 });
@@ -86,11 +140,15 @@ function analizza(esercizi, giorni, righe) {
 
   // --- aderenza vs programma
   if (nSeduteProg > 0 && dateAllenate28.size > 0) {
-    const sett = dateAllenate28.size / 4;
-    if (sett < nSeduteProg * 0.75) consigli.push({ t: "chk", tit: `Frequenza settimanale reale ${String(Math.round(sett * 10) / 10).replace(".", ",")} (programma: ${nSeduteProg} sedute)`, testo: "L'esecuzione è inferiore al programma: la limitazione alla progressione è più probabilmente l'aderenza che la programmazione. Valutare se il numero di sedute è sostenibile o va ridotto.", peso: 0 });
+    // il conteggio parte dal primo allenamento registrato nel log (chi ha iniziato da poco non viene penalizzata)
+    const primo = righe.filter((r) => r.data).map((r) => r.data).sort()[0];
+    const inizio = primo && primo > giorniFa(27) ? primo : giorniFa(27);
+    const giorniOsservati = Math.max(1, Math.round((new Date(oggi) - new Date(inizio)) / 86400000) + 1);
+    const sett = dateAllenate28.size / (giorniOsservati / 7);
+    if (giorniOsservati >= 14 && sett < nSeduteProg * 0.75) consigli.push({ t: "chk", tit: `Frequenza settimanale reale ${String(Math.round(sett * 10) / 10).replace(".", ",")} (programma: ${nSeduteProg} sedute)`, testo: "Dal primo allenamento registrato, l'esecuzione è inferiore al programma: la limitazione alla progressione è più probabilmente l'aderenza che la programmazione. Valutare se il numero di sedute è sostenibile o va ridotto.", peso: 0 });
   }
   const mantenere = ok.slice(0, 5);
-  return { consigli, mantenere, datiPochi: dateAllenate28.size < 4 || (!programma.length && !righe.length) };
+  return { consigli, mantenere, tabella, sesso, datiPochi: dateAllenate28.size < 4 || (!programma.length && !righe.length) };
 }
 
 export function ConsigliProgramma({ client }) {
@@ -99,14 +157,14 @@ export function ConsigliProgramma({ client }) {
     let vivo = true; setR(null);
     (async () => {
       try {
-        const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, training_day_id").eq("client_id", client.id);
+        const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, training_day_id").eq("client_id", client.id);
         const { data: gg } = await supabase.from("training_days").select("id, scheda_archiviata").eq("client_id", client.id);
         const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
-        if (vivo) setR(analizza(es || [], gg || [], righe));
+        if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso));
       } catch (e) { if (vivo) setR({ errore: true }); }
     })();
     return () => { vivo = false; };
-  }, [client.id]);
+  }, [client.id, client.sesso]);
   const stile = { up: ["▲ Aumentare / cambiare", "bg-sky-100 text-sky-700"], dn: ["▼ Ridurre / scaricare", "bg-slate-800 text-white"], fl: ["◆ Struttura", "bg-slate-100 text-slate-600"], chk: ["⚑ Verificare", "bg-slate-100 text-slate-600"] };
   return (
     <div className="bg-white border border-sky-200 rounded-2xl p-4 min-w-0">
@@ -124,6 +182,22 @@ export function ConsigliProgramma({ client }) {
               <p className="text-[12px] text-slate-500 mt-0.5 leading-snug">{c.testo}</p>
             </div>
           ))}
+          {r.tabella?.length > 0 && r.tabella.some((x) => x.serie > 0) && (
+            <div className="mt-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mb-1">Programma vs riferimento · {r.sesso === "M" ? "uomo" : "donna"}</p>
+              <div className="text-[11.5px] text-slate-700">
+                <div className="grid grid-cols-[1.5fr_1fr_.8fr_1fr] gap-x-2 text-[10.5px] text-slate-400 pb-1"><span>Distretto</span><span>Serie/sett.</span><span>Freq.</span><span>Ripetizioni</span></div>
+                {r.tabella.map((x) => (
+                  <div key={x.d} className="grid grid-cols-[1.5fr_1fr_.8fr_1fr] gap-x-2 py-1 border-t border-sky-100">
+                    <span>{x.d}</span>
+                    <span className={x.stato === "basso" || x.stato === "manca" ? "text-slate-900 font-semibold" : x.stato === "alto" ? "text-slate-900 font-semibold" : ""}>{x.serie} <span className="text-slate-400">/ {x.rifSerie[0]}–{x.rifSerie[1]}</span> {x.stato === "basso" || x.stato === "manca" ? "▼" : x.stato === "alto" ? "▲" : x.stato === "ok" ? "✓" : ""}</span>
+                    <span>{x.freq}× <span className="text-slate-400">/ {x.rifFreq[0]}{x.rifFreq[1] > x.rifFreq[0] ? "–" + x.rifFreq[1] : ""}</span></span>
+                    <span>{x.rep ? x.rep[0] + "–" + x.rep[1] : "—"} <span className="text-slate-400">/ {x.rifRep[0]}–{x.rifRep[1]}</span></span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {r.mantenere.length > 0 && <p className="text-[12px] text-slate-600 pt-2"><span className="inline-block text-[10.5px] rounded-full px-2 py-0.5 mr-2 bg-slate-100 text-slate-600">▬ Mantenere</span>{r.mantenere.join(", ")}: progressione regolare.</p>}
           <p className="text-[11px] text-slate-400 mt-2">Regole su carichi, ripetizioni e serie registrati e sul programma attivo: sono spunti, la decisione è tua. Il distretto è dedotto dal nome dell'esercizio.</p>
         </>
