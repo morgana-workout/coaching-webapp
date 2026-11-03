@@ -3316,7 +3316,8 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
     const kgT = valore(n, "kg") !== "" ? valore(n, "kg") : fmtKg(u.kg);
     const ripT = valore(n, "rip") !== "" ? valore(n, "rip") : (u.ripetizioni ?? "");
     await salvaSerie(n, { kg: kgT, rip: ripT, completata: true });
-    onSerieSpuntata(es, n, nSerie, rec, { kg: kgT, rip: ripT });
+    const tutte = Array.from({ length: nSerie }).every((_, i) => i + 1 === n || fatta(i + 1));
+    onSerieSpuntata(es, n, nSerie, rec, { kg: kgT, rip: ripT }, tutte);
   };
   const salvaNota = async () => {
     if (nota === notaSalvata) return;
@@ -3328,10 +3329,10 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   const notaCoach = notaPulita(es.note);
 
   return (
-    <div className="bg-white rounded-3xl p-4" style={{ border: "1px solid #C9E0F7" }}>
+    <div id={`card-${es.id}`} className="bg-white rounded-3xl p-4" style={{ border: "1px solid #C9E0F7", scrollMarginTop: 12 }}>
       <button onClick={onToggle} className="w-full flex items-start justify-between gap-2 text-left">
         <div className="min-w-0">
-          <h3 className="font-bold text-base leading-snug" style={{ color: "#27466D" }}>{es.nome}</h3>
+          <h3 className="font-bold text-base leading-snug" style={{ color: "#27466D" }}>{es.nome}{fatteTot === nSerie ? " ✓" : ""}</h3>
           <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>
             {nSerie} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{notaCoach ? ` · ${notaCoach}` : ""}
             {!aperto && fatteTot > 0 ? ` · ${fatteTot}/${nSerie} fatte` : ""}
@@ -3388,6 +3389,7 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
   const [storicoEntries, setStoricoEntries] = useState([]);
   const [libreria, setLibreria] = useState([]);
   const [aperti, setAperti] = useState({});
+  const [prep, setPrep] = useState([]);
   const [infoEs, setInfoEs] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [timer, setTimerState] = useState(() => { try { const t = JSON.parse(localStorage.getItem(TIMER_KEY) || "null"); return t && Date.now() - t.start < 6 * 3600 * 1000 ? t : null; } catch (e) { return null; } });
@@ -3415,8 +3417,12 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
     const { data: tutti } = await supabase.from("training_exercises").select("*").eq("training_day_id", giornoId).order("ordine");
     const es = (tutti || []).filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
     setEsercizi(es);
-    if (es.length) {
-      const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", es.map((e) => e.id));
+    const { data: mob } = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
+    const pr = [...(mob || []), ...(tutti || []).filter((e) => e.tipo === "attivazione")];
+    setPrep(pr);
+    const ids = [...es, ...pr].map((e) => e.id);
+    if (ids.length) {
+      const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", ids);
       setStoricoEntries(en || []);
     } else setStoricoEntries([]);
   };
@@ -3432,8 +3438,14 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
     return m;
   };
 
-  const onSerieSpuntata = (es, n, nSerie, rec, valori) => {
+  const onSerieSpuntata = (es, n, nSerie, rec, valori, tutte) => {
     const idx = esercizi.findIndex((x) => x.id === es.id);
+    if (tutte) {
+      // esercizio finito: si chiude e si apre quello sotto
+      const prossimo = esercizi[idx + 1];
+      setAperti((a) => ({ ...a, [es.id]: false, ...(prossimo ? { [prossimo.id]: true } : {}) }));
+      if (prossimo) setTimeout(() => { const el = document.getElementById(`card-${prossimo.id}`); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 250);
+    }
     const ultima = idx === esercizi.length - 1 && n >= nSerie;
     if (ultima) { setTimer(null); return; }
     let prossimaEs = es, prossimaN = n + 1;
@@ -3452,6 +3464,23 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
     }
   };
 
+  const prepFatta = (p) => entries.some((e) => e.exercise_id === p.id && e.completata === true);
+  const prepCompleta = prep.length > 0 && prep.every(prepFatta);
+  const esCompleto = (es) => { const n = Math.max(1, Math.min(Number(es.serie) || 3, 10)); const en = entries.filter((e) => e.exercise_id === es.id); return Array.from({ length: n }).every((_, i) => { const x = en.find((y) => y.numero_serie === i + 1); return !!x && (x.completata === true || (x.completata == null && (x.kg != null || x.ripetizioni))); }); };
+  const tuttiFatti = esercizi.length > 0 && esercizi.every(esCompleto);
+  const correnteKey = prep.length > 0 && !prepCompleta ? "prep" : (esercizi.find((e) => !esCompleto(e)) || {}).id;
+  useEffect(() => { if (tuttiFatti) { try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} setTimeout(() => { const el = document.getElementById("fine-allenamento"); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 300); } }, [tuttiFatti, data]);
+  const spuntaPrep = async (p) => {
+    const e = entries.find((x) => x.exercise_id === p.id);
+    if (e) await supabase.from("training_entries").update({ completata: !(e.completata === true) }).eq("id", e.id);
+    else await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: p.id, data, numero_serie: 1, completata: true });
+    const resto = prep.filter((x) => x.id !== p.id).every(prepFatta);
+    if (!prepFatta(p) && resto) {
+      setAperti((a) => ({ ...a, prep: false, ...(esercizi[0] ? { [esercizi[0].id]: true } : {}) }));
+      if (esercizi[0]) setTimeout(() => { const el = document.getElementById(`card-${esercizi[0].id}`); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 250);
+    }
+    caricaGiorno();
+  };
   if (caricando) return <Spinner />;
   const giorno = giorni.find((g) => g.id === giornoId);
   const oggi = formatDataLocale(new Date());
@@ -3487,17 +3516,55 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
 
           {giorno && <p className="text-xs -mt-1" style={{ color: "#7a8da3" }}>{nomeGiornoPulito(giorno.nome)}</p>}
 
+          {prep.length > 0 && (() => {
+            const aperta = aperti.prep ?? correnteKey === "prep";
+            const fatte = prep.filter(prepFatta).length;
+            return (
+              <div className="bg-white rounded-3xl p-4" style={{ border: "1px solid #C9E0F7" }}>
+                <button onClick={() => setAperti((a) => ({ ...a, prep: !aperta }))} className="w-full flex items-start justify-between gap-2 text-left">
+                  <div>
+                    <h3 className="font-bold text-base" style={{ color: "#27466D" }}>Mobilità pre allenamento{prepCompleta ? " ✓" : ""}</h3>
+                    <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Solo da spuntare · {fatte}/{prep.length} fatti</p>
+                  </div>
+                  <ChevronRight size={18} stroke="#4F8FD0" className={`flex-shrink-0 mt-1 transition-transform ${aperta ? "rotate-90" : ""}`} />
+                </button>
+                {aperta && (
+                  <div className="mt-2 space-y-1">
+                    {prep.map((p) => {
+                      const ok = prepFatta(p); const info = trovaEsercizioVideo(p.nome, libreria);
+                      return (
+                        <div key={p.id} className="flex items-center gap-3 py-2" style={{ borderTop: "1px solid #EEF3F8" }}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold" style={{ color: "#27466D" }}>{p.nome}</p>
+                            {info && <button onClick={() => setInfoEs(info)} className="text-xs font-semibold mt-0.5" style={{ color: "#3F78B3" }}>▷ {info.video_url ? "Guarda il video" : "Tecnica"}</button>}
+                          </div>
+                          <button onClick={() => spuntaPrep(p)} aria-label={ok ? "Fatto" : "Segna come fatto"} className="rounded-full flex items-center justify-center flex-shrink-0"
+                            style={{ width: 44, height: 44, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
+                            <Check size={20} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {esercizi.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Gli esercizi di questo giorno li aggiunge Morgana ✨</Card>}
-          {esercizi.map((es, i) => (
-            <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? i === 0}
-              onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? i === 0) }))}
+          {esercizi.map((es) => (
+            <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? correnteKey === es.id}
+              onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? correnteKey === es.id) }))}
               entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
               onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} />
           ))}
-          {esercizi.length > 0 && <p className="text-center text-xs pt-1" style={{ color: "#7a8da3" }}>Ogni serie conta: brava, stai andando alla grande 💪🏻</p>}
+          {tuttiFatti ? (
+            <div id="fine-allenamento" className="rounded-3xl p-5 text-center" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7" }}>
+              <p className="font-bold text-base" style={{ color: "#27466D" }}>Allenamento completato ✨</p>
+              <p className="text-sm mt-1" style={{ color: "#3F78B3" }}>Ora dedica 5 minuti allo stretching 🧘🏻‍♀️ aiuta il recupero e scioglie la tensione. Brava, grande lavoro 💪🏻</p>
+            </div>
+          ) : esercizi.length > 0 && <p className="text-center text-xs pt-1" style={{ color: "#7a8da3" }}>Ogni serie conta: brava, stai andando alla grande 💪🏻</p>}
         </>
       )}
-      <BloccoPreparazione clientId={clientId} isAdmin={false} libreriaVideo={libreria} />
       {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
       <BarraTimer timer={timer} onChange={setTimer} onVai={vai} />
     </div>
