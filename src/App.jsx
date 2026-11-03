@@ -2221,8 +2221,16 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
   );
 }
 
+// Numero di serie da mostrare: quello indicato dal coach; se manca, top set = 1, back-off = 2, altrimenti 3
+function serieDefault(nome, serie) {
+  const n = Number(serie);
+  if (n > 0) return n;
+  if (/top\s*set/i.test(nome || "")) return 1;
+  if (/back.?off/i.test(nome || "")) return 2;
+  return 3;
+}
 function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, onSaved }) {
-  const nSerie = Math.max(1, Math.min(Number(serieRichieste) || 3, 10));
+  const nSerie = Math.max(1, Math.min(serieRichieste, 10));
   const primaRigaConNota = entries.find((e) => e.note) || entries.find((e) => e.numero_serie === 1) || entries[0];
   const [nota, setNota] = useState(primaRigaConNota?.note ?? "");
   const [salvandoNota, setSalvandoNota] = useState(false);
@@ -2727,7 +2735,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                     const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
                     return (
                       <td key={d} className="px-2 py-2 text-center">
-                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={es.serie} onSaved={carica} />
+                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={serieDefault(es.nome, es.serie)} onSaved={carica} />
                       </td>
                     );
                   })}
@@ -3271,7 +3279,7 @@ function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichett
 }
 
 function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo }) {
-  const nSerie = Math.max(1, Math.min(Number(es.serie) || 3, 10));
+  const nSerie = Math.max(1, Math.min(serieDefault(es.nome, es.serie), 10));
   const [bozza, setBozza] = useState({}); // { "n-kg": testo }
   const [nota, setNota] = useState("");
   const [notaAperta, setNotaAperta] = useState(false);
@@ -3466,7 +3474,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
 
   const prepFatta = (p) => entries.some((e) => e.exercise_id === p.id && e.completata === true);
   const prepCompleta = prep.length > 0 && prep.every(prepFatta);
-  const esCompleto = (es) => { const n = Math.max(1, Math.min(Number(es.serie) || 3, 10)); const en = entries.filter((e) => e.exercise_id === es.id); return Array.from({ length: n }).every((_, i) => { const x = en.find((y) => y.numero_serie === i + 1); return !!x && (x.completata === true || (x.completata == null && (x.kg != null || x.ripetizioni))); }); };
+  const esCompleto = (es) => { const n = Math.max(1, Math.min(serieDefault(es.nome, es.serie), 10)); const en = entries.filter((e) => e.exercise_id === es.id); return Array.from({ length: n }).every((_, i) => { const x = en.find((y) => y.numero_serie === i + 1); return !!x && (x.completata === true || (x.completata == null && (x.kg != null || x.ripetizioni))); }); };
   const tuttiFatti = esercizi.length > 0 && esercizi.every(esCompleto);
   const correnteKey = prep.length > 0 && !prepCompleta ? "prep" : (esercizi.find((e) => !esCompleto(e)) || {}).id;
   useEffect(() => { if (tuttiFatti) { try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} setTimeout(() => { const el = document.getElementById("fine-allenamento"); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 300); } }, [tuttiFatti, data]);

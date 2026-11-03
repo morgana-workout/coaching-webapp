@@ -24,6 +24,40 @@ const GRUPPI = [
   ["Addome", /crunch|plank|addom|ab wheel|sit.?up|leg raise|core/i],
 ];
 const gruppoDi = (nome) => { const n = (nome || "").replace(/^\+\s*/, ""); const g = GRUPPI.find(([, re]) => re.test(n)); return g ? g[0] : null; };
+// Ripartizione del lavoro tra distretti: molti esercizi non lavorano un solo muscolo.
+// Dipende dall'esercizio e, per i multiarticolari degli arti inferiori, dalle leve della cliente (femore lungo/corto).
+function quote(nome, leve) {
+  const n = (nome || "").replace(/^\+\s*/, "");
+  if (/bulgar|split squat/i.test(n)) return { Glutei: 0.5, Femorali: 0.5 };
+  if (/affond|lunge|step.?up|walking/i.test(n)) return { Glutei: 0.5, Quadricipiti: 0.3, Femorali: 0.2 };
+  if (/rdl|stacco rumeno|romanian|good morning/i.test(n)) return { Femorali: 0.6, Glutei: 0.4 };
+  if (/squat|leg press|pressa|hack/i.test(n)) {
+    if (leve === "lunghe") return { Quadricipiti: 0.4, Glutei: 0.6 };
+    if (leve === "corte") return { Quadricipiti: 0.75, Glutei: 0.25 };
+    return { Quadricipiti: 0.6, Glutei: 0.4 };
+  }
+  const g = gruppoDi(n);
+  return g ? { [g]: 1 } : {};
+}
+// Serie effettive di un esercizio: quelle indicate nel programma; se mancano, top set = 1 e back-off = 2;
+// altrimenti quelle realmente registrate nel log (valore più frequente); se non c'è nulla, restano "non indicate" (null) e non vengono contate.
+function serieEffettive(programma, righe) {
+  const perEs = {};
+  righe.forEach((r) => { if (!r.data || !(Number(r.kg) > 0 || num(r.ripetizioni))) return; ((perEs[r.exercise_id] = perEs[r.exercise_id] || {})[r.data] = (perEs[r.exercise_id][r.data] || new Set())).add(r.numero_serie || 1); });
+  return programma.map((e) => {
+    let s = num(e.serie);
+    if (!(s > 0)) {
+      if (/top\s*set/i.test(e.nome || "")) s = 1;
+      else if (/back.?off/i.test(e.nome || "")) s = 2;
+      else {
+        const conte = Object.entries(perEs[e.id] || {}).sort((a, b) => a[0].localeCompare(b[0])).slice(-4).map(([, set]) => set.size);
+        if (conte.length) { const f = {}; conte.forEach((c) => { f[c] = (f[c] || 0) + 1; }); s = Number(Object.entries(f).sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0]); } else s = null;
+      }
+    }
+    return { ...e, serieEff: s };
+  });
+}
+const arr05 = (x) => Math.round(x * 2) / 2;
 const SPINTA = ["Petto", "Spalle", "Tricipiti"], TRAZIONE = ["Dorso", "Bicipiti"];
 
 // Riferimenti settimanali per distretto: serie, frequenza (sedute/sett.), range di ripetizioni.
@@ -50,31 +84,36 @@ const DISTRETTI = {
 };
 const repRange = (v) => { const n = (String(v ?? "").match(/\d+([.,]\d+)?/g) || []).map((x) => Number(x.replace(",", "."))).filter((x) => x > 0 && x < 100); return n.length ? [Math.min(...n), Math.max(...n)] : null; };
 
-function analisiTarget(programma, sesso) {
+function analisiTarget(programma, sesso, leve) {
   const tab = DISTRETTI[sesso === "M" ? "M" : "F"];
   const consigli = [], righe = [];
   const donna = sesso !== "M";
   tab.forEach((D) => {
-    const es = programma.filter((e) => D.g.includes(gruppoDi(e.nome)));
-    const serie = es.reduce((a, e) => a + (num(e.serie) || 0), 0);
+    const peso = (e) => { const q = quote(e.nome, leve); return D.g.reduce((a, g) => a + (q[g] || 0), 0); };
+    const esTutti = programma.filter((e) => peso(e) > 0);
+    const es = esTutti.filter((e) => e.serieEff > 0);
+    const inc = esTutti.length - es.length; // esercizi del distretto senza serie indicate: non si inventano
+    const serie = arr05(es.reduce((a, e) => a + e.serieEff * peso(e), 0));
     const perSeduta = {};
-    es.forEach((e) => { perSeduta[e.training_day_id] = (perSeduta[e.training_day_id] || 0) + (num(e.serie) || 0); });
+    es.forEach((e) => { perSeduta[e.training_day_id] = (perSeduta[e.training_day_id] || 0) + e.serieEff * peso(e); });
     const freq = Object.values(perSeduta).filter((x) => x > 0).length;
     let lo = 0, hi = 0, pesi = 0;
-    es.forEach((e) => { const r = repRange(e.ripetizioni), w = num(e.serie) || 0; if (r && w) { lo += r[0] * w; hi += r[1] * w; pesi += w; } });
+    es.forEach((e) => { const r = repRange(e.ripetizioni), w = e.serieEff * peso(e); if (r && w) { lo += r[0] * w; hi += r[1] * w; pesi += w; } });
     const rep = pesi ? [Math.round(lo / pesi), Math.round(hi / pesi)] : null;
     const medio = rep ? (rep[0] + rep[1]) / 2 : null;
     let stato = "ok";
-    if (serie === 0) stato = D.facolt ? "nd" : "manca";
+    if (inc > 0) stato = "inc";
+    else if (serie === 0) stato = D.facolt ? "nd" : "manca";
     else if (serie < D.serie[0]) stato = "basso";
     else if (serie > D.serie[1] + 2) stato = "alto";
-    righe.push({ d: D.d, serie, freq, rep, rifSerie: D.serie, rifFreq: D.freq, rifRep: D.rep, stato });
+    righe.push({ d: D.d, serie, freq, rep, rifSerie: D.serie, rifFreq: D.freq, rifRep: D.rep, stato, inc });
+    if (inc > 0) return; // senza le serie indicate non si danno indicazioni di volume su questo distretto
     if (serie === 0) { if (!D.facolt) consigli.push({ t: "up", tit: `${D.d}: nessuno stimolo diretto nel programma`, testo: `Riferimento ${D.serie[0]}–${D.serie[1]} serie/settimana. Se il distretto è un obiettivo, inserire almeno 1–2 esercizi.`, peso: 2 }); return; }
     if (serie < D.serie[0]) consigli.push({ t: "up", tit: `${D.d}: ${serie} serie/settimana (riferimento ${D.serie[0]}–${D.serie[1]})`, testo: `Volume inferiore al range indicato per ${donna ? "la donna" : "l'uomo"}. Se il distretto è prioritario, valutare +${Math.min(6, D.serie[0] - serie)} serie settimanali, distribuite su ${Math.max(D.freq[0], 2)} sedute.`, peso: D.facolt ? 0 : 2 });
     else if (serie > D.serie[1] + 2) consigli.push({ t: "dn", tit: `${D.d}: ${serie} serie/settimana (riferimento ${D.serie[0]}–${D.serie[1]})`, testo: "Volume superiore al range: valutare la riduzione se il recupero è scarso, se i carichi non progrediscono o se compare ritenzione/indolenzimento persistente.", peso: 1 });
     if (freq > 0 && freq < D.freq[0]) consigli.push({ t: "fl", tit: `${D.d}: frequenza ${freq}×/settimana (riferimento ${D.freq[0]}${D.freq[1] > D.freq[0] ? "–" + D.freq[1] : ""}×)`, testo: `Distribuire le ${serie} serie su ${D.freq[0]} sedute migliora la qualità delle serie e il recupero${donna ? "; nella donna la monofrequenza è in genere poco efficiente" : ""}.`, peso: 1 });
     if (medio !== null && (medio < D.rep[0] - 1 || medio > D.rep[1] + 1)) consigli.push({ t: "fl", tit: `${D.d}: ripetizioni medie ${rep[0]}–${rep[1]} (riferimento ${D.rep[0]}–${D.rep[1]})`, testo: medio < D.rep[0] ? "Range di ripetizioni più basso del riferimento: valutare esercizi/serie a più ripetizioni per aumentare il tempo sotto tensione." : "Range di ripetizioni più alto del riferimento: valutare carichi maggiori su 1–2 esercizi principali per la tensione meccanica.", peso: 0 });
-    const max = Math.max(0, ...Object.values(perSeduta));
+    const max = arr05(Math.max(0, ...Object.values(perSeduta)));
     const soglia = donna ? 10 : 12;
     if (max > soglia) consigli.push({ t: "fl", tit: `${D.d}: fino a ${max} serie in una sola seduta (soglia ${soglia})`, testo: donna && D.d === "Glutei e femorali"
       ? "Oltre 10–12 serie per distretto nella stessa seduta il guadagno ipertrofico tende a ridursi (danno muscolare localizzato) e può peggiorare l'infiammazione e la ritenzione agli arti inferiori: frazionare in 3 sedute brevi da 5–6 serie invece di una da 15–18."
@@ -89,10 +128,10 @@ async function leggi(q) {
   return tutto;
 }
 
-function analizza(esercizi, giorni, righe, sesso) {
+function analizza(esercizi, giorni, righe, sesso, leve) {
   let tabella = [];
   const idGiorniAttivi = new Set(giorni.filter((g) => !g.scheda_archiviata).map((g) => g.id));
-  const programma = esercizi.filter((e) => idGiorniAttivi.has(e.training_day_id));
+  const programma = serieEffettive(esercizi.filter((e) => idGiorniAttivi.has(e.training_day_id)), righe);
   const consigli = [];
   const oggi = fmt(new Date());
   const finestra28 = righe.filter((r) => r.data >= giorniFa(27) && r.data <= oggi);
@@ -127,10 +166,10 @@ function analizza(esercizi, giorni, righe, sesso) {
 
   // --- volume previsto per distretto (serie/settimana) dal programma attivo, e frequenza (sedute per distretto)
   const vol = {}, freq = {};
-  programma.forEach((e) => { const g = gruppoDi(e.nome); if (!g) return; const s = num(e.serie) || 0; vol[g] = (vol[g] || 0) + s; (freq[g] = freq[g] || new Set()).add(e.training_day_id); });
+  programma.forEach((e) => { const q = quote(e.nome, leve); const s = e.serieEff || 0; Object.entries(q).forEach(([g, w]) => { vol[g] = (vol[g] || 0) + s * w; (freq[g] = freq[g] || new Set()).add(e.training_day_id); }); });
   const nSeduteProg = idGiorniAttivi.size;
   if (nSeduteProg > 0) {
-    const T = analisiTarget(programma, sesso);
+    const T = analisiTarget(programma, sesso, leve);
     T.consigli.sort((x, y) => y.peso - x.peso).forEach((x) => consigli.push(x));
     tabella = T.righe;
     const sp = SPINTA.reduce((s, g) => s + (vol[g] || 0), 0), tr = TRAZIONE.reduce((s, g) => s + (vol[g] || 0), 0);
@@ -148,31 +187,41 @@ function analizza(esercizi, giorni, righe, sesso) {
     if (giorniOsservati >= 14 && sett < nSeduteProg * 0.75) consigli.push({ t: "chk", tit: `Frequenza settimanale reale ${String(Math.round(sett * 10) / 10).replace(".", ",")} (programma: ${nSeduteProg} sedute)`, testo: "Dal primo allenamento registrato, l'esecuzione è inferiore al programma: la limitazione alla progressione è più probabilmente l'aderenza che la programmazione. Valutare se il numero di sedute è sostenibile o va ridotto.", peso: 0 });
   }
   const mantenere = ok.slice(0, 5);
-  return { consigli, mantenere, tabella, sesso, datiPochi: dateAllenate28.size < 4 || (!programma.length && !righe.length) };
+  const nonIndicate = programma.filter((e) => !(e.serieEff > 0)).map((e) => e.nome);
+  return { consigli, mantenere, tabella, sesso, programma, nonIndicate, giorni: giorni.filter((g) => !g.scheda_archiviata), datiPochi: dateAllenate28.size < 4 || (!programma.length && !righe.length) };
 }
 
 export function ConsigliProgramma({ client }) {
   const [r, setR] = useState(null);
+  const [leve, setLeve] = useState(client.leve || "");
+  const salvaLeve = async (v) => { setLeve(v); try { await supabase.from("clients").update({ leve: v || null }).eq("id", client.id); } catch (e) {} };
   useEffect(() => {
     let vivo = true; setR(null);
     (async () => {
       try {
         const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, training_day_id").eq("client_id", client.id);
-        const { data: gg } = await supabase.from("training_days").select("id, scheda_archiviata").eq("client_id", client.id);
-        const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
-        if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso));
+        const { data: gg } = await supabase.from("training_days").select("id, nome, scheda_archiviata").eq("client_id", client.id);
+        const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni, numero_serie").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
+        if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso, leve));
       } catch (e) { if (vivo) setR({ errore: true }); }
     })();
     return () => { vivo = false; };
-  }, [client.id, client.sesso]);
+  }, [client.id, client.sesso, leve]);
   const stile = { up: ["▲ Aumentare / cambiare", "bg-sky-100 text-sky-700"], dn: ["▼ Ridurre / scaricare", "bg-slate-800 text-white"], fl: ["◆ Struttura", "bg-slate-100 text-slate-600"], chk: ["⚑ Verificare", "bg-slate-100 text-slate-600"] };
   return (
     <div className="bg-white border border-sky-200 rounded-2xl p-4 min-w-0">
       <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Indicazioni sul programma · ultime 8 settimane</p>
+      <div className="flex items-center gap-2 mb-2 text-[12px] text-slate-600">
+        <span>Leve (femore):</span>
+        {[["", "non indicate"], ["corte", "corte"], ["lunghe", "lunghe"]].map(([v, l]) => (
+          <button key={v} onClick={() => salvaLeve(v)} className={`px-2.5 py-1 rounded-full text-[11.5px] ${leve === v ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{l}</button>
+        ))}
+      </div>
       {!r && <p className="text-xs text-slate-400">Analizzo il programma…</p>}
       {r?.errore && <p className="text-xs text-slate-400">Non riesco a leggere i dati.</p>}
       {r && !r.errore && (
         <>
+          {r.nonIndicate?.length > 0 && <p className="text-[12px] text-slate-500 mb-2">Serie non indicate per {r.nonIndicate.length} esercizi ({r.nonIndicate.slice(0, 4).join(", ")}{r.nonIndicate.length > 4 ? "…" : ""}): non li conto e non do indicazioni di volume sui distretti che li comprendono. Le serie mancanti vengono dedotte solo da top set (1) e back-off (2) o dal log.</p>}
           {r.datiPochi && <p className="text-[12px] text-slate-500 mb-2">Dati di allenamento ancora pochi: le indicazioni basate sui carichi richiedono almeno 3 sessioni per esercizio.</p>}
           {r.consigli.length === 0 && !r.datiPochi && <p className="text-sm text-slate-500">Nessuna indicazione particolare: progressione e struttura del programma sono nei range attesi.</p>}
           {r.consigli.map((c, i) => (
@@ -190,7 +239,7 @@ export function ConsigliProgramma({ client }) {
                 {r.tabella.map((x) => (
                   <div key={x.d} className="grid grid-cols-[1.5fr_1fr_.8fr_1fr] gap-x-2 py-1 border-t border-sky-100">
                     <span>{x.d}</span>
-                    <span className={x.stato === "basso" || x.stato === "manca" ? "text-slate-900 font-semibold" : x.stato === "alto" ? "text-slate-900 font-semibold" : ""}>{x.serie} <span className="text-slate-400">/ {x.rifSerie[0]}–{x.rifSerie[1]}</span> {x.stato === "basso" || x.stato === "manca" ? "▼" : x.stato === "alto" ? "▲" : x.stato === "ok" ? "✓" : ""}</span>
+                    <span className={x.stato === "basso" || x.stato === "manca" ? "text-slate-900 font-semibold" : x.stato === "alto" ? "text-slate-900 font-semibold" : ""}>{String(x.serie).replace(".", ",")}{x.inc ? <span className="text-slate-400"> +{x.inc} n.i.</span> : null} <span className="text-slate-400">/ {x.rifSerie[0]}–{x.rifSerie[1]}</span> {x.stato === "basso" || x.stato === "manca" ? "▼" : x.stato === "alto" ? "▲" : x.stato === "ok" ? "✓" : ""}</span>
                     <span>{x.freq}× <span className="text-slate-400">/ {x.rifFreq[0]}{x.rifFreq[1] > x.rifFreq[0] ? "–" + x.rifFreq[1] : ""}</span></span>
                     <span>{x.rep ? x.rep[0] + "–" + x.rep[1] : "—"} <span className="text-slate-400">/ {x.rifRep[0]}–{x.rifRep[1]}</span></span>
                   </div>
@@ -198,9 +247,76 @@ export function ConsigliProgramma({ client }) {
               </div>
             </div>
           )}
+          <Simulatore r={r} sesso={client.sesso} leve={leve} />
           {r.mantenere.length > 0 && <p className="text-[12px] text-slate-600 pt-2"><span className="inline-block text-[10.5px] rounded-full px-2 py-0.5 mr-2 bg-slate-100 text-slate-600">▬ Mantenere</span>{r.mantenere.join(", ")}: progressione regolare.</p>}
-          <p className="text-[11px] text-slate-400 mt-2">Regole su carichi, ripetizioni e serie registrati e sul programma attivo: sono spunti, la decisione è tua. Il distretto è dedotto dal nome dell'esercizio.</p>
+          <p className="text-[11px] text-slate-400 mt-2">Regole su carichi, ripetizioni e serie registrati e sul programma attivo: sono spunti, la decisione è tua. Il lavoro è ripartito tra i distretti in base all'esercizio (es. squat bulgaro: glutei e femorali; squat e pressa: quadricipiti e glutei in proporzione alle leve indicate).</p>
         </>
+      )}
+    </div>
+  );
+}
+
+// Bozza provvisoria: si modificano serie / si aggiungono o tolgono esercizi e si vede come cambia la valutazione. Non salva nulla.
+function Simulatore({ r, sesso, leve }) {
+  const [aperto, setAperto] = useState(false);
+  const [mod, setMod] = useState({}); // id -> serie (stringa) | "x" per togliere
+  const [nuovi, setNuovi] = useState([]); // { nome, serie, rip, training_day_id }
+  const [nn, setNn] = useState({ nome: "", serie: "3", rip: "8-12", training_day_id: r.giorni[0]?.id || "" });
+  const nomeGiorno = (id) => r.giorni.find((g) => g.id === id)?.nome || "";
+  const bozza = [
+    ...r.programma.filter((e) => mod[e.id] !== "x").map((e) => (mod[e.id] != null && mod[e.id] !== "" ? { ...e, serieEff: Number(mod[e.id]) || 0 } : e)),
+    ...nuovi.map((e, i) => ({ id: "n" + i, nome: e.nome, serieEff: Number(e.serie) || 0, ripetizioni: e.rip, training_day_id: e.training_day_id })),
+  ];
+  const B = aperto ? analisiTarget(bozza, sesso, leve) : null;
+  const sc = (x) => String(x).replace(".", ",");
+  return (
+    <div className="mt-3 border-t border-sky-100 pt-3">
+      <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700">🧪 {aperto ? "Chiudi la bozza" : "Prova una modifica al programma (bozza provvisoria)"}</button>
+      {aperto && (
+        <div className="mt-2 space-y-3">
+          <p className="text-[11.5px] text-slate-500">Cambia le serie, togli un esercizio o aggiungine uno: sotto vedi come cambia il confronto con i riferimenti. È solo una simulazione, il programma vero non viene toccato.</p>
+          <div className="space-y-1 max-h-72 overflow-y-auto">
+            {r.programma.map((e) => (
+              <div key={e.id} className={`flex items-center gap-2 text-[12px] ${mod[e.id] === "x" ? "opacity-40" : ""}`}>
+                <span className="flex-1 min-w-0 truncate">{e.nome} <span className="text-slate-400">· {nomeGiorno(e.training_day_id)}</span></span>
+                <input inputMode="numeric" value={mod[e.id] === "x" ? "" : (mod[e.id] ?? (e.serieEff > 0 ? e.serieEff : ""))} placeholder="serie" onChange={(ev) => setMod({ ...mod, [e.id]: ev.target.value.replace(/\D/g, "") })} className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center" />
+                <button onClick={() => setMod({ ...mod, [e.id]: mod[e.id] === "x" ? "" : "x" })} className="text-slate-400 px-1" title="Togli/rimetti">{mod[e.id] === "x" ? "↺" : "✕"}</button>
+              </div>
+            ))}
+            {nuovi.map((e, i) => (
+              <div key={i} className="flex items-center gap-2 text-[12px] text-sky-700">
+                <span className="flex-1 min-w-0 truncate">+ {e.nome} <span className="text-slate-400">· {nomeGiorno(e.training_day_id)} · {e.serie} serie</span></span>
+                <button onClick={() => setNuovi(nuovi.filter((_, j) => j !== i))} className="text-slate-400 px-1">✕</button>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-1.5 items-center flex-wrap">
+            <input value={nn.nome} onChange={(ev) => setNn({ ...nn, nome: ev.target.value })} placeholder="Nuovo esercizio (es. Hip thrust)" className="flex-1 min-w-[140px] border border-slate-200 rounded px-2 py-1 text-[12px]" />
+            <select value={nn.training_day_id} onChange={(ev) => setNn({ ...nn, training_day_id: ev.target.value })} className="border border-slate-200 rounded px-1 py-1 text-[12px]">{r.giorni.map((g) => <option key={g.id} value={g.id}>{g.nome}</option>)}</select>
+            <input value={nn.serie} onChange={(ev) => setNn({ ...nn, serie: ev.target.value.replace(/\D/g, "") })} className="w-12 border border-slate-200 rounded px-1 py-1 text-center text-[12px]" />
+            <input value={nn.rip} onChange={(ev) => setNn({ ...nn, rip: ev.target.value })} className="w-16 border border-slate-200 rounded px-1 py-1 text-center text-[12px]" />
+            <button onClick={() => { if (nn.nome.trim()) { setNuovi([...nuovi, nn]); setNn({ ...nn, nome: "" }); } }} className="bg-slate-800 text-white rounded px-2.5 py-1 text-[12px]">Aggiungi</button>
+          </div>
+          {B && (
+            <div className="text-[11.5px] text-slate-700">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mb-1">Ora → bozza</p>
+              <div className="grid grid-cols-[1.4fr_.8fr_.8fr_1fr] gap-x-2 text-[10.5px] text-slate-400 pb-1"><span>Distretto</span><span>Serie ora</span><span>Serie bozza</span><span>Riferimento</span></div>
+              {B.righe.map((x, i) => {
+                const ora = r.tabella[i];
+                return (
+                  <div key={x.d} className="grid grid-cols-[1.4fr_.8fr_.8fr_1fr] gap-x-2 py-1 border-t border-sky-100">
+                    <span>{x.d}</span>
+                    <span>{sc(ora?.serie ?? 0)}</span>
+                    <span className={x.serie !== ora?.serie ? "font-semibold text-sky-700" : ""}>{sc(x.serie)} {x.stato === "ok" ? "✓" : x.stato === "basso" || x.stato === "manca" ? "▼" : x.stato === "alto" ? "▲" : ""}</span>
+                    <span className="text-slate-400">{x.rifSerie[0]}–{x.rifSerie[1]}</span>
+                  </div>
+                );
+              })}
+              <p className="mt-2 font-semibold">Indicazioni sulla bozza: {B.consigli.length === 0 ? "nessuna, volume e frequenza nei range ✓" : `${B.consigli.length} (prima: ${r.consigli.filter((c) => c.t !== "chk").length})`}</p>
+              {B.consigli.sort((a, b) => b.peso - a.peso).slice(0, 5).map((c, i) => <p key={i} className="text-slate-500 mt-0.5">• {c.tit}</p>)}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
