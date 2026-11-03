@@ -46,6 +46,7 @@ function serieEffettive(programma, righe) {
   righe.forEach((r) => { if (!r.data || !(Number(r.kg) > 0 || num(r.ripetizioni))) return; ((perEs[r.exercise_id] = perEs[r.exercise_id] || {})[r.data] = (perEs[r.exercise_id][r.data] || new Set())).add(r.numero_serie || 1); });
   return programma.map((e) => {
     let s = num(e.serie);
+    if (e.tecnica === "top_back" && ((e.serie_top || 0) + (e.serie_backoff || 0)) > 0) s = (e.serie_top || 0) + (e.serie_backoff || 0);
     if (!(s > 0)) {
       if (/top\s*set/i.test(e.nome || "")) s = 1;
       else if (/back.?off/i.test(e.nome || "")) s = 2;
@@ -200,7 +201,7 @@ export function ConsigliProgramma({ client }) {
     let vivo = true; setR(null);
     (async () => {
       try {
-        const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, training_day_id").eq("client_id", client.id);
+        const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, training_day_id, ordine, tecnica, serie_top, serie_backoff").eq("client_id", client.id);
         const { data: gg } = await supabase.from("training_days").select("id, nome, scheda_archiviata").eq("client_id", client.id);
         const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni, numero_serie").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
         if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso, leve));
@@ -257,8 +258,13 @@ export function ConsigliProgramma({ client }) {
   );
 }
 
-// Propone automaticamente le modifiche al numero di serie per portare ogni distretto nel range di riferimento.
-// Agisce solo su esercizi con serie indicate; non inventa esercizi nuovi (per i distretti senza esercizi lo segnala soltanto).
+const TECNICHE_SIM = [["", "Nessuna tecnica"], ["top_back", "Top set + back-off"], ["drop", "Drop set"], ["rest_pause", "Rest-pause"], ["myo", "Myo-reps"], ["super", "Superserie"], ["cluster", "Cluster"], ["pausa", "Serie con pausa"]];
+const nomeTecnica = (t) => (TECNICHE_SIM.find(([k]) => k === t) || [])[1] || "";
+const COMPOSTI = /squat|leg press|pressa|hack|hip thrust|rdl|romanian|stacco|deadlift|good morning|bulgar|affond|lunge|step.?up|panca|chest press|military|lento avanti|lat |lat machine|pulldown|trazion|rematore|row|pull.?up|chin|dip/i;
+const baseNome = (n) => String(n || "").replace(/\s*(top\s*set|back.?off)\s*/gi, " ").replace(/\s+/g, " ").trim().toLowerCase();
+
+// Propone automaticamente: serie per distretto, ordine degli esercizi (multiarticolari prima) e tecnica (top set + back-off) per gli esercizi in stallo.
+// Agisce solo su esercizi con serie indicate; non inventa esercizi nuovi.
 function proponiModifiche(r, sesso, leve) {
   const tab = DISTRETTI[sesso === "M" ? "M" : "F"];
   const mod = {}; // id -> serie proposte
@@ -285,69 +291,150 @@ function proponiModifiche(r, sesso, leve) {
   }
   const T0 = analisiTarget(corrente(), sesso, leve);
   T0.righe.forEach((x) => { if (x.stato === "manca") note.push(`${x.d}: nessun esercizio nel programma, valuta di inserirne 1–2 (non lo aggiungo io).`); else if (x.stato === "basso") note.push(`${x.d}: ancora sotto il riferimento con le serie degli esercizi attuali, serve un esercizio in più.`); });
-  return { mod, note };
+
+  // ordine: multiarticolari prima degli isolamenti, a parità resta l'ordine attuale (top set e back-off restano vicini)
+  const ord = {};
+  r.giorni.forEach((g) => {
+    const es = r.programma.filter((e) => e.training_day_id === g.id).sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0));
+    const nuovo = es.map((e, i) => ({ e, i, t: COMPOSTI.test(e.nome) ? 0 : 1 })).sort((a, b) => a.t - b.t || a.i - b.i).map((x) => x.e.id);
+    if (nuovo.join() !== es.map((e) => e.id).join()) { ord[g.id] = nuovo; note.push(`${g.nome}: porto gli esercizi multiarticolari prima degli isolamenti (più freschi sui carichi alti).`); }
+  });
+
+  // tecnica: esercizi con carico fermo da molte sessioni → top set + back-off
+  const tec = {};
+  r.consigli.filter((c) => c.cambio).forEach((c) => {
+    const k = baseNome(c.tit);
+    const e = r.programma.find((x) => baseNome(x.nome) === k && !x.tecnica && !/top\s*set|back.?off/i.test(x.nome));
+    const tot = e ? (mod[e.id] ?? e.serieEff) : 0;
+    if (e && tot >= 3) { tec[e.id] = { t: "top_back", top: "1", back: String(tot - 1) }; note.push(`${e.nome}: carico fermo da più sessioni → 1 top set + ${tot - 1} back-off per cambiare stimolo.`); }
+  });
+  return { mod, note, ord, tec };
 }
 
-// Bozza provvisoria: si modificano serie / si aggiungono o tolgono esercizi e si vede come cambia la valutazione. Non salva nulla.
+// Bozza provvisoria: si modificano serie, ordine e tecniche (o si aggiungono/tolgono esercizi) e si vede come cambia la valutazione.
+// Le modifiche si possono poi applicare al programma vero con conferma.
 function Simulatore({ r, sesso, leve, onApplicato }) {
   const [aperto, setAperto] = useState(false);
   const [mod, setMod] = useState({}); // id -> serie (stringa) | "x" per togliere
-  const [nuovi, setNuovi] = useState([]); // { nome, serie, rip, training_day_id }
+  const [tec, setTec] = useState({}); // id -> { t, top, back }
+  const [ord, setOrd] = useState({}); // giorno -> [ids]
+  const [nuovi, setNuovi] = useState([]); // solo simulazione: { nome, serie, rip, training_day_id }
   const [nn, setNn] = useState({ nome: "", serie: "3", rip: "8-12", training_day_id: r.giorni[0]?.id || "" });
   const [esito, setEsito] = useState("");
   const [applicando, setApplicando] = useState(false);
   const [notePrp, setNotePrp] = useState([]);
-  const cambi = r.programma.filter((e) => mod[e.id] != null && mod[e.id] !== "x" && mod[e.id] !== "" && Number(mod[e.id]) !== (e.serieEff || 0));
-  const proponi = () => {
-    const p = proponiModifiche(r, sesso, leve);
-    const m = {}; Object.entries(p.mod).forEach(([id, v]) => { m[id] = String(v); });
-    setMod(m); setNotePrp(p.note); setEsito(Object.keys(m).length ? "" : "Con le serie indicate non trovo modifiche utili da proporre.");
-  };
-  const applica = async () => {
-    if (!cambi.length) return;
-    if (!confirm(`Applico ${cambi.length} modifiche alle serie nel programma vero?\n\n` + cambi.map((e) => `${e.nome}: ${e.serieEff || "—"} → ${mod[e.id]}`).join("\n"))) return;
-    setApplicando(true);
-    for (const e of cambi) await supabase.from("training_exercises").update({ serie: Number(mod[e.id]) }).eq("id", e.id);
-    setApplicando(false); setMod({}); setNotePrp([]);
-    setEsito(`Fatto: ${cambi.length} esercizi aggiornati nel programma ✓`);
-    onApplicato && onApplicato();
-  };
   const nomeGiorno = (id) => r.giorni.find((g) => g.id === id)?.nome || "";
+  const ordineOriginale = (gid) => r.programma.filter((e) => e.training_day_id === gid).sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0)).map((e) => e.id);
+  const ordineDi = (gid) => ord[gid] || ordineOriginale(gid);
+
+  const tecDi = (e) => tec[e.id] || { t: e.tecnica || "", top: e.serie_top != null ? String(e.serie_top) : "", back: e.serie_backoff != null ? String(e.serie_backoff) : "" };
+  const serieDi = (e) => {
+    const T = tecDi(e);
+    if (T.t === "top_back" && (Number(T.top) || 0) + (Number(T.back) || 0) > 0) return (Number(T.top) || 0) + (Number(T.back) || 0);
+    return mod[e.id] != null && mod[e.id] !== "" && mod[e.id] !== "x" ? Number(mod[e.id]) : (e.serieEff > 0 ? e.serieEff : 0);
+  };
+  const cambiato = (e) => {
+    const T = tecDi(e);
+    const posNuova = ordineDi(e.training_day_id).indexOf(e.id), posOra = ordineOriginale(e.training_day_id).indexOf(e.id);
+    return serieDi(e) !== (e.serieEff || 0) || (T.t || "") !== (e.tecnica || "") || (T.t === "top_back" && (Number(T.top) || 0) !== (e.serie_top || 0)) || (T.t === "top_back" && (Number(T.back) || 0) !== (e.serie_backoff || 0)) || posNuova !== posOra;
+  };
+  const cambi = r.programma.filter((e) => mod[e.id] !== "x" && cambiato(e));
   const bozza = [
-    ...r.programma.filter((e) => mod[e.id] !== "x").map((e) => (mod[e.id] != null && mod[e.id] !== "" ? { ...e, serieEff: Number(mod[e.id]) || 0 } : e)),
+    ...r.programma.filter((e) => mod[e.id] !== "x").map((e) => ({ ...e, serieEff: serieDi(e) })),
     ...nuovi.map((e, i) => ({ id: "n" + i, nome: e.nome, serieEff: Number(e.serie) || 0, ripetizioni: e.rip, training_day_id: e.training_day_id })),
   ];
   const B = aperto ? analisiTarget(bozza, sesso, leve) : null;
   const sc = (x) => String(x).replace(".", ",");
+
+  const proponi = () => {
+    const p = proponiModifiche(r, sesso, leve);
+    const m = {}; Object.entries(p.mod).forEach(([id, v]) => { m[id] = String(v); });
+    setMod(m); setTec(p.tec); setOrd(p.ord); setNotePrp(p.note);
+    setEsito(Object.keys(m).length + Object.keys(p.tec).length + Object.keys(p.ord).length ? "" : "Con i dati indicati non trovo modifiche utili da proporre.");
+  };
+  const sposta = (gid, id, d) => {
+    const lista = [...ordineDi(gid)]; const i = lista.indexOf(id), j = i + d;
+    if (j < 0 || j >= lista.length) return;
+    [lista[i], lista[j]] = [lista[j], lista[i]];
+    setOrd({ ...ord, [gid]: lista });
+  };
+  const applica = async () => {
+    if (!cambi.length) return;
+    const righe = cambi.map((e) => {
+      const T = tecDi(e);
+      return `${e.nome}: ${e.serieEff || "—"} → ${serieDi(e)} serie${T.t ? ` · ${nomeTecnica(T.t)}${T.t === "top_back" ? ` (${T.top || 0} top + ${T.back || 0} back-off)` : ""}` : ""}`;
+    });
+    if (!confirm(`Applico ${cambi.length} modifiche al programma vero (serie, tecniche, ordine)?\n\n` + righe.join("\n"))) return;
+    setApplicando(true);
+    for (const e of cambi) {
+      const T = tecDi(e);
+      const campi = { serie: serieDi(e) || null, tecnica: T.t || null, serie_top: T.t === "top_back" ? Number(T.top) || 0 : null, serie_backoff: T.t === "top_back" ? Number(T.back) || 0 : null };
+      await supabase.from("training_exercises").update(campi).eq("id", e.id);
+    }
+    for (const g of r.giorni) {
+      if (!ord[g.id]) continue;
+      for (let i = 0; i < ord[g.id].length; i++) await supabase.from("training_exercises").update({ ordine: i + 1 }).eq("id", ord[g.id][i]);
+    }
+    setApplicando(false); setMod({}); setTec({}); setOrd({}); setNotePrp([]);
+    setEsito(`Fatto: ${cambi.length} esercizi aggiornati nel programma ✓`);
+    onApplicato && onApplicato();
+  };
+
   return (
     <div className="mt-3 border-t border-sky-100 pt-3">
       <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700">🧪 {aperto ? "Chiudi la bozza" : "Prova una modifica al programma (bozza provvisoria)"}</button>
       {aperto && (
         <div className="mt-2 space-y-3">
-          <p className="text-[11.5px] text-slate-500">Cambia le serie, togli un esercizio o aggiungine uno: sotto vedi come cambia il confronto con i riferimenti. È solo una simulazione, il programma vero non viene toccato.</p>
+          <p className="text-[11.5px] text-slate-500">Cambia le serie, l'ordine, le tecniche (es. top set + back-off), togli un esercizio o aggiungine uno per provare: sotto vedi come cambia il confronto con i riferimenti. Il programma vero cambia solo se premi "Applica".</p>
           <div className="flex gap-2 flex-wrap">
             <button onClick={proponi} className="bg-sky-100 text-sky-700 rounded-lg px-3 py-1.5 text-[12px] font-semibold">✨ Proponi tu le modifiche</button>
             {cambi.length > 0 && <button onClick={applica} disabled={applicando} className="bg-slate-800 text-white rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50">{applicando ? "Applico..." : `Applica ${cambi.length} modifiche al programma`}</button>}
           </div>
           {esito && <p className="text-[12px] text-sky-700">{esito}</p>}
-          {cambi.length > 0 && (
+          {(cambi.length > 0 || notePrp.length > 0) && (
             <div className="bg-sky-50 rounded-lg px-3 py-2 text-[12px] text-slate-700 space-y-0.5">
               <p className="font-semibold text-slate-800">Modifiche proposte</p>
-              {cambi.map((e) => <p key={e.id}>{e.nome}: {e.serieEff || "—"} → <b>{mod[e.id]}</b> serie</p>)}
+              {cambi.map((e) => { const T = tecDi(e); return <p key={e.id}>{e.nome}: {e.serieEff || "—"} → <b>{serieDi(e)}</b> serie{T.t ? ` · ${nomeTecnica(T.t)}` : ""}{ordineDi(e.training_day_id).indexOf(e.id) !== ordineOriginale(e.training_day_id).indexOf(e.id) ? " · cambia posizione" : ""}</p>; })}
               {notePrp.map((n, i) => <p key={i} className="text-slate-500">• {n}</p>)}
             </div>
           )}
-          <div className="space-y-1 max-h-72 overflow-y-auto">
-            {r.programma.map((e) => (
-              <div key={e.id} className={`flex items-center gap-2 text-[12px] ${mod[e.id] === "x" ? "opacity-40" : ""}`}>
-                <span className="flex-1 min-w-0 truncate">{e.nome} <span className="text-slate-400">· {nomeGiorno(e.training_day_id)}</span></span>
-                <input inputMode="numeric" value={mod[e.id] === "x" ? "" : (mod[e.id] ?? (e.serieEff > 0 ? e.serieEff : ""))} placeholder="serie" onChange={(ev) => setMod({ ...mod, [e.id]: ev.target.value.replace(/\D/g, "") })} className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center" />
-                <button onClick={() => setMod({ ...mod, [e.id]: mod[e.id] === "x" ? "" : "x" })} className="text-slate-400 px-1" title="Togli/rimetti">{mod[e.id] === "x" ? "↺" : "✕"}</button>
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {r.giorni.map((g) => (
+              <div key={g.id}>
+                <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium mb-1">{g.nome}</p>
+                <div className="space-y-1.5">
+                  {ordineDi(g.id).map((id, pos, lista) => {
+                    const e = r.programma.find((x) => x.id === id); if (!e) return null;
+                    const T = tecDi(e); const tb = T.t === "top_back";
+                    return (
+                      <div key={id} className={`border border-sky-100 rounded-lg px-2 py-1.5 ${mod[id] === "x" ? "opacity-40" : ""}`}>
+                        <div className="flex items-center gap-1.5 text-[12px]">
+                          <span className="flex flex-col leading-none text-slate-400">
+                            <button disabled={pos === 0} onClick={() => sposta(g.id, id, -1)} className="disabled:opacity-20">▲</button>
+                            <button disabled={pos === lista.length - 1} onClick={() => sposta(g.id, id, 1)} className="disabled:opacity-20">▼</button>
+                          </span>
+                          <span className="flex-1 min-w-0 truncate">{e.nome}</span>
+                          {!tb && <input inputMode="numeric" value={mod[id] === "x" ? "" : (mod[id] ?? (e.serieEff > 0 ? e.serieEff : ""))} placeholder="serie" onChange={(ev) => setMod({ ...mod, [id]: ev.target.value.replace(/\D/g, "") })} className="w-12 border border-slate-200 rounded px-1 py-1 text-center" />}
+                          <button onClick={() => setMod({ ...mod, [id]: mod[id] === "x" ? "" : "x" })} className="text-slate-400 px-1" title="Togli/rimetti">{mod[id] === "x" ? "↺" : "✕"}</button>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-1 text-[11.5px] text-slate-500 flex-wrap">
+                          <select value={T.t} onChange={(ev) => setTec({ ...tec, [id]: { ...T, t: ev.target.value, top: ev.target.value === "top_back" && !T.top ? "1" : T.top, back: ev.target.value === "top_back" && !T.back ? String(Math.max(1, (serieDi(e) || 3) - 1)) : T.back } })} className="border border-slate-200 rounded px-1 py-0.5 bg-white">
+                            {TECNICHE_SIM.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                          </select>
+                          {tb && (<>
+                            <input inputMode="numeric" value={T.top} onChange={(ev) => setTec({ ...tec, [id]: { ...T, top: ev.target.value.replace(/\D/g, "") } })} className="w-9 border border-slate-200 rounded px-1 py-0.5 text-center" /><span>top +</span>
+                            <input inputMode="numeric" value={T.back} onChange={(ev) => setTec({ ...tec, [id]: { ...T, back: ev.target.value.replace(/\D/g, "") } })} className="w-9 border border-slate-200 rounded px-1 py-0.5 text-center" /><span>back-off</span>
+                          </>)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
             {nuovi.map((e, i) => (
               <div key={i} className="flex items-center gap-2 text-[12px] text-sky-700">
-                <span className="flex-1 min-w-0 truncate">+ {e.nome} <span className="text-slate-400">· {nomeGiorno(e.training_day_id)} · {e.serie} serie</span></span>
+                <span className="flex-1 min-w-0 truncate">+ {e.nome} <span className="text-slate-400">· {nomeGiorno(e.training_day_id)} · {e.serie} serie · solo simulazione</span></span>
                 <button onClick={() => setNuovi(nuovi.filter((_, j) => j !== i))} className="text-slate-400 px-1">✕</button>
               </div>
             ))}

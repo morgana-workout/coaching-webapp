@@ -2173,7 +2173,7 @@ function ClientNutrizione({ piano, storico }) {
   );
 }
 
-function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved }) {
+function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved, etichetta = "" }) {
   const [kg, setKg] = useState(entry?.kg ?? "");
   const [rip, setRip] = useState(entry?.ripetizioni ?? "");
   const [id, setId] = useState(entry?.id ?? null);
@@ -2212,7 +2212,7 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
 
   return (
     <div className="flex gap-1 items-center">
-      <span className="text-[9px] text-slate-300 w-2.5 flex-shrink-0">{numeroSerie}</span>
+      <span className="text-[9px] text-slate-300 w-2.5 flex-shrink-0" title={etichetta}>{etichetta ? etichetta[0] : numeroSerie}</span>
       <input type="number" step="0.5" value={kg} onChange={(e) => setKg(e.target.value)} onBlur={salva} disabled={salvando}
         placeholder="kg" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
       <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={salva} disabled={salvando}
@@ -2229,7 +2229,20 @@ function serieDefault(nome, serie) {
   if (/back.?off/i.test(nome || "")) return 2;
   return 3;
 }
-function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, onSaved }) {
+// Tecniche di intensità impostabili dal coach per ogni esercizio
+const TECNICHE = [["", "Nessuna"], ["top_back", "Top set + back-off"], ["drop", "Drop set"], ["rest_pause", "Rest-pause"], ["myo", "Myo-reps"], ["super", "Superserie"], ["cluster", "Cluster"], ["pausa", "Serie con pausa"]];
+const nomeTecnica = (t) => (TECNICHE.find(([k]) => k === t) || [])[1] || "";
+// Serie totali: se top set + back-off sono indicati separati, la somma; altrimenti come prima
+function serieDi(es) {
+  if (es.tecnica === "top_back" && ((es.serie_top || 0) + (es.serie_backoff || 0)) > 0) return (es.serie_top || 0) + (es.serie_backoff || 0);
+  return serieDefault(es.nome, es.serie);
+}
+// Etichetta della singola serie ("Top" / "Back-off") quando l'esercizio è impostato come top set + back-off
+function etichettaSerie(es, n) {
+  if (es.tecnica === "top_back" && (es.serie_top || 0) > 0) return n <= es.serie_top ? "TOP" : "BACK";
+  return "";
+}
+function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, etichette = [], onSaved }) {
   const nSerie = Math.max(1, Math.min(serieRichieste, 10));
   const primaRigaConNota = entries.find((e) => e.note) || entries.find((e) => e.numero_serie === 1) || entries[0];
   const [nota, setNota] = useState(primaRigaConNota?.note ?? "");
@@ -2256,7 +2269,7 @@ function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste,
         const entry = entries.find((e) => e.numero_serie === numeroSerie);
         return (
           <RigaSerieAllenamento key={numeroSerie} exerciseId={exerciseId} data={data} clientId={clientId}
-            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} />
+            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} etichetta={etichette[i]} />
         );
       })}
       <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} disabled={salvandoNota}
@@ -2721,6 +2734,37 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                     )}
                     {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
                     {isAdmin && (
+                      <div className="mt-1 space-y-1">
+                        <div className="flex items-center gap-1 flex-wrap text-[11px] text-slate-400">
+                          <select defaultValue={es.tecnica || ""} onChange={(e) => aggiornaEsercizioCampo(es.id, "tecnica", e.target.value || null)} className="border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600 bg-white">
+                            {TECNICHE.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                          </select>
+                          {es.tecnica === "top_back" ? (
+                            <>
+                              <input type="number" min="0" defaultValue={es.serie_top ?? ""} placeholder="top" title="Serie di top set"
+                                onBlur={async (e) => { const t = Number(e.target.value) || 0; await supabase.from("training_exercises").update({ serie_top: t, serie: t + (es.serie_backoff || 0) }).eq("id", es.id); carica(); }}
+                                className="w-10 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                              <span>top +</span>
+                              <input type="number" min="0" defaultValue={es.serie_backoff ?? ""} placeholder="back" title="Serie di back-off"
+                                onBlur={async (e) => { const b = Number(e.target.value) || 0; await supabase.from("training_exercises").update({ serie_backoff: b, serie: (es.serie_top || 0) + b }).eq("id", es.id); carica(); }}
+                                className="w-10 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                              <span>back-off</span>
+                            </>
+                          ) : (
+                            <>
+                              <input type="number" min="0" defaultValue={es.serie ?? ""} placeholder="serie" title="Serie"
+                                onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v !== (es.serie ?? null)) aggiornaEsercizioCampo(es.id, "serie", v); }}
+                                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                              <span>serie</span>
+                            </>
+                          )}
+                          <input defaultValue={es.ripetizioni ?? ""} placeholder="rip" title="Ripetizioni"
+                            onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (es.ripetizioni ?? null)) aggiornaEsercizioCampo(es.id, "ripetizioni", v); }}
+                            className="w-14 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                        </div>
+                      </div>
+                    )}
+                    {isAdmin && (
                       <label className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">Recupero (sec)
                         <input type="number" min="0" step="5" defaultValue={es.recupero_sec || ""} placeholder="90"
                           onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v !== (es.recupero_sec || null)) aggiornaEsercizioCampo(es.id, "recupero_sec", v); }}
@@ -2735,7 +2779,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                     const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
                     return (
                       <td key={d} className="px-2 py-2 text-center">
-                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={serieDefault(es.nome, es.serie)} onSaved={carica} />
+                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={serieDi(es)} etichette={Array.from({ length: 10 }).map((_, i) => etichettaSerie(es, i + 1))} onSaved={carica} />
                       </td>
                     );
                   })}
@@ -3279,7 +3323,7 @@ function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichett
 }
 
 function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo }) {
-  const nSerie = Math.max(1, Math.min(serieDefault(es.nome, es.serie), 10));
+  const nSerie = Math.max(1, Math.min(serieDi(es), 10));
   const [bozza, setBozza] = useState({}); // { "n-kg": testo }
   const [nota, setNota] = useState("");
   const [notaAperta, setNotaAperta] = useState(false);
@@ -3342,7 +3386,7 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
         <div className="min-w-0">
           <h3 className="font-bold text-base leading-snug" style={{ color: "#27466D" }}>{es.nome}{fatteTot === nSerie ? " ✓" : ""}</h3>
           <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>
-            {nSerie} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{notaCoach ? ` · ${notaCoach}` : ""}
+            {es.tecnica === "top_back" && es.serie_top > 0 ? `${es.serie_top} top set + ${es.serie_backoff || 0} back-off` : `${nSerie} serie`}{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{es.tecnica && es.tecnica !== "top_back" ? ` · ${nomeTecnica(es.tecnica)}` : ""}{notaCoach ? ` · ${notaCoach}` : ""}
             {!aperto && fatteTot > 0 ? ` · ${fatteTot}/${nSerie} fatte` : ""}
           </p>
         </div>
@@ -3362,7 +3406,7 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
               const n = i + 1; const ok = fatta(n); const u = ultime[n] || {};
               return (
                 <div key={n} id={`serie-${es.id}-${n}`} className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
-                  <span className="text-center font-bold" style={{ color: "#7a8da3" }}>{n}</span>
+                  <span className="text-center font-bold leading-tight" style={{ color: "#7a8da3" }}>{n}{etichettaSerie(es, n) && <span className="block font-semibold" style={{ fontSize: 8, color: "#3F78B3" }}>{etichettaSerie(es, n) === "TOP" ? "TOP" : "BACK"}</span>}</span>
                   <CasellaNumero valore={valore(n, "kg")} suggerimento={ok ? null : u.kg} fatto={ok} etichetta={`Chilogrammi serie ${n}`}
                     onChange={(v) => setBozza((b) => ({ ...b, [`${n}-kg`]: v }))} onBlur={() => alBlur(n)} />
                   <CasellaNumero valore={valore(n, "rip")} suggerimento={ok ? null : u.ripetizioni} fatto={ok} etichetta={`Ripetizioni serie ${n}`}
@@ -3474,7 +3518,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
 
   const prepFatta = (p) => entries.some((e) => e.exercise_id === p.id && e.completata === true);
   const prepCompleta = prep.length > 0 && prep.every(prepFatta);
-  const esCompleto = (es) => { const n = Math.max(1, Math.min(serieDefault(es.nome, es.serie), 10)); const en = entries.filter((e) => e.exercise_id === es.id); return Array.from({ length: n }).every((_, i) => { const x = en.find((y) => y.numero_serie === i + 1); return !!x && (x.completata === true || (x.completata == null && (x.kg != null || x.ripetizioni))); }); };
+  const esCompleto = (es) => { const n = Math.max(1, Math.min(serieDi(es), 10)); const en = entries.filter((e) => e.exercise_id === es.id); return Array.from({ length: n }).every((_, i) => { const x = en.find((y) => y.numero_serie === i + 1); return !!x && (x.completata === true || (x.completata == null && (x.kg != null || x.ripetizioni))); }); };
   const tuttiFatti = esercizi.length > 0 && esercizi.every(esCompleto);
   const correnteKey = prep.length > 0 && !prepCompleta ? "prep" : (esercizi.find((e) => !esCompleto(e)) || {}).id;
   useEffect(() => { if (tuttiFatti) { try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} setTimeout(() => { const el = document.getElementById("fine-allenamento"); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 300); } }, [tuttiFatti, data]);
