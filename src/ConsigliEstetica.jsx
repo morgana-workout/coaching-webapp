@@ -194,6 +194,7 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
 export function ConsigliProgramma({ client }) {
   const [r, setR] = useState(null);
   const [leve, setLeve] = useState(client.leve || "");
+  const [ric, setRic] = useState(0);
   const salvaLeve = async (v) => { setLeve(v); try { await supabase.from("clients").update({ leve: v || null }).eq("id", client.id); } catch (e) {} };
   useEffect(() => {
     let vivo = true; setR(null);
@@ -206,7 +207,7 @@ export function ConsigliProgramma({ client }) {
       } catch (e) { if (vivo) setR({ errore: true }); }
     })();
     return () => { vivo = false; };
-  }, [client.id, client.sesso, leve]);
+  }, [client.id, client.sesso, leve, ric]);
   const stile = { up: ["▲ Aumentare / cambiare", "bg-sky-100 text-sky-700"], dn: ["▼ Ridurre / scaricare", "bg-slate-800 text-white"], fl: ["◆ Struttura", "bg-slate-100 text-slate-600"], chk: ["⚑ Verificare", "bg-slate-100 text-slate-600"] };
   return (
     <div className="bg-white border border-sky-200 rounded-2xl p-4 min-w-0">
@@ -247,7 +248,7 @@ export function ConsigliProgramma({ client }) {
               </div>
             </div>
           )}
-          <Simulatore r={r} sesso={client.sesso} leve={leve} />
+          <Simulatore r={r} sesso={client.sesso} leve={leve} onApplicato={() => setRic((x) => x + 1)} />
           {r.mantenere.length > 0 && <p className="text-[12px] text-slate-600 pt-2"><span className="inline-block text-[10.5px] rounded-full px-2 py-0.5 mr-2 bg-slate-100 text-slate-600">▬ Mantenere</span>{r.mantenere.join(", ")}: progressione regolare.</p>}
           <p className="text-[11px] text-slate-400 mt-2">Regole su carichi, ripetizioni e serie registrati e sul programma attivo: sono spunti, la decisione è tua. Il lavoro è ripartito tra i distretti in base all'esercizio (es. squat bulgaro: glutei e femorali; squat e pressa: quadricipiti e glutei in proporzione alle leve indicate).</p>
         </>
@@ -256,12 +257,61 @@ export function ConsigliProgramma({ client }) {
   );
 }
 
+// Propone automaticamente le modifiche al numero di serie per portare ogni distretto nel range di riferimento.
+// Agisce solo su esercizi con serie indicate; non inventa esercizi nuovi (per i distretti senza esercizi lo segnala soltanto).
+function proponiModifiche(r, sesso, leve) {
+  const tab = DISTRETTI[sesso === "M" ? "M" : "F"];
+  const mod = {}; // id -> serie proposte
+  const note = [];
+  const corrente = () => r.programma.map((e) => (mod[e.id] != null ? { ...e, serieEff: mod[e.id] } : e));
+  const pesoDi = (e, D) => { const q = quote(e.nome, leve); return D.g.reduce((a, g) => a + (q[g] || 0), 0); };
+  for (let giro = 0; giro < 40; giro++) {
+    const prog = corrente();
+    const T = analisiTarget(prog, sesso, leve);
+    let fatto = false;
+    for (const riga of T.righe) {
+      if (riga.inc > 0) continue;
+      const D = tab.find((x) => x.d === riga.d);
+      const cand = prog.filter((e) => e.serieEff > 0 && pesoDi(e, D) > 0);
+      if (riga.stato === "basso" && cand.length) {
+        const c = cand.filter((e) => e.serieEff < 5).sort((a, b) => pesoDi(b, D) - pesoDi(a, D) || a.serieEff - b.serieEff)[0];
+        if (c) { mod[c.id] = c.serieEff + 1; fatto = true; break; }
+      } else if (riga.stato === "alto" && cand.length) {
+        const c = cand.filter((e) => e.serieEff > 2 && !(mod[e.id] > (r.programma.find((x) => x.id === e.id)?.serieEff || 0))).sort((a, b) => b.serieEff - a.serieEff)[0];
+        if (c) { mod[c.id] = c.serieEff - 1; fatto = true; break; }
+      }
+    }
+    if (!fatto) break;
+  }
+  const T0 = analisiTarget(corrente(), sesso, leve);
+  T0.righe.forEach((x) => { if (x.stato === "manca") note.push(`${x.d}: nessun esercizio nel programma, valuta di inserirne 1–2 (non lo aggiungo io).`); else if (x.stato === "basso") note.push(`${x.d}: ancora sotto il riferimento con le serie degli esercizi attuali, serve un esercizio in più.`); });
+  return { mod, note };
+}
+
 // Bozza provvisoria: si modificano serie / si aggiungono o tolgono esercizi e si vede come cambia la valutazione. Non salva nulla.
-function Simulatore({ r, sesso, leve }) {
+function Simulatore({ r, sesso, leve, onApplicato }) {
   const [aperto, setAperto] = useState(false);
   const [mod, setMod] = useState({}); // id -> serie (stringa) | "x" per togliere
   const [nuovi, setNuovi] = useState([]); // { nome, serie, rip, training_day_id }
   const [nn, setNn] = useState({ nome: "", serie: "3", rip: "8-12", training_day_id: r.giorni[0]?.id || "" });
+  const [esito, setEsito] = useState("");
+  const [applicando, setApplicando] = useState(false);
+  const [notePrp, setNotePrp] = useState([]);
+  const cambi = r.programma.filter((e) => mod[e.id] != null && mod[e.id] !== "x" && mod[e.id] !== "" && Number(mod[e.id]) !== (e.serieEff || 0));
+  const proponi = () => {
+    const p = proponiModifiche(r, sesso, leve);
+    const m = {}; Object.entries(p.mod).forEach(([id, v]) => { m[id] = String(v); });
+    setMod(m); setNotePrp(p.note); setEsito(Object.keys(m).length ? "" : "Con le serie indicate non trovo modifiche utili da proporre.");
+  };
+  const applica = async () => {
+    if (!cambi.length) return;
+    if (!confirm(`Applico ${cambi.length} modifiche alle serie nel programma vero?\n\n` + cambi.map((e) => `${e.nome}: ${e.serieEff || "—"} → ${mod[e.id]}`).join("\n"))) return;
+    setApplicando(true);
+    for (const e of cambi) await supabase.from("training_exercises").update({ serie: Number(mod[e.id]) }).eq("id", e.id);
+    setApplicando(false); setMod({}); setNotePrp([]);
+    setEsito(`Fatto: ${cambi.length} esercizi aggiornati nel programma ✓`);
+    onApplicato && onApplicato();
+  };
   const nomeGiorno = (id) => r.giorni.find((g) => g.id === id)?.nome || "";
   const bozza = [
     ...r.programma.filter((e) => mod[e.id] !== "x").map((e) => (mod[e.id] != null && mod[e.id] !== "" ? { ...e, serieEff: Number(mod[e.id]) || 0 } : e)),
@@ -275,6 +325,18 @@ function Simulatore({ r, sesso, leve }) {
       {aperto && (
         <div className="mt-2 space-y-3">
           <p className="text-[11.5px] text-slate-500">Cambia le serie, togli un esercizio o aggiungine uno: sotto vedi come cambia il confronto con i riferimenti. È solo una simulazione, il programma vero non viene toccato.</p>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={proponi} className="bg-sky-100 text-sky-700 rounded-lg px-3 py-1.5 text-[12px] font-semibold">✨ Proponi tu le modifiche</button>
+            {cambi.length > 0 && <button onClick={applica} disabled={applicando} className="bg-slate-800 text-white rounded-lg px-3 py-1.5 text-[12px] font-semibold disabled:opacity-50">{applicando ? "Applico..." : `Applica ${cambi.length} modifiche al programma`}</button>}
+          </div>
+          {esito && <p className="text-[12px] text-sky-700">{esito}</p>}
+          {cambi.length > 0 && (
+            <div className="bg-sky-50 rounded-lg px-3 py-2 text-[12px] text-slate-700 space-y-0.5">
+              <p className="font-semibold text-slate-800">Modifiche proposte</p>
+              {cambi.map((e) => <p key={e.id}>{e.nome}: {e.serieEff || "—"} → <b>{mod[e.id]}</b> serie</p>)}
+              {notePrp.map((n, i) => <p key={i} className="text-slate-500">• {n}</p>)}
+            </div>
+          )}
           <div className="space-y-1 max-h-72 overflow-y-auto">
             {r.programma.map((e) => (
               <div key={e.id} className={`flex items-center gap-2 text-[12px] ${mod[e.id] === "x" ? "opacity-40" : ""}`}>
