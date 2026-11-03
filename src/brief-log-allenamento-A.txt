@@ -1,0 +1,39 @@
+MODIFICA ALL'APP: nuovo "Diario allenamento" (lato cliente)
+
+Obiettivo: rendere il registro allenamento più facile e più bello da usare in palestra, da telefono.
+Non cambiare nulla del resto dell'app. Colori: solo azzurro, blu navy, bianco, crema (come ora). Icone: piccole, solo contorno azzurro.
+
+1) STRUTTURA DELLA PAGINA
+- In alto: "← Home", titolo "Diario allenamento", sottotitolo "Registra carichi e ripetizioni, serie dopo serie."
+- Selettore giorni: pillole "Giorno 1 · Giorno 2 · Giorno 3 · Giorno 4" (quello attivo blu navy, gli altri crema). Mai su due righe.
+- Sotto: selettore data con frecce  ‹  Lun 26 ottobre  ›  e a destra il link "Storico".
+  Niente più colonne per data con scorrimento laterale: si vede una data alla volta. Lo storico si apre con "Storico".
+- Se esiste, la sezione Mobilità/Attivazione resta come ora (a tendina), sopra gli esercizi.
+
+2) CARD ESERCIZIO (una per esercizio)
+- Titolo esercizio in grassetto, sotto: "N serie · nota del coach" (es. "4 serie · piede piatto, massima attivazione glutea").
+- Pulsante-pillola azzurro "Guarda il video" (apre il video dell'esercizio, come ora) e accanto la pillola crema "Recupero 1:30".
+- Tabella a righe, UNA SERIE PER RIGA, con intestazione SERIE · KG · RIP:
+  numero serie | casella KG grande | casella RIP grande | cerchio da spuntare.
+  Caselle alte almeno 44 px, numeri grandi, tastiera numerica (con virgola per 2,5).
+- Nelle serie ancora da fare, le caselle mostrano in grigio chiaro il valore dell'ultima volta (es. 80 / 8) con la scritta piccola "ultima volta".
+  Se la cliente non tocca la casella e spunta, vale il valore dell'ultima volta.
+- Quando una serie è spuntata: caselle azzurro chiaro e cerchio pieno azzurro con la spunta bianca.
+- In fondo alla card: riquadro tratteggiato "+ Aggiungi una nota" (nota libera per quell'esercizio).
+- Gli esercizi dopo il primo possono stare chiusi (freccia ⌄) e si aprono al tocco; l'esercizio in corso resta aperto.
+
+3) TIMER DI RECUPERO
+- Quando la cliente spunta una serie parte da solo il recupero (durata = quella dell'esercizio, di default 1:30; la modifico io lato coach per esercizio).
+- Compare una barra fissa in basso (blu navy, angoli molto arrotondati) con: anello che si svuota, tempo grande (es. 1:12), testo "Recupero · poi serie 3", e tre tasti: −15, +15, Salta.
+- A 0:00 la barra diventa azzurra con "Si riparte ✨" e "Serie 3 · 80 kg × 8" e un tasto "Vai"; vibrazione breve (se il telefono lo permette) e un suono morbido.
+- Il timer deve continuare a contare anche se lo schermo si spegne o la cliente cambia app (calcolare dal momento di partenza, non con un conto alla rovescia che si ferma).
+- Se spunta un'altra serie mentre il timer corre, riparte da capo. Nessun timer dopo l'ultima serie dell'ultimo esercizio.
+
+4) REGOLE DA MANTENERE
+- La cliente inserisce solo kg, ripetizioni, spunte e note. NON può aggiungere, togliere o rinominare giorni, esercizi o serie: la struttura la cambia solo la coach.
+- Tutti i dati già salvati (storico carichi, programmi archiviati T.1, T.2...) restano e devono comparire nello "Storico".
+- Testi sempre dolci e incoraggianti, con emoji ✨💪🏻 dove serve (es. "Ottimo ritmo ✨"). Mai messaggi secchi o di errore freddi.
+- Nessun costo, nessun servizio a pagamento.
+
+5) PRIMA DI PUBBLICARE
+Mostrami un'anteprima (schermata) della nuova pagina su telefono e aspetta il mio OK.
