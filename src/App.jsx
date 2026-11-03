@@ -3380,7 +3380,7 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   );
 }
 
-function DiarioClienteNuovo({ clientId, onStorico }) {
+function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" }) {
   const [giorni, setGiorni] = useState([]);
   const [giornoId, setGiornoId] = useState(null);
   const [data, setData] = useState(formatDataLocale(new Date()));
@@ -3511,7 +3511,7 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
               <button onClick={() => setData(oggi)} className="font-bold text-[15px]" style={{ color: "#27466D" }}>{etichettaDataIt(data)}</button>
               <button onClick={() => setData(spostaData(data, 1))} aria-label="Giorno successivo" className="w-9 h-9 rounded-full bg-white flex items-center justify-center" style={{ border: "1px solid #C9E0F7", color: "#3F78B3" }}>›</button>
             </div>
-            <button onClick={onStorico} className="text-sm font-semibold" style={{ color: "#3F78B3" }}>Storico</button>
+            <button onClick={onStorico} className="text-sm font-semibold text-right" style={{ color: "#3F78B3" }}>{etichettaStorico}</button>
           </div>
 
           {giorno && <p className="text-xs -mt-1" style={{ color: "#7a8da3" }}>{nomeGiornoPulito(giorno.nome)}</p>}
@@ -3571,15 +3571,15 @@ function DiarioClienteNuovo({ clientId, onStorico }) {
   );
 }
 
-function DiarioClienteHost({ clientId }) {
+function DiarioClienteHost({ clientId, isAdmin = false }) {
   const [storico, setStorico] = useState(false);
   if (storico) return (
     <div>
       <button onClick={() => setStorico(false)} className="px-5 pt-5 text-sm font-semibold flex items-center gap-1" style={{ color: "#3F78B3" }}><ArrowLeft size={16} /> Torna al diario</button>
-      <DiarioAllenamento clientId={clientId} />
+      <DiarioAllenamento clientId={clientId} isAdmin={isAdmin} />
     </div>
   );
-  return <DiarioClienteNuovo clientId={clientId} onStorico={() => setStorico(true)} />;
+  return <DiarioClienteNuovo clientId={clientId} onStorico={() => setStorico(true)} etichettaStorico={isAdmin ? "Modifica programma e storico" : "Storico"} />;
 }
 
 function NotificheCliente({ client }) {
@@ -6592,6 +6592,13 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     setPagamenti(pg || []);
   };
   useEffect(() => { carica(); }, [clientId]);
+  const apertoIniziale = React.useRef(null);
+  useEffect(() => {
+    if (client && apertoIniziale.current !== clientId) {
+      apertoIniziale.current = clientId;
+      if (client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido") setTab("allenamento");
+    }
+  }, [client?.id, client?.tipo_servizio]);
 
   const salvaCliente = async (campi) => {
     setSalvando(true);
@@ -6604,13 +6611,15 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   if (!client) return <Spinner />;
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
+  const tabAll = { key: "allenamento", label: "Allenamento" };
   const tabs = [
+    ...(isBulb ? [tabAll] : []), // Bulb e ibride: l'allenamento viene prima del riepilogo
     { key: "riepilogo", label: "Riepilogo" },
     { key: "dati", label: "Dati" },
     ...(isOnline ? [{ key: "check", label: "Check" }] : []), // tab "Scheda" congelato temporaneamente (workflow spostato su CSV esterno)
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
     { key: "progressi", label: "Progressi" },
-    { key: "allenamento", label: "Allenamento" },
+    ...(isBulb ? [] : [tabAll]),
     { key: "nutrizione", label: "Macros" },
     ...(client.kcal_attivo !== false ? [{ key: "analisi", label: "Cosa mangia" }] : []),
     ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
@@ -6962,7 +6971,9 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
           <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
           {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
-          <DiarioAllenamento clientId={clientId} isAdmin />
+          {isBulb
+            ? <DiarioClienteHost clientId={clientId} isAdmin />
+            : <DiarioAllenamento clientId={clientId} isAdmin />}
         </div>
       )}
 
