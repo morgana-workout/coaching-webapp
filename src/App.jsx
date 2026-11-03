@@ -2712,6 +2712,13 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       </p>
                     )}
                     {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
+                    {isAdmin && (
+                      <label className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">Recupero (sec)
+                        <input type="number" min="0" step="5" defaultValue={es.recupero_sec || ""} placeholder="90"
+                          onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v !== (es.recupero_sec || null)) aggiornaEsercizioCampo(es.id, "recupero_sec", v); }}
+                          className="w-14 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                      </label>
+                    )}
                     {(() => { const info = trovaEsercizioVideo(es.nome, libreriaVideo); return info ? (
                       <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>
                     ) : null; })()}
@@ -3136,6 +3143,378 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Diario allenamento — nuovo layout lato cliente (con timer recupero) */
+/* ------------------------------------------------------------------ */
+const TIMER_KEY = "diario_timer_v1";
+const GIORNI_IT = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
+const MESI_IT = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
+function etichettaDataIt(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return `${GIORNI_IT[dt.getDay()]} ${d} ${MESI_IT[m - 1]}`;
+}
+function spostaData(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return formatDataLocale(new Date(y, m - 1, d + n));
+}
+function fmtMmSs(s) {
+  s = Math.max(0, Math.round(s));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+// Recupero in secondi: campo del coach, altrimenti letto dalla nota ("Recupero: 1:30", "90s", "2 min"), altrimenti 90
+function recuperoSecondi(es) {
+  if (es.recupero_sec > 0) return es.recupero_sec;
+  const m = String(es.note || "").match(/recupero\s*:?\s*([0-9]+(?::[0-9]{2})?)\s*(min|m|'|s|sec|")?/i);
+  if (m) {
+    if (m[1].includes(":")) { const [a, b] = m[1].split(":").map(Number); return a * 60 + b; }
+    const n = Number(m[1]); const u = (m[2] || "").toLowerCase();
+    if (u === "min" || u === "m" || u === "'") return n * 60;
+    if (u === "s" || u === "sec" || u === '"') return n;
+    return n <= 10 ? n * 60 : n;
+  }
+  return 90;
+}
+function notaPulita(note) {
+  return String(note || "").split(" — ").filter((p) => !/^recupero\s*:/i.test(p.trim())).join(" — ");
+}
+const num = (v) => { if (v === "" || v == null) return null; const n = Number(String(v).replace(",", ".")); return isNaN(n) ? null : n; };
+const fmtKg = (v) => (v == null || v === "" ? "" : String(v).replace(".", ","));
+
+function suonoFine() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ctx = new AC(); const t = ctx.currentTime;
+    [660, 880].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.type = "sine"; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, t + i * 0.22); g.gain.exponentialRampToValueAtTime(0.18, t + i * 0.22 + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.22 + 0.2);
+      o.start(t + i * 0.22); o.stop(t + i * 0.22 + 0.22);
+    });
+  } catch (e) { /* senza suono si va avanti */ }
+}
+
+function BarraTimer({ timer, onChange, onVai }) {
+  const [, forza] = useState(0);
+  const avvisato = React.useRef(false);
+  useEffect(() => { avvisato.current = !!timer?.avvisato; }, [timer?.start]);
+  useEffect(() => {
+    if (!timer) return;
+    const tick = () => {
+      forza((x) => x + 1);
+      const resta = timer.dur - (Date.now() - timer.start) / 1000;
+      if (resta <= 0 && !avvisato.current) {
+        avvisato.current = true;
+        try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
+        suonoFine();
+        onChange({ ...timer, avvisato: true });
+      }
+    };
+    const id = setInterval(tick, 250);
+    document.addEventListener("visibilitychange", tick);
+    tick();
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", tick); };
+  }, [timer?.start, timer?.dur]);
+  if (!timer) return null;
+  const resta = timer.dur - (Date.now() - timer.start) / 1000;
+  const fine = resta <= 0;
+  const pct = Math.max(0, Math.min(1, resta / timer.dur));
+  const R = 27, C = 2 * Math.PI * R;
+  const bg = fine ? "#4F8FD0" : "#27466D";
+  return (
+    <div className="fixed left-0 right-0 z-[60] flex justify-center px-3" style={{ bottom: "calc(env(safe-area-inset-bottom) + 76px)" }}>
+      <div className="w-full max-w-md rounded-3xl text-white flex items-center gap-3 px-4 py-3 shadow-xl" style={{ background: bg }}>
+        <svg width="62" height="62" viewBox="0 0 62 62" className="flex-shrink-0">
+          <circle cx="31" cy="31" r={R} fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="5" />
+          <circle cx="31" cy="31" r={R} fill="none" stroke="#fff" strokeWidth="5" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={C * (fine ? 0 : 1 - pct)} transform="rotate(-90 31 31)" />
+        </svg>
+        {fine ? (
+          <>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-lg leading-tight">Si riparte ✨</p>
+              <p className="text-xs opacity-90 truncate">{timer.prossima || "Hai finito il recupero"}</p>
+            </div>
+            <button onClick={onVai} className="bg-white font-bold text-sm rounded-2xl px-6 py-3" style={{ color: "#27466D" }}>Vai</button>
+          </>
+        ) : (
+          <>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold leading-none" style={{ fontSize: 28 }}>{fmtMmSs(resta)}</p>
+              <p className="text-xs opacity-85 mt-1 truncate">Recupero{timer.prossima ? ` · poi ${timer.prossimaCorta}` : ""}</p>
+            </div>
+            <div className="flex gap-1.5 flex-shrink-0">
+              <button onClick={() => onChange({ ...timer, dur: Math.max(5, timer.dur - 15), avvisato: false })} className="px-2.5 py-2 rounded-xl bg-white/15 text-xs font-semibold">−15</button>
+              <button onClick={() => onChange({ ...timer, dur: timer.dur + 15, avvisato: false })} className="px-2.5 py-2 rounded-xl bg-white/15 text-xs font-semibold">+15</button>
+              <button onClick={() => onChange(null)} className="px-2.5 py-2 rounded-xl bg-white/15 text-xs font-semibold">Salta</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichetta }) {
+  const vuoto = valore === "" || valore == null;
+  return (
+    <div className="relative">
+      <input inputMode="decimal" value={valore ?? ""} onChange={(e) => onChange(e.target.value.replace(/[^0-9.,]/g, ""))} onBlur={onBlur}
+        placeholder={suggerimento != null && suggerimento !== "" ? fmtKg(suggerimento) : ""} aria-label={etichetta}
+        className="w-full text-center rounded-xl text-lg font-semibold focus:outline-none"
+        style={{ height: 46, border: `1.5px solid ${fatto ? "#C9E0F7" : "#C9E0F7"}`, background: fatto ? "#E1EEFB" : "#fff", color: "#27466D" }} />
+      {vuoto && suggerimento != null && suggerimento !== "" && (
+        <span className="absolute left-0 right-0 bottom-0.5 text-center pointer-events-none" style={{ fontSize: 8.5, color: "#8EBDED" }}>ultima volta</span>
+      )}
+    </div>
+  );
+}
+
+function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo }) {
+  const nSerie = Math.max(1, Math.min(Number(es.serie) || 3, 10));
+  const [bozza, setBozza] = useState({}); // { "n-kg": testo }
+  const [nota, setNota] = useState("");
+  const [notaAperta, setNotaAperta] = useState(false);
+  const entryDi = (n) => entries.find((e) => e.numero_serie === n);
+  const notaSalvata = (entries.find((e) => e.note) || {}).note || "";
+  useEffect(() => { setNota(notaSalvata); setNotaAperta(!!notaSalvata); }, [data, notaSalvata]);
+  const info = trovaEsercizioVideo(es.nome, libreria);
+  const rec = recuperoSecondi(es);
+  const fatta = (n) => { const e = entryDi(n); return !!e && (e.completata === true || (e.completata == null && (e.kg != null || e.ripetizioni))); };
+  const fatteTot = Array.from({ length: nSerie }).filter((_, i) => fatta(i + 1)).length;
+
+  const valore = (n, campo) => {
+    const k = `${n}-${campo}`;
+    if (k in bozza) return bozza[k];
+    const e = entryDi(n);
+    return campo === "kg" ? fmtKg(e?.kg) : (e?.ripetizioni ?? "");
+  };
+  const salvaSerie = async (n, { kg, rip, completata }) => {
+    const e = entryDi(n);
+    const payload = { kg: num(kg), ripetizioni: rip === "" || rip == null ? null : String(rip) };
+    if (completata !== undefined) payload.completata = completata;
+    if (e) await supabase.from("training_entries").update(payload).eq("id", e.id);
+    else {
+      if (payload.kg == null && !payload.ripetizioni && !payload.completata) return;
+      await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: es.id, data, numero_serie: n, ...payload });
+    }
+    if (payload.kg != null) inviaPushCarichi();
+    setBozza((b) => { const c = { ...b }; delete c[`${n}-kg`]; delete c[`${n}-rip`]; return c; });
+    onSaved();
+  };
+  const alBlur = (n) => {
+    const e = entryDi(n);
+    const kgT = `${n}-kg` in bozza ? bozza[`${n}-kg`] : fmtKg(e?.kg);
+    const ripT = `${n}-rip` in bozza ? bozza[`${n}-rip`] : (e?.ripetizioni ?? "");
+    if (!(`${n}-kg` in bozza) && !(`${n}-rip` in bozza)) return;
+    salvaSerie(n, { kg: kgT, rip: ripT });
+  };
+  const spunta = async (n) => {
+    const e = entryDi(n);
+    if (fatta(n)) { await salvaSerie(n, { kg: valore(n, "kg"), rip: valore(n, "rip"), completata: false }); return; }
+    const u = ultime[n] || {};
+    const kgT = valore(n, "kg") !== "" ? valore(n, "kg") : fmtKg(u.kg);
+    const ripT = valore(n, "rip") !== "" ? valore(n, "rip") : (u.ripetizioni ?? "");
+    await salvaSerie(n, { kg: kgT, rip: ripT, completata: true });
+    onSerieSpuntata(es, n, nSerie, rec, { kg: kgT, rip: ripT });
+  };
+  const salvaNota = async () => {
+    if (nota === notaSalvata) return;
+    const prima = entries.find((x) => x.numero_serie === 1) || entries[0];
+    if (prima) await supabase.from("training_entries").update({ note: nota || null }).eq("id", prima.id);
+    else if (nota) await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: es.id, data, numero_serie: 1, note: nota });
+    onSaved();
+  };
+  const notaCoach = notaPulita(es.note);
+
+  return (
+    <div className="bg-white rounded-3xl p-4" style={{ border: "1px solid #C9E0F7" }}>
+      <button onClick={onToggle} className="w-full flex items-start justify-between gap-2 text-left">
+        <div className="min-w-0">
+          <h3 className="font-bold text-base leading-snug" style={{ color: "#27466D" }}>{es.nome}</h3>
+          <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>
+            {nSerie} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{notaCoach ? ` · ${notaCoach}` : ""}
+            {!aperto && fatteTot > 0 ? ` · ${fatteTot}/${nSerie} fatte` : ""}
+          </p>
+        </div>
+        <ChevronRight size={18} stroke="#4F8FD0" className={`flex-shrink-0 mt-1 transition-transform ${aperto ? "rotate-90" : ""}`} />
+      </button>
+      {aperto && (
+        <>
+          <div className="flex flex-wrap gap-2 mt-2.5">
+            {info && <button onClick={() => onVideo(info)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: "#E1EEFB", color: "#3F78B3" }}>▷ {info.video_url ? "Guarda il video" : "Tecnica"}</button>}
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: "#E1EEFB", color: "#3F78B3" }}>◷ Recupero {fmtMmSs(rec)}</span>
+          </div>
+          <div className="grid gap-2 mt-3 text-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px", fontSize: 10, color: "#7a8da3", letterSpacing: ".06em" }}>
+            <span></span><span>KG</span><span>RIP</span><span></span>
+          </div>
+          <div className="space-y-2 mt-1">
+            {Array.from({ length: nSerie }).map((_, i) => {
+              const n = i + 1; const ok = fatta(n); const u = ultime[n] || {};
+              return (
+                <div key={n} id={`serie-${es.id}-${n}`} className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
+                  <span className="text-center font-bold" style={{ color: "#7a8da3" }}>{n}</span>
+                  <CasellaNumero valore={valore(n, "kg")} suggerimento={ok ? null : u.kg} fatto={ok} etichetta={`Chilogrammi serie ${n}`}
+                    onChange={(v) => setBozza((b) => ({ ...b, [`${n}-kg`]: v }))} onBlur={() => alBlur(n)} />
+                  <CasellaNumero valore={valore(n, "rip")} suggerimento={ok ? null : u.ripetizioni} fatto={ok} etichetta={`Ripetizioni serie ${n}`}
+                    onChange={(v) => setBozza((b) => ({ ...b, [`${n}-rip`]: v }))} onBlur={() => alBlur(n)} />
+                  <button onClick={() => spunta(n)} aria-label={ok ? "Serie fatta" : "Segna come fatta"}
+                    className="rounded-full flex items-center justify-center"
+                    style={{ width: 44, height: 44, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
+                    <Check size={20} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {notaAperta ? (
+            <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} placeholder="Come è andata? Scrivi qui una nota ✨"
+              className="w-full mt-3 rounded-xl px-3 py-3 text-sm focus:outline-none" style={{ border: "1.5px dashed #C9E0F7", color: "#27466D" }} />
+          ) : (
+            <button onClick={() => setNotaAperta(true)} className="w-full mt-3 rounded-xl py-3 text-sm font-semibold" style={{ border: "1.5px dashed #C9E0F7", color: "#3F78B3" }}>+ Aggiungi una nota</button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function DiarioClienteNuovo({ clientId, onStorico }) {
+  const [giorni, setGiorni] = useState([]);
+  const [giornoId, setGiornoId] = useState(null);
+  const [data, setData] = useState(formatDataLocale(new Date()));
+  const [esercizi, setEsercizi] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [storicoEntries, setStoricoEntries] = useState([]);
+  const [libreria, setLibreria] = useState([]);
+  const [aperti, setAperti] = useState({});
+  const [infoEs, setInfoEs] = useState(null);
+  const [caricando, setCaricando] = useState(true);
+  const [timer, setTimerState] = useState(() => { try { const t = JSON.parse(localStorage.getItem(TIMER_KEY) || "null"); return t && Date.now() - t.start < 6 * 3600 * 1000 ? t : null; } catch (e) { return null; } });
+  const setTimer = (t) => { setTimerState(t); try { t ? localStorage.setItem(TIMER_KEY, JSON.stringify(t)) : localStorage.removeItem(TIMER_KEY); } catch (e) {} };
+
+  useEffect(() => {
+    (async () => {
+      const { data: g } = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
+      const attivi = (g || []).filter((x) => !x.scheda_archiviata);
+      setGiorni(attivi);
+      if (attivi.length) setGiornoId((cur) => cur || attivi[0].id);
+      setCaricando(false);
+      try {
+        const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
+        if (c && c.video_attivi !== false && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")) {
+          const { data: v } = await supabase.from("esercizi_video").select("*").order("ordine");
+          setLibreria(v || []);
+        }
+      } catch (e) {}
+    })();
+  }, [clientId]);
+
+  const caricaGiorno = async () => {
+    if (!giornoId) return;
+    const { data: tutti } = await supabase.from("training_exercises").select("*").eq("training_day_id", giornoId).order("ordine");
+    const es = (tutti || []).filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
+    setEsercizi(es);
+    if (es.length) {
+      const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", es.map((e) => e.id));
+      setStoricoEntries(en || []);
+    } else setStoricoEntries([]);
+  };
+  useEffect(() => { caricaGiorno(); setAperti({}); }, [giornoId]);
+  useEffect(() => { setEntries(storicoEntries.filter((e) => e.data === data)); }, [storicoEntries, data]);
+
+  // ultimi valori per esercizio: dalla data più recente precedente a quella scelta
+  const ultimePer = (exId) => {
+    const prima = storicoEntries.filter((e) => e.exercise_id === exId && e.data < data && (e.kg != null || e.ripetizioni));
+    if (!prima.length) return {};
+    const d = prima.map((e) => e.data).sort().pop();
+    const m = {}; prima.filter((e) => e.data === d).forEach((e) => { m[e.numero_serie] = e; });
+    return m;
+  };
+
+  const onSerieSpuntata = (es, n, nSerie, rec, valori) => {
+    const idx = esercizi.findIndex((x) => x.id === es.id);
+    const ultima = idx === esercizi.length - 1 && n >= nSerie;
+    if (ultima) { setTimer(null); return; }
+    let prossimaEs = es, prossimaN = n + 1;
+    if (n >= nSerie) { prossimaEs = esercizi[idx + 1]; prossimaN = 1; }
+    const u = ultimePer(prossimaEs.id)[prossimaN] || {};
+    const kg = u.kg != null ? fmtKg(u.kg) : fmtKg(valori.kg);
+    const rip = u.ripetizioni ?? valori.rip;
+    const dettaglio = kg || rip ? ` · ${kg ? kg + " kg" : ""}${kg && rip ? " × " : ""}${rip || ""}` : "";
+    setTimer({ start: Date.now(), dur: rec, avvisato: false, prossimaCorta: `serie ${prossimaN}`, prossima: `Serie ${prossimaN}${dettaglio}`, esId: prossimaEs.id, n: prossimaN });
+  };
+  const vai = () => {
+    const t = timer; setTimer(null);
+    if (t) {
+      setAperti((a) => ({ ...a, [t.esId]: true }));
+      setTimeout(() => { const el = document.getElementById(`serie-${t.esId}-${t.n}`); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 120);
+    }
+  };
+
+  if (caricando) return <Spinner />;
+  const giorno = giorni.find((g) => g.id === giornoId);
+  const oggi = formatDataLocale(new Date());
+
+  return (
+    <div className="px-5 pt-6 pb-40 space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold" style={{ color: "#27466D" }}>Diario allenamento</h1>
+        <p className="text-sm mt-1" style={{ color: "#7a8da3" }}>Registra carichi e ripetizioni, serie dopo serie.</p>
+      </div>
+
+      {giorni.length === 0 ? (
+        <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
+      ) : (
+        <>
+          <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1">
+            {giorni.map((g, i) => (
+              <button key={g.id} onClick={() => setGiornoId(g.id)} className="flex-shrink-0 whitespace-nowrap px-4 py-2 rounded-full text-sm font-semibold"
+                style={giornoId === g.id ? { background: "#27466D", color: "#fff", border: "1px solid #27466D" } : { background: "#fff", color: "#3F78B3", border: "1px solid #C9E0F7" }}>
+                Giorno {i + 1}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setData(spostaData(data, -1))} aria-label="Giorno precedente" className="w-9 h-9 rounded-full bg-white flex items-center justify-center" style={{ border: "1px solid #C9E0F7", color: "#3F78B3" }}>‹</button>
+              <button onClick={() => setData(oggi)} className="font-bold text-[15px]" style={{ color: "#27466D" }}>{etichettaDataIt(data)}</button>
+              <button onClick={() => setData(spostaData(data, 1))} aria-label="Giorno successivo" className="w-9 h-9 rounded-full bg-white flex items-center justify-center" style={{ border: "1px solid #C9E0F7", color: "#3F78B3" }}>›</button>
+            </div>
+            <button onClick={onStorico} className="text-sm font-semibold" style={{ color: "#3F78B3" }}>Storico</button>
+          </div>
+
+          {giorno && <p className="text-xs -mt-1" style={{ color: "#7a8da3" }}>{nomeGiornoPulito(giorno.nome)}</p>}
+
+          {esercizi.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Gli esercizi di questo giorno li aggiunge Morgana ✨</Card>}
+          {esercizi.map((es, i) => (
+            <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? i === 0}
+              onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? i === 0) }))}
+              entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
+              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} />
+          ))}
+          {esercizi.length > 0 && <p className="text-center text-xs pt-1" style={{ color: "#7a8da3" }}>Ogni serie conta: brava, stai andando alla grande 💪🏻</p>}
+        </>
+      )}
+      <BloccoPreparazione clientId={clientId} isAdmin={false} libreriaVideo={libreria} />
+      {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
+      <BarraTimer timer={timer} onChange={setTimer} onVai={vai} />
+    </div>
+  );
+}
+
+function DiarioClienteHost({ clientId }) {
+  const [storico, setStorico] = useState(false);
+  if (storico) return (
+    <div>
+      <button onClick={() => setStorico(false)} className="px-5 pt-5 text-sm font-semibold flex items-center gap-1" style={{ color: "#3F78B3" }}><ArrowLeft size={16} /> Torna al diario</button>
+      <DiarioAllenamento clientId={clientId} />
+    </div>
+  );
+  return <DiarioClienteNuovo clientId={clientId} onStorico={() => setStorico(true)} />;
+}
+
 function NotificheCliente({ client }) {
   const [notifiche, setNotifiche] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -3486,7 +3865,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
         {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
-        {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioAllenamento clientId={client.id} /></>}
+        {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioClienteHost clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false) && (
           <div className="px-5 pt-6 pb-24">
