@@ -3571,6 +3571,109 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
   );
 }
 
+// Coach: dossier unico per cliente (tutti i check con foto, misure, note e analisi) da salvare in PDF e allegare alla chat
+function DossierCheck({ client, onClose }) {
+  const [dati, setDati] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const [c, v, n] = await Promise.all([
+        supabase.from("checkins").select("*").eq("client_id", client.id).order("data_check", { ascending: true }),
+        supabase.from("valutazione_estetica").select("checkin_id, voti, analisi").eq("client_id", client.id),
+        supabase.from("notes").select("*").eq("client_id", client.id).order("data", { ascending: true }),
+      ]);
+      const slots = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale destra"], ["foto_posteriore_path", "Posteriore"], ["foto_extra_path", "Laterale sinistra"]];
+      const checks = await Promise.all((c.data || []).map(async (k) => {
+        const foto = (await Promise.all(slots.filter(([key]) => k[key]).map(async ([key, label]) => {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(k[key], 3600);
+          return data?.signedUrl ? { label, url: data.signedUrl } : null;
+        }))).filter(Boolean);
+        return { ...k, foto };
+      }));
+      if (vivo) setDati({ checks, val: Object.fromEntries((v.data || []).map((x) => [x.checkin_id, x])), note: n.data || [] });
+    })();
+    return () => { vivo = false; };
+  }, [client.id]);
+
+  const fmt = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const MIS = [["peso_kg", "Peso", "kg"], ["spalle_cm", "Spalle", "cm"], ["collo_cm", "Collo", "cm"], ["petto_cm", "Petto", "cm"], ["braccio_dx_cm", "Braccio", "cm"], ["sopra_ombelico_cm", "Sopra ombelico", "cm"], ["ombelico_cm", "Ombelico", "cm"], ["sotto_ombelico_cm", "Sotto ombelico", "cm"], ["glutei_cm", "Glutei", "cm"], ["coscia_dx_cm", "Coscia", "cm"]];
+  const ETI_TESTO = { sintesi: "Sintesi", forti: "Punti forti", migliorare: "Da migliorare", osservazioni: "Osservazioni coach", suggerimenti: "Suggerimenti", qualita: "Qualità dei dati" };
+  const eta = calcolaEta(client.data_nascita) ?? client.eta;
+  const nCheck = dati?.checks.length || 0;
+  const nFoto = (dati?.checks || []).reduce((s, k) => s + k.foto.length, 0);
+
+  return createPortal(
+    <div className="scheda-overlay fixed inset-0 bg-black/50 z-50 overflow-y-auto p-3 print:bg-white print:p-0">
+      <style>{`
+        @page { size: A4; margin: 10mm; }
+        @media print {
+          html, body { height: auto !important; }
+          #root { display: none !important; }
+          .scheda-overlay { position: static !important; overflow: visible !important; background: white !important; }
+          .scheda-foglio { box-shadow: none !important; border-radius: 0 !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; font-size: 10px !important; }
+          .no-print { display: none !important; }
+          .dossier-check { break-inside: avoid; page-break-inside: avoid; }
+        }
+      `}</style>
+      <div className="scheda-foglio bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-auto p-4 space-y-4 text-slate-800">
+        <div className="flex justify-between items-start border-b border-slate-200 pb-2">
+          <div>
+            <p className="font-semibold text-base leading-tight">Dossier check · {[client.nome, client.cognome].filter(Boolean).join(" ")}</p>
+            <p className="text-slate-500 text-[11px]">
+              {[client.sesso === "M" ? "Uomo" : client.sesso ? "Donna" : null, eta ? `${eta} anni` : null, client.altezza_cm ? `${client.altezza_cm} cm` : null, client.obiettivo_attuale ? `Obiettivo: ${client.obiettivo_attuale}` : null].filter(Boolean).join(" · ")}
+            </p>
+            <p className="text-slate-400 text-[11px]">{nCheck} check · {nFoto} foto · generato il {fmt(formatDataLocale(new Date()))}. Le foto sono in ordine: frontale, laterale destra, posteriore, laterale sinistra.</p>
+          </div>
+          <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={20} /></button>
+        </div>
+        {!dati && <p className="text-slate-400 text-sm">Preparo il dossier e carico le foto...</p>}
+        {dati && (
+          <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF (poi allegalo alla chat)</button>
+        )}
+        {dati && dati.checks.map((k, i) => {
+          const v = dati.val[k.id];
+          const prec = i > 0 ? dati.checks[i - 1] : null;
+          return (
+            <div key={k.id} className="dossier-check border border-slate-200 rounded-xl p-3 space-y-2">
+              <p className="font-semibold text-sm">Check {i + 1} · {fmt(k.data_check)}{k.fase_mestruale ? ` · fase ${k.fase_mestruale}` : ""}</p>
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-slate-400 text-left"><th className="font-medium">Misura</th><th className="font-medium text-right">Valore</th><th className="font-medium text-right">Δ prec.</th></tr></thead>
+                <tbody>
+                  {MIS.filter(([key]) => k[key] != null).map(([key, label, u]) => {
+                    const d = prec && prec[key] != null ? Math.round((k[key] - prec[key]) * 10) / 10 : null;
+                    return <tr key={key} className="border-t border-slate-100"><td>{label}</td><td className="text-right tabular-nums">{k[key]} {u}</td><td className="text-right tabular-nums text-slate-500">{d == null ? "" : (d > 0 ? "+" : "") + d}</td></tr>;
+                  })}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-slate-600">
+                {[k.energia != null && `Energia ${k.energia}/5`, k.sonno != null && `Sonno ${k.sonno}/5`, k.aderenza_cibo != null && `Aderenza alimentazione ${k.aderenza_cibo}/5`, k.aderenza_allenamento != null && `Aderenza allenamento ${k.aderenza_allenamento}/5`].filter(Boolean).join(" · ")}
+              </p>
+              {k.note_cliente && <p className="text-[11px]"><b>Note della cliente:</b> {k.note_cliente}</p>}
+              {k.nota_foto_coach && <p className="text-[11px]"><b>Nota coach sulle foto:</b> {k.nota_foto_coach}</p>}
+              {v?.voti && Object.keys(v.voti).length > 0 && <p className="text-[11px]"><b>Voti estetici (1-5):</b> {Object.entries(v.voti).map(([a, n]) => `${a} ${n}`).join(" · ")}</p>}
+              {v?.analisi && Object.entries(v.analisi).filter(([, t]) => t).map(([a, t]) => <p key={a} className="text-[11px]"><b>{ETI_TESTO[a] || a}:</b> {String(t)}</p>)}
+              {k.foto.length > 0 && (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {k.foto.map((f, j) => (
+                    <div key={j}><img src={f.url} alt={f.label} className="w-full object-cover rounded-md" style={{ aspectRatio: "3 / 4" }} /><p className="text-[9px] text-slate-400 text-center">{f.label}</p></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {dati && dati.note.length > 0 && (
+          <div className="dossier-check border border-slate-200 rounded-xl p-3 space-y-1">
+            <p className="font-semibold text-sm">Note della coach</p>
+            {dati.note.map((n) => <p key={n.id} className="text-[11px]"><b>{fmt(n.data)}</b>{n.tipo ? ` (${n.tipo})` : ""}: {n.testo}</p>)}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function DiarioClienteHost({ clientId, isAdmin = false }) {
   const [storico, setStorico] = useState(false);
   if (storico) return (
@@ -6592,6 +6695,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     setPagamenti(pg || []);
   };
   useEffect(() => { carica(); }, [clientId]);
+  const [dossier, setDossier] = useState(false);
   const apertoIniziale = React.useRef(null);
   useEffect(() => {
     if (client && apertoIniziale.current !== clientId) {
@@ -6963,6 +7067,10 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
+      {tab === "progressi" && (
+        <button onClick={() => setDossier(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📎 Dossier per la chat (PDF con tutti i check, foto, misure e note)</button>
+      )}
+      {dossier && <DossierCheck client={client} onClose={() => setDossier(false)} />}
       {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta tutto lo storico di questa cliente (Excel con foto)" />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
 
