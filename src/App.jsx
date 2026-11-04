@@ -2433,6 +2433,36 @@ function EsercizioInfoModal({ es, onClose }) {
   );
 }
 
+// Slot video: più video per esercizio, ognuno con un nome facoltativo (es. "Frontale", "Laterale")
+function VideoSlots({ valore, onChange }) {
+  const leggi = (v) => {
+    const r = String(v || "").split("\n").map((x) => x.trim()).filter(Boolean).map((x) => { const i = x.indexOf("|"); return i > -1 ? { label: x.slice(0, i), url: x.slice(i + 1) } : { label: "", url: x }; });
+    while (r.length < 3) r.push({ label: "", url: "" });
+    return r;
+  };
+  const [righe, setRighe] = useState(() => leggi(valore));
+  const aggiorna = (nuove) => {
+    setRighe(nuove);
+    const piene = nuove.filter((r) => r.url.trim());
+    onChange(piene.map((r) => (r.label.trim() ? `${r.label.trim()}|${r.url.trim()}` : r.url.trim())).join("\n"));
+  };
+  const cambia = (i, campo, v) => aggiorna(righe.map((r, j) => (j === i ? { ...r, [campo]: v } : r)));
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">Video (puoi metterne più di uno)</p>
+      <div className="space-y-2">
+        {righe.map((r, i) => (
+          <div key={i} className="flex gap-2 items-center">
+            <span className="text-[11px] text-slate-400 w-4 flex-shrink-0 text-center">{i + 1}</span>
+            <input value={r.label} onChange={(e) => cambia(i, "label", e.target.value)} placeholder="Nome (facoltativo)" className="w-28 flex-shrink-0 border border-slate-200 rounded-xl px-2 py-2 text-sm" />
+            <input value={r.url} onChange={(e) => cambia(i, "url", e.target.value)} placeholder="Link YouTube" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={() => setRighe((x) => [...x, { label: "", url: "" }])} className="mt-2 text-xs text-sky-600 font-medium">+ Aggiungi un altro video</button>
+    </div>
+  );
+}
 function CampoEs({ edit, setEdit, label, k, righe = 1, hint }) {
   return (
     <div>
@@ -2508,7 +2538,7 @@ function LibreriaEserciziCoach() {
             <CampoEs edit={edit} setEdit={setEdit} label="Gruppo muscolare" k="gruppo" />
             <CampoEs edit={edit} setEdit={setEdit} label="Attrezzo" k="attrezzo" />
           </div>
-          <CampoEs edit={edit} setEdit={setEdit} label="Link video YouTube" k="video_url" righe={3} hint="Un link per riga. Se ne metti più di uno puoi dare un nome: Frontale|https://youtube.com/shorts/..." />
+          <VideoSlots key={edit.id || "nuovo"} valore={edit.video_url} onChange={(v) => setEdit((e) => ({ ...e, video_url: v }))} />
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={!!edit.senza_video} onChange={(e) => setEdit({ ...edit, senza_video: e.target.checked })} /> Questo esercizio non ha bisogno del video (non comparirà tra i video mancanti)</label>
           <CampoEs edit={edit} setEdit={setEdit} label="Posizionamento" k="posizionamento" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Movimento e ROM" k="movimento" righe={4} />
