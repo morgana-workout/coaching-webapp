@@ -2332,15 +2332,50 @@ function EsercizioNome({ id, nome, onSaved }) {
 }
 
 // Libreria esercizi con video (tabella esercizi_video): trova l'esercizio che corrisponde al nome scritto in scheda
+// Scelte manuali della coach: per un esercizio può indicare un video preciso (anche di un esercizio simile) oppure "nessun video"
+let SCELTE_VIDEO = {};
+const normVideoNome = (n) => String(n || "").toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+async function caricaSceltaVideo() {
+  try {
+    const { data } = await supabase.from("esercizio_video_scelta").select("*");
+    const m = {}; (data || []).forEach((r) => { m[r.nome_norm] = r; }); SCELTE_VIDEO = m;
+  } catch (e) { /* ignora */ }
+}
 function trovaEsercizioVideo(nome, libreria) {
-  const n = (nome || "").toLowerCase();
+  const n = normVideoNome(nome);
+  const sc = SCELTE_VIDEO[n];
+  if (sc) { if (sc.nessuno || !sc.video_id) return null; return (libreria || []).find((e) => e.id === sc.video_id) || null; }
   let best = null, bestLen = 0;
   (libreria || []).forEach((e) => {
-    (e.parole_chiave || "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean).forEach((k) => {
+    (e.parole_chiave || "").split(",").map((k) => normVideoNome(k)).filter(Boolean).forEach((k) => {
       if (n.includes(k) && k.length > bestLen) { best = e; bestLen = k.length; }
     });
   });
   return best;
+}
+function ScegliVideo({ nome, libreria, onCambiato }) {
+  const n = normVideoNome(nome);
+  const sc = SCELTE_VIDEO[n];
+  const valore = sc ? (sc.nessuno || !sc.video_id ? "nessuno" : sc.video_id) : "auto";
+  const cambia = async (v) => {
+    if (v === "auto") { await supabase.from("esercizio_video_scelta").delete().eq("nome_norm", n); delete SCELTE_VIDEO[n]; }
+    else {
+      const riga = { nome_norm: n, video_id: v === "nessuno" ? null : v, nessuno: v === "nessuno", updated_at: new Date().toISOString() };
+      await supabase.from("esercizio_video_scelta").upsert(riga, { onConflict: "nome_norm" });
+      SCELTE_VIDEO[n] = riga;
+    }
+    onCambiato?.();
+  };
+  return (
+    <label className="block mt-1">
+      <span className="text-[10px] text-slate-400">Video di questo esercizio{valore === "auto" ? " (automatico)" : " (scelto da te)"}</span>
+      <select value={valore} onChange={(e) => cambia(e.target.value)} className="w-full border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] bg-white text-slate-600">
+        <option value="auto">Automatico (solo se è lo stesso esercizio)</option>
+        <option value="nessuno">Nessun video</option>
+        {(libreria || []).map((e) => <option key={e.id} value={e.id}>Usa: {e.nome}</option>)}
+      </select>
+    </label>
+  );
 }
 
 function videoIdYoutube(url) {
@@ -2798,8 +2833,9 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       </label>
                     )}
                     {(() => { const info = trovaEsercizioVideo(es.nome, libreriaVideo); return info ? (
-                      <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>
+                      <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}{info ? ` · ${info.nome}` : ""}</button>
                     ) : null; })()}
+                    {isAdmin && libreriaVideo.length > 0 && <ScegliVideo nome={es.nome} libreria={libreriaVideo} onCambiato={carica} />}
                   </td>
                   {date.map((d) => {
                     const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
@@ -2962,6 +2998,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
           const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
           if (!c || c.video_attivi === false || (c.tipo_servizio !== "online" && c.tipo_servizio !== "ibrido")) return;
         }
+        await caricaSceltaVideo();
         const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
         setLibreriaVideo(data || []);
       } catch (e) { /* senza libreria l'app funziona come prima */ }
@@ -3515,6 +3552,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
       try {
         const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
         if (c && c.video_attivi !== false && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")) {
+          await caricaSceltaVideo();
           const { data: v } = await supabase.from("esercizi_video").select("*").order("ordine");
           setLibreria(v || []);
         }
