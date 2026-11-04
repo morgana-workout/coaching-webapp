@@ -11105,18 +11105,39 @@ function CercaClienti({ clienti, onSelect }) {
   const [q, setQ] = useState("");
   const t = q.trim().toLowerCase();
   const risultati = t ? clienti.filter((c) => `${c.nome} ${c.cognome || ""}`.toLowerCase().includes(t)).slice(0, 8) : [];
+  const [aperta, setAperta] = useState(false);
+  const leggiRecenti = () => { try { return JSON.parse(localStorage.getItem("ultime_cercate") || "[]"); } catch (e) { return []; } };
+  const [recenti, setRecenti] = useState(leggiRecenti);
+  const recentiClienti = recenti.map((id) => clienti.find((c) => c.id === id)).filter(Boolean).slice(0, 3);
+  const scegli = (c) => {
+    const nuovi = [c.id, ...recenti.filter((id) => id !== c.id)].slice(0, 3);
+    setRecenti(nuovi);
+    try { localStorage.setItem("ultime_cercate", JSON.stringify(nuovi)); } catch (e) { /* ignora */ }
+    onSelect(c.id); setQ(""); setAperta(false);
+  };
   return (
     <div className="relative z-30">
       <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
         <Search size={17} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca una cliente..." className="flex-1 min-w-0 text-sm text-slate-800 bg-transparent outline-none" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} onFocus={() => setAperta(true)} onBlur={() => setTimeout(() => setAperta(false), 150)} placeholder="Cerca una cliente..." className="flex-1 min-w-0 text-sm text-slate-800 bg-transparent outline-none" />
         {q && <button onClick={() => setQ("")} className="text-slate-400 text-sm px-1" aria-label="Cancella">×</button>}
       </div>
+      {!t && aperta && recentiClienti.length > 0 && (
+        <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          <p className="px-4 pt-2.5 pb-1 text-[10px] uppercase tracking-wide text-slate-400 font-medium">Cercate di recente</p>
+          {recentiClienti.map((c) => (
+            <button key={c.id} onMouseDown={(e) => e.preventDefault()} onClick={() => scegli(c)} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100">
+              <span className="text-sm text-slate-800">{c.nome} {c.cognome}</span>
+              <span className="text-[11px] text-slate-400 capitalize">{c.tipo_servizio || ""}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {t && (
         <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
           {risultati.length === 0 && <p className="px-4 py-3 text-sm text-slate-400">Nessuna cliente trovata</p>}
           {risultati.map((c) => (
-            <button key={c.id} onClick={() => { onSelect(c.id); setQ(""); }} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0">
+            <button key={c.id} onMouseDown={(e) => e.preventDefault()} onClick={() => scegli(c)} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0">
               <span className="text-sm text-slate-800">{c.nome} {c.cognome}</span>
               <span className="text-[11px] text-slate-400 capitalize">{c.tipo_servizio || ""}</span>
             </button>
@@ -11520,7 +11541,7 @@ function AdminApp({ onVistaCliente }) {
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [backupInCorso, setBackupInCorso] = useState(false);
-  const [vista, setVista] = useState("oggi"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
+  const [vista, setVista] = useState("calendario"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
 
   const carica = async () => {
     try {
