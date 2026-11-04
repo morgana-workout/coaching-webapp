@@ -2173,7 +2173,14 @@ function ClientNutrizione({ piano, storico }) {
   );
 }
 
-function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved, etichetta = "" }) {
+// Superset: "A + B" nel nome => parti separate, ognuna con carico e ripetizioni
+function partiSuperset(nome) {
+  const pulito = String(nome || "").replace(/\(\s*super\s*set\s*\)/i, "").trim();
+  const parti = pulito.split("+").map((x) => x.trim()).filter(Boolean);
+  return parti.length >= 2 && !/^\s*\+/.test(pulito) ? parti.slice(0, 4) : [];
+}
+function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved, etichetta = "", parti = [] }) {
+  const [extra, setExtra] = useState(entry?.extra || {});
   const [kg, setKg] = useState(entry?.kg ?? "");
   const [rip, setRip] = useState(entry?.ripetizioni ?? "");
   const [id, setId] = useState(entry?.id ?? null);
@@ -2183,12 +2190,14 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
     setKg(entry?.kg ?? "");
     setRip(entry?.ripetizioni ?? "");
     setId(entry?.id ?? null);
+    setExtra(entry?.extra || {});
   }, [entry?.id]);
 
   const salva = async () => {
-    if (kg === "" && rip === "" && !id) return;
+    const extraVuoto = !Object.values(extra).some((v) => v && (v.kg || v.rip));
+    if (kg === "" && rip === "" && extraVuoto && !id) return;
     setSalvando(true);
-    if (kg === "" && rip === "" && id) {
+    if (kg === "" && rip === "" && extraVuoto && id) {
       // riga svuotata: la rimuoviamo invece di lasciare un record vuoto
       await supabase.from("training_entries").delete().eq("id", id);
       setId(null);
@@ -2196,7 +2205,7 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
       onSaved();
       return;
     }
-    const payload = { kg: kg === "" ? null : Number(kg), ripetizioni: rip || null };
+    const payload = { kg: kg === "" ? null : Number(kg), ripetizioni: rip || null, extra: extraVuoto ? null : extra };
     if (id) {
       await supabase.from("training_entries").update(payload).eq("id", id);
     } else {
@@ -2211,12 +2220,27 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
   };
 
   return (
-    <div className="flex gap-1 items-center">
+    <div className="flex flex-col gap-1">
+      <div className="flex gap-1 items-center">
       <span className="text-[9px] text-slate-300 w-2.5 flex-shrink-0" title={etichetta}>{etichetta ? etichetta[0] : numeroSerie}</span>
       <input type="number" step="0.5" value={kg} onChange={(e) => setKg(e.target.value)} onBlur={salva} disabled={salvando}
         placeholder="kg" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
       <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={salva} disabled={salvando}
         placeholder="rip" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
+      </div>
+      {parti.slice(1).map((nomeP, k) => {
+        const pk = String(k + 2);
+        const v = extra[pk] || {};
+        return (
+          <div key={pk} className="flex gap-1 items-center">
+            <span className="text-[9px] text-sky-500 w-2.5 flex-shrink-0" title={nomeP}>{pk === "2" ? "B" : pk === "3" ? "C" : "D"}</span>
+            <input value={v.kg ?? ""} onChange={(e) => setExtra({ ...extra, [pk]: { ...v, kg: e.target.value.replace(/[^0-9.,]/g, "") } })} onBlur={salva} disabled={salvando}
+              placeholder="kg" className="w-1/2 min-w-0 text-center border border-sky-200 rounded px-1 py-1 text-xs" />
+            <input value={v.rip ?? ""} onChange={(e) => setExtra({ ...extra, [pk]: { ...v, rip: e.target.value } })} onBlur={salva} disabled={salvando}
+              placeholder="rip" className="w-1/2 min-w-0 text-center border border-sky-200 rounded px-1 py-1 text-xs" />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2242,7 +2266,7 @@ function etichettaSerie(es, n) {
   if (es.tecnica === "top_back" && (es.serie_top || 0) > 0) return n <= es.serie_top ? "TOP" : "BACK";
   return "";
 }
-function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, etichette = [], onSaved }) {
+function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, etichette = [], onSaved, parti = [] }) {
   const nSerie = Math.max(1, Math.min(serieRichieste, 10));
   const primaRigaConNota = entries.find((e) => e.note) || entries.find((e) => e.numero_serie === 1) || entries[0];
   const [nota, setNota] = useState(primaRigaConNota?.note ?? "");
@@ -2269,7 +2293,7 @@ function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste,
         const entry = entries.find((e) => e.numero_serie === numeroSerie);
         return (
           <RigaSerieAllenamento key={numeroSerie} exerciseId={exerciseId} data={data} clientId={clientId}
-            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} etichetta={etichette[i]} />
+            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} etichetta={etichette[i]} parti={parti} />
         );
       })}
       <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} disabled={salvandoNota}
@@ -2779,7 +2803,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                     const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
                     return (
                       <td key={d} className="px-2 py-2 text-center">
-                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={serieDi(es)} etichette={Array.from({ length: 10 }).map((_, i) => etichettaSerie(es, i + 1))} onSaved={carica} />
+                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={serieDi(es)} etichette={Array.from({ length: 10 }).map((_, i) => etichettaSerie(es, i + 1))} onSaved={carica} parti={partiSuperset(es.nome)} />
                       </td>
                     );
                   })}
@@ -3331,34 +3355,46 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   const notaSalvata = (entries.find((e) => e.note) || {}).note || "";
   useEffect(() => { setNota(notaSalvata); setNotaAperta(!!notaSalvata); }, [data, notaSalvata]);
   const info = trovaEsercizioVideo(es.nome, libreria);
+  const parti = partiSuperset(es.nome);
   const rec = recuperoSecondi(es);
   const fatta = (n) => { const e = entryDi(n); return !!e && (e.completata === true || (e.completata == null && (e.kg != null || e.ripetizioni))); };
   const fatteTot = Array.from({ length: nSerie }).filter((_, i) => fatta(i + 1)).length;
 
-  const valore = (n, campo) => {
-    const k = `${n}-${campo}`;
+  const valore = (n, campo, p = 1) => {
+    const k = p === 1 ? `${n}-${campo}` : `${n}-${campo}${p}`;
     if (k in bozza) return bozza[k];
     const e = entryDi(n);
+    if (p > 1) { const x = e?.extra?.[p]; return campo === "kg" ? (x?.kg ?? "") : (x?.rip ?? ""); }
     return campo === "kg" ? fmtKg(e?.kg) : (e?.ripetizioni ?? "");
+  };
+  const extraDi = (n, usaUltima) => {
+    const o = {}; const u = (ultime[n] || {}).extra || {};
+    for (let p = 2; p <= parti.length; p++) {
+      const kg = valore(n, "kg", p) !== "" ? valore(n, "kg", p) : (usaUltima ? (u[p]?.kg ?? "") : "");
+      const rip = valore(n, "rip", p) !== "" ? valore(n, "rip", p) : (usaUltima ? (u[p]?.rip ?? "") : "");
+      if (kg !== "" || rip !== "") o[p] = { kg, rip };
+    }
+    return Object.keys(o).length ? o : null;
   };
   const salvaSerie = async (n, { kg, rip, completata }) => {
     const e = entryDi(n);
     const payload = { kg: num(kg), ripetizioni: rip === "" || rip == null ? null : String(rip) };
+    if (parti.length > 1) payload.extra = extraDi(n, completata === true);
     if (completata !== undefined) payload.completata = completata;
     if (e) await supabase.from("training_entries").update(payload).eq("id", e.id);
     else {
-      if (payload.kg == null && !payload.ripetizioni && !payload.completata) return;
+      if (payload.kg == null && !payload.ripetizioni && !payload.completata && !payload.extra) return;
       await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: es.id, data, numero_serie: n, ...payload });
     }
     if (payload.kg != null) inviaPushCarichi();
-    setBozza((b) => { const c = { ...b }; delete c[`${n}-kg`]; delete c[`${n}-rip`]; return c; });
+    setBozza((b) => { const c = { ...b }; Object.keys(c).forEach((k) => { if (k.startsWith(`${n}-`)) delete c[k]; }); return c; });
     onSaved();
   };
   const alBlur = (n) => {
     const e = entryDi(n);
     const kgT = `${n}-kg` in bozza ? bozza[`${n}-kg`] : fmtKg(e?.kg);
     const ripT = `${n}-rip` in bozza ? bozza[`${n}-rip`] : (e?.ripetizioni ?? "");
-    if (!(`${n}-kg` in bozza) && !(`${n}-rip` in bozza)) return;
+    if (!Object.keys(bozza).some((k) => k.startsWith(`${n}-`))) return;
     salvaSerie(n, { kg: kgT, rip: ripT });
   };
   const spunta = async (n) => {
@@ -3401,11 +3437,14 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
           <div className="grid gap-2 mt-3 text-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px", fontSize: 10, color: "#7a8da3", letterSpacing: ".06em" }}>
             <span></span><span>KG</span><span>RIP</span><span></span>
           </div>
+          {parti.length > 1 && <p className="text-xs mt-1.5" style={{ color: "#3F78B3" }}>Superserie: segna carico e ripetizioni di ogni esercizio, in alternanza ✨</p>}
           <div className="space-y-2 mt-1">
             {Array.from({ length: nSerie }).map((_, i) => {
               const n = i + 1; const ok = fatta(n); const u = ultime[n] || {};
               return (
-                <div key={n} id={`serie-${es.id}-${n}`} className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
+                <div key={n} className={parti.length > 1 ? "rounded-2xl p-1.5 space-y-1.5" : ""} style={parti.length > 1 ? { background: "#F5FAFE" } : undefined}>
+                {parti.length > 1 && <p className="text-[11px] font-semibold pl-8 truncate" style={{ color: "#3F78B3" }}>A · {parti[0]}</p>}
+                <div id={`serie-${es.id}-${n}`} className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
                   <span className="text-center font-bold leading-tight" style={{ color: "#7a8da3" }}>{n}{etichettaSerie(es, n) && <span className="block font-semibold" style={{ fontSize: 8, color: "#3F78B3" }}>{etichettaSerie(es, n) === "TOP" ? "TOP" : "BACK"}</span>}</span>
                   <CasellaNumero valore={valore(n, "kg")} suggerimento={ok ? null : u.kg} fatto={ok} etichetta={`Chilogrammi serie ${n}`}
                     onChange={(v) => setBozza((b) => ({ ...b, [`${n}-kg`]: v }))} onBlur={() => alBlur(n)} />
@@ -3416,6 +3455,23 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
                     style={{ width: 44, height: 44, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
                     <Check size={20} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
                   </button>
+                </div>
+                {parti.slice(1).map((nomeP, k) => {
+                  const p = k + 2; const uu = ((u.extra || {})[p]) || {};
+                  return (
+                    <div key={p}>
+                      <p className="text-[11px] font-semibold pl-8 truncate mb-1" style={{ color: "#3F78B3" }}>{String.fromCharCode(64 + p)} · {nomeP}</p>
+                      <div className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
+                        <span></span>
+                        <CasellaNumero valore={valore(n, "kg", p)} suggerimento={ok ? null : uu.kg} fatto={ok} etichetta={`Chilogrammi ${nomeP} serie ${n}`}
+                          onChange={(v) => setBozza((b) => ({ ...b, [`${n}-kg${p}`]: v }))} onBlur={() => alBlur(n)} />
+                        <CasellaNumero valore={valore(n, "rip", p)} suggerimento={ok ? null : uu.rip} fatto={ok} etichetta={`Ripetizioni ${nomeP} serie ${n}`}
+                          onChange={(v) => setBozza((b) => ({ ...b, [`${n}-rip${p}`]: v }))} onBlur={() => alBlur(n)} />
+                        <span></span>
+                      </div>
+                    </div>
+                  );
+                })}
                 </div>
               );
             })}

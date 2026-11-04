@@ -58,6 +58,37 @@ function serieEffettive(programma, righe) {
     return { ...e, serieEff: s };
   });
 }
+const COMPOSTI = /squat|leg press|pressa|hack|hip thrust|rdl|romanian|stacco|deadlift|good morning|bulgar|affond|lunge|step.?up|panca|chest press|military|lento avanti|lat |lat machine|pulldown|trazion|rematore|row|pull.?up|chin|dip/i;
+// Livello di sostegno di ogni indicazione (vedi documento "Allenamento femminile: cosa dice la ricerca")
+function livelloEv(c) {
+  const t = (c.tit || "") + " " + (c.testo || "");
+  if (/serie\/settimana|serie in una sola seduta|frequenza/i.test(t)) return ["Evidenza media", "dose-risposta del volume e frequenza"];
+  if (/ripetizioni medie/i.test(t)) return ["Convenzione", "l'ipertrofia avviene in un range ampio di carichi"];
+  if (/spinta\/trazione/i.test(t)) return ["Scelta di coach", "postura e simmetria, nessuno studio diretto"];
+  if (/Frequenza settimanale reale/i.test(t)) return ["Convenzione", "soglia di aderenza arbitraria"];
+  if (/carico|stimolo|ripetizioni in calo|sessioni/i.test(t)) return ["Prassi", "sovraccarico progressivo, soglie pratiche"];
+  return ["Prassi", ""];
+}
+// Errori gravi nel programma (strutturali, indipendenti dal log)
+function controlloGravi(programma, giorni) {
+  const gravi = [];
+  const nomeG = (id) => (giorni.find((g) => g.id === id) || {}).nome || "";
+  const perGiorno = {};
+  programma.forEach((e) => {
+    if (e.serieEff > 8) gravi.push(`${e.nome}: ${e.serieEff} serie in un solo esercizio (oltre 8 non è produttivo, probabile errore di inserimento).`);
+    const r = repRange(e.ripetizioni);
+    if (r && r[1] > 40) gravi.push(`${e.nome}: ripetizioni "${e.ripetizioni}" fuori scala (probabile errore).`);
+    if (e.serieEff > 0) perGiorno[e.training_day_id] = (perGiorno[e.training_day_id] || 0) + e.serieEff;
+  });
+  Object.entries(perGiorno).forEach(([id, tot]) => { if (tot > 28) gravi.push(`${nomeG(id)}: ${tot} serie totali in una seduta (oltre ~28 il volume è difficilmente recuperabile e la qualità cala).`); });
+  const visti = {};
+  programma.forEach((e) => { const k = e.training_day_id + "|" + (e.nome || "").trim().toLowerCase(); if (visti[k]) gravi.push(`${nomeG(e.training_day_id)}: "${e.nome}" è inserito due volte nello stesso giorno.`); visti[k] = 1; });
+  const vol = {};
+  programma.forEach((e) => { Object.entries(quote(e.nome)).forEach(([g, w]) => { vol[g] = (vol[g] || 0) + (e.serieEff || 0) * w; }); });
+  const sp = SPINTA.reduce((a, g) => a + (vol[g] || 0), 0), tr = TRAZIONE.reduce((a, g) => a + (vol[g] || 0), 0);
+  if (sp > 0 && tr > 0 && sp / tr > 2) gravi.push(`Spinta/trazione ${Math.round(sp)}:${Math.round(tr)}: sbilanciamento marcato verso la spinta (spalle e postura).`);
+  return gravi;
+}
 const arr05 = (x) => Math.round(x * 2) / 2;
 const SPINTA = ["Petto", "Spalle", "Tricipiti"], TRAZIONE = ["Dorso", "Bicipiti"];
 
@@ -187,9 +218,40 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
     const sett = dateAllenate28.size / (giorniOsservati / 7);
     if (giorniOsservati >= 14 && sett < nSeduteProg * 0.75) consigli.push({ t: "chk", tit: `Frequenza settimanale reale ${String(Math.round(sett * 10) / 10).replace(".", ",")} (programma: ${nSeduteProg} sedute)`, testo: "Dal primo allenamento registrato, l'esecuzione è inferiore al programma: la limitazione alla progressione è più probabilmente l'aderenza che la programmazione. Valutare se il numero di sedute è sostenibile o va ridotto.", peso: 0 });
   }
+  // --- indicazioni per il prossimo log: per ogni esercizio, cosa provare (carico/ripetizioni) ed eventuale tecnica
+  const prossimo = [];
+  Object.entries(perEs).forEach(([cid, sess]) => {
+    const date = Object.keys(sess).sort();
+    const nome = nomeDi[cid]; if (!nome || !date.length) return;
+    const e = programma.find((x) => (canon.map[x.id] || x.id) === cid);
+    if (!e) return; // solo esercizi del programma attivo
+    const ult = sess[date[date.length - 1]];
+    const rr = repRange(e.ripetizioni) || [8, 12];
+    const composto = COMPOSTI.test(nome);
+    const isol = !composto;
+    const step = composto ? 2.5 : 1;
+    const ultimi = date.slice(-3).map((d) => sess[d]);
+    const ferma = date.length >= 3 && ultimi.every((x) => x.kg === ultimi[0].kg);
+    const quanteFerme = (() => { let n = 0; for (let i = date.length - 1; i >= 0 && sess[date[i]].kg === ult.kg; i--) n++; return n; })();
+    const calo = date.length >= 3 && ultimi[2].kg < ultimi[0].kg && ultimi[2].kg <= ultimi[1].kg;
+    let prova, tecnica = null, motivo;
+    if (calo) { prova = `${kgFmt(ult.kg)} kg × ${Math.max(rr[0], ult.reps || rr[0])}, senza forzare`; motivo = "carico in calo: priorità al recupero"; tecnica = { t: "", testo: "Valuta −1 serie o una settimana di scarico (−30/40% del volume)." }; }
+    else if (ult.reps >= rr[1]) { prova = `${kgFmt(Math.round((ult.kg + step) * 100) / 100)} kg × ${rr[0]}–${rr[0] + 1}`; motivo = `top del range (${ult.reps} rip a ${kgFmt(ult.kg)} kg): si sale di carico`; }
+    else if (ult.reps > 0) { prova = `${kgFmt(ult.kg)} kg × ${Math.min(rr[1], ult.reps + 1)}`; motivo = `doppia progressione: +1 ripetizione fino a ${rr[1]}, poi si sale di carico`; }
+    else { prova = `${kgFmt(ult.kg)} kg, +1 ripetizione`; motivo = "ripetizioni non registrate"; }
+    if (!calo && ferma && quanteFerme >= 4) {
+      if (composto && !e.tecnica && (e.serieEff || 0) >= 3) tecnica = { t: "top_back", top: 1, back: (e.serieEff || 3) - 1, testo: `Carico fermo da ${quanteFerme} sessioni: 1 top set a RIR 1 + ${(e.serieEff || 3) - 1} back-off (−10/15%).` };
+      else if (isol && !e.tecnica) tecnica = { t: "rest_pause", testo: `Carico fermo da ${quanteFerme} sessioni: sull'ultima serie rest-pause (cedimento tecnico, 15–20 s di pausa, ripetizioni extra) oppure una serie in più in myo-reps.` };
+    } else if (!calo && isol && !e.tecnica && ult.reps >= rr[1] && (e.serieEff || 0) >= 3 && quanteFerme >= 2) {
+      tecnica = { t: "drop", testo: "Progressione lenta: sull'ultima serie un drop set (−20/25% del carico, fino al cedimento tecnico)." };
+    }
+    prossimo.push({ id: e.id, nome, ultimo: `${kgFmt(ult.kg)} kg × ${ult.reps || "—"}`, prova, motivo, tecnica, serieEff: e.serieEff || 0, giorno: e.training_day_id });
+  });
   const mantenere = ok.slice(0, 5);
+  const gravi = controlloGravi(programma, giorni.filter((g) => !g.scheda_archiviata));
+  consigli.forEach((c) => { const [l, m] = livelloEv(c); c.ev = l; c.evNota = m; });
   const nonIndicate = programma.filter((e) => !(e.serieEff > 0)).map((e) => e.nome);
-  return { consigli, mantenere, tabella, sesso, programma, nonIndicate, giorni: giorni.filter((g) => !g.scheda_archiviata), datiPochi: dateAllenate28.size < 4 || (!programma.length && !righe.length) };
+  return { gravi, consigli, mantenere, prossimo, tabella, sesso, programma, nonIndicate, giorni: giorni.filter((g) => !g.scheda_archiviata), datiPochi: dateAllenate28.size < 4 || (!programma.length && !righe.length) };
 }
 
 export function ConsigliProgramma({ client }) {
@@ -223,6 +285,10 @@ export function ConsigliProgramma({ client }) {
       {r?.errore && <p className="text-xs text-slate-400">Non riesco a leggere i dati.</p>}
       {r && !r.errore && (
         <>
+          <div className={`rounded-lg px-3 py-2 mb-2 text-[12px] ${r.gravi?.length ? "bg-slate-800 text-white" : "bg-sky-50 text-sky-700"}`}>
+            <p className="font-semibold">Controllo errori gravi: {r.gravi?.length ? `${r.gravi.length} da verificare` : "nessuno ✓"}</p>
+            {r.gravi?.map((g, i) => <p key={i} className="mt-0.5 opacity-90">• {g}</p>)}
+          </div>
           {r.nonIndicate?.length > 0 && <p className="text-[12px] text-slate-500 mb-2">Serie non indicate per {r.nonIndicate.length} esercizi ({r.nonIndicate.slice(0, 4).join(", ")}{r.nonIndicate.length > 4 ? "…" : ""}): non li conto e non do indicazioni di volume sui distretti che li comprendono. Le serie mancanti vengono dedotte solo da top set (1) e back-off (2) o dal log.</p>}
           {r.datiPochi && <p className="text-[12px] text-slate-500 mb-2">Dati di allenamento ancora pochi: le indicazioni basate sui carichi richiedono almeno 3 sessioni per esercizio.</p>}
           {r.consigli.length === 0 && !r.datiPochi && <p className="text-sm text-slate-500">Nessuna indicazione particolare: progressione e struttura del programma sono nei range attesi.</p>}
@@ -230,6 +296,7 @@ export function ConsigliProgramma({ client }) {
             <div key={i} className="py-2 border-b border-sky-100 last:border-0">
               <span className={`inline-block text-[10.5px] rounded-full px-2 py-0.5 mr-2 ${stile[c.t][1]}`}>{c.cambio ? "⟳ Cambiare stimolo" : stile[c.t][0]}</span>
               <span className="text-[13px] font-semibold text-slate-800">{c.tit}</span>
+              {c.ev && <span className="ml-2 text-[10px] text-slate-400" title={c.evNota}>[{c.ev}]</span>}
               <p className="text-[12px] text-slate-500 mt-0.5 leading-snug">{c.testo}</p>
             </div>
           ))}
@@ -249,6 +316,7 @@ export function ConsigliProgramma({ client }) {
               </div>
             </div>
           )}
+          {r.prossimo?.length > 0 && <ProssimoLog r={r} onApplicato={() => setRic((x) => x + 1)} />}
           <Simulatore r={r} sesso={client.sesso} leve={leve} onApplicato={() => setRic((x) => x + 1)} />
           {r.mantenere.length > 0 && <p className="text-[12px] text-slate-600 pt-2"><span className="inline-block text-[10.5px] rounded-full px-2 py-0.5 mr-2 bg-slate-100 text-slate-600">▬ Mantenere</span>{r.mantenere.join(", ")}: progressione regolare.</p>}
           <p className="text-[11px] text-slate-400 mt-2">Regole su carichi, ripetizioni e serie registrati e sul programma attivo: sono spunti, la decisione è tua. Il lavoro è ripartito tra i distretti in base all'esercizio (es. squat bulgaro: glutei e femorali; squat e pressa: quadricipiti e glutei in proporzione alle leve indicate).</p>
@@ -260,7 +328,6 @@ export function ConsigliProgramma({ client }) {
 
 const TECNICHE_SIM = [["", "Nessuna tecnica"], ["top_back", "Top set + back-off"], ["drop", "Drop set"], ["rest_pause", "Rest-pause"], ["myo", "Myo-reps"], ["super", "Superserie"], ["cluster", "Cluster"], ["pausa", "Serie con pausa"]];
 const nomeTecnica = (t) => (TECNICHE_SIM.find(([k]) => k === t) || [])[1] || "";
-const COMPOSTI = /squat|leg press|pressa|hack|hip thrust|rdl|romanian|stacco|deadlift|good morning|bulgar|affond|lunge|step.?up|panca|chest press|military|lento avanti|lat |lat machine|pulldown|trazion|rematore|row|pull.?up|chin|dip/i;
 const baseNome = (n) => String(n || "").replace(/\s*(top\s*set|back.?off)\s*/gi, " ").replace(/\s+/g, " ").trim().toLowerCase();
 
 // Propone automaticamente: serie per distretto, ordine degli esercizi (multiarticolari prima) e tecnica (top set + back-off) per gli esercizi in stallo.
@@ -309,6 +376,43 @@ function proponiModifiche(r, sesso, leve) {
     if (e && tot >= 3) { tec[e.id] = { t: "top_back", top: "1", back: String(tot - 1) }; note.push(`${e.nome}: carico fermo da più sessioni → 1 top set + ${tot - 1} back-off per cambiare stimolo.`); }
   });
   return { mod, note, ord, tec };
+}
+
+// Per ogni esercizio con log: cosa provare nel prossimo allenamento e quale tecnica inserire/modificare
+function ProssimoLog({ r, onApplicato }) {
+  const [aperto, setAperto] = useState(true);
+  const [fatti, setFatti] = useState({});
+  const applica = async (x) => {
+    const t = x.tecnica; if (!t?.t) return;
+    const campi = { tecnica: t.t, ...(t.t === "top_back" ? { serie_top: t.top, serie_backoff: t.back, serie: t.top + t.back } : {}) };
+    if (!confirm(`Imposto "${nomeTecnica(t.t)}" su ${x.nome}${t.t === "top_back" ? ` (${t.top} top + ${t.back} back-off)` : ""}?`)) return;
+    await supabase.from("training_exercises").update(campi).eq("id", x.id);
+    setFatti({ ...fatti, [x.id]: true }); onApplicato && onApplicato();
+  };
+  const conTec = r.prossimo.filter((x) => x.tecnica);
+  return (
+    <div className="mt-3 border-t border-sky-100 pt-3">
+      <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700">📈 Per il prossimo log {conTec.length ? `· ${conTec.length} con tecnica` : ""} {aperto ? "▲" : "▼"}</button>
+      {aperto && (
+        <div className="mt-2 space-y-2">
+          <p className="text-[11.5px] text-slate-500">Dall'ultima sessione registrata: cosa provare la prossima volta (doppia progressione) ed eventuali tecniche di intensità da inserire o modificare. Sono proposte: decidi tu.</p>
+          {r.prossimo.map((x) => (
+            <div key={x.id} className="border border-sky-100 rounded-lg px-3 py-2 text-[12px]">
+              <p className="font-semibold text-slate-800">{x.nome} <span className="font-normal text-slate-400">· ultimo {x.ultimo}</span></p>
+              <p className="text-slate-700">Prova: <b>{x.prova}</b></p>
+              <p className="text-slate-500">{x.motivo}</p>
+              {x.tecnica && (
+                <div className="mt-1 bg-sky-50 rounded px-2 py-1.5">
+                  <p className="text-slate-700">⟳ {x.tecnica.t ? <b>{nomeTecnica(x.tecnica.t)}: </b> : null}{x.tecnica.testo}</p>
+                  {x.tecnica.t && (fatti[x.id] ? <p className="text-sky-700 mt-1">Impostata ✓</p> : <button onClick={() => applica(x)} className="mt-1 bg-slate-800 text-white rounded px-2.5 py-1 text-[11.5px]">Imposta nel programma</button>)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Bozza provvisoria: si modificano serie, ordine e tecniche (o si aggiungono/tolgono esercizi) e si vede come cambia la valutazione.
