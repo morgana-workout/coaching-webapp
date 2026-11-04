@@ -2475,6 +2475,57 @@ function CampoEs({ edit, setEdit, label, k, righe = 1, hint }) {
   );
 }
 
+// Cliente (Bulb e ibrida): tutti gli esercizi con video e spiegazione, cercabili
+function EserciziCliente() {
+  const [lista, setLista] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+  const [cerca, setCerca] = useState("");
+  const [gruppo, setGruppo] = useState("");
+  const [aperto, setAperto] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("esercizi_video").select("*").order("nome");
+      setLista((data || []).filter((e) => e.video_url || e.posizionamento || e.movimento || e.errori));
+      setCaricando(false);
+    })();
+  }, []);
+  const prima = (g) => String(g || "Altro").split(/[\/(]/)[0].trim() || "Altro";
+  const gruppi = [...new Set(lista.map((e) => prima(e.gruppo)))].sort();
+  const q = cerca.trim().toLowerCase();
+  const filtrati = lista.filter((e) => (!q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""} ${e.parole_chiave || ""}`.toLowerCase().includes(q)) && (!gruppo || prima(e.gruppo) === gruppo));
+  if (caricando) return <Spinner />;
+  return (
+    <div className="px-5 pt-6 pb-24 space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-800">Esercizi</h1>
+        <p className="text-sm text-slate-500 mt-1">Tutti gli esercizi con video e spiegazione: cerca quello che ti serve ✨</p>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
+        <Search size={17} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
+        <input value={cerca} onChange={(e) => setCerca(e.target.value)} placeholder="Cerca un esercizio..." className="flex-1 min-w-0 text-sm text-slate-800 bg-transparent outline-none" />
+        {cerca && <button onClick={() => setCerca("")} className="text-slate-400 text-sm px-1" aria-label="Cancella">×</button>}
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <button onClick={() => setGruppo("")} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${!gruppo ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>Tutti</button>
+        {gruppi.map((g) => <button key={g} onClick={() => setGruppo(g === gruppo ? "" : g)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${gruppo === g ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{g}</button>)}
+      </div>
+      {filtrati.length === 0 && <p className="text-center text-sm text-slate-400 py-6">Nessun esercizio trovato</p>}
+      <div className="space-y-2">
+        {filtrati.map((e) => (
+          <button key={e.id} onClick={() => setAperto(e)} className="w-full text-left bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800">{e.nome}</p>
+              <p className="text-xs text-slate-400 truncate">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
+            </div>
+            <span className="text-[11px] text-sky-600 flex-shrink-0">{e.video_url ? "▶ Video" : "Tecnica"}</span>
+          </button>
+        ))}
+      </div>
+      {aperto && <EsercizioInfoModal es={aperto} onClose={() => setAperto(null)} />}
+    </div>
+  );
+}
+
 // Coach: modifica la libreria esercizi con video + richieste delle clienti
 function LibreriaEserciziCoach() {
   const [lista, setLista] = useState([]);
@@ -4403,6 +4454,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
+    ...(isBulbNav ? [{ key: "esercizi", label: "Esercizi", icon: Search }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
     { key: "chat", label: "Appunti con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
@@ -4428,6 +4480,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} lezioneProssima={lezioneProssima} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
+        {tab === "esercizi" && isBulbNav && <EserciziCliente />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
         {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Appunti con Morgana</p><AppuntiPagina clientId={client.id} ruolo="cliente" nomeCliente={client.nome} onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
         {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioClienteHost clientId={client.id} /></>}
