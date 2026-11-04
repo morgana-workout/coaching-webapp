@@ -1972,6 +1972,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         </ResponsiveContainer>
       </Card>
 
+      {!isAdmin && <CommentiCheckCliente checkins={checkins} />}
+
       <ConfrontoFoto checkins={checkins} isAdmin={isAdmin} />
 
       <HistoryTable checkins={checkins} sesso={sesso} />
@@ -3975,6 +3977,212 @@ function ClientApprofondimenti() {
   );
 }
 
+
+/* ===== Commento automatico sul check (solo coach, con un click lo vede la cliente) ===== */
+function generaCommentoCheck(c, tutti, client) {
+  const ord = [...tutti].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const i = ord.findIndex((x) => x.id === c.id);
+  const prev = i > 0 ? ord[i - 1] : null;
+  const f1 = (n) => (Math.round(n * 10) / 10).toString().replace(".", ",");
+  const sg = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + f1(Math.abs(n));
+  const fd = (d) => (d || "").split("-").reverse().join("/");
+  const nome = client?.nome || "";
+  const righe = [];
+  righe.push(prev ? `Ciao ${nome}! ✨ Ecco come leggo questo check rispetto a quello del ${fd(prev.data_check)}.` : `Ciao ${nome}! ✨ Questo è il tuo primo check: da qui in poi lo useremo come punto di partenza.`);
+  if (c.peso_kg != null) {
+    if (prev && prev.peso_kg != null) {
+      const d = Number(c.peso_kg) - Number(prev.peso_kg);
+      const gg = Math.max(1, Math.round((new Date(c.data_check) - new Date(prev.data_check)) / 86400000));
+      const sett = d / (gg / 7);
+      let lett;
+      if (Math.abs(d) <= 0.5) lett = "praticamente stabile: rientra nella normale oscillazione quotidiana (liquidi, sodio, transito, ciclo).";
+      else if (Math.abs(sett) <= 0.5) lett = "una variazione graduale, in linea con un ritmo sostenibile.";
+      else lett = "una variazione un po' più marcata: la guardiamo insieme sul trend dei prossimi check, non sul singolo dato.";
+      righe.push(`• Peso: ${f1(c.peso_kg)} kg (${sg(d)} kg in ${gg} giorni, circa ${sg(sett)} kg a settimana): ${lett}`);
+    } else righe.push(`• Peso: ${f1(c.peso_kg)} kg.`);
+  }
+  const campi = getCampiMisura(client?.sesso).filter((k) => k.key !== "peso_kg");
+  if (prev) {
+    const cambi = [], stabili = [];
+    campi.forEach((k) => {
+      if (c[k.key] == null || prev[k.key] == null) return;
+      const d = Number(c[k.key]) - Number(prev[k.key]);
+      (Math.abs(d) >= 0.5 ? cambi : stabili).push(Math.abs(d) >= 0.5 ? `${k.label.toLowerCase()} ${sg(d)} cm` : k.label.toLowerCase());
+    });
+    if (cambi.length) righe.push(`• Misure: ${cambi.join(", ")}.`);
+    if (stabili.length && cambi.length) righe.push(`• Stabili: ${stabili.join(", ")}.`);
+    if (!cambi.length && stabili.length) righe.push("• Misure sostanzialmente invariate rispetto all'ultimo check.");
+    if (c.sopra_ombelico_cm && c.glutei_cm && prev.sopra_ombelico_cm && prev.glutei_cm) {
+      const w1 = c.sopra_ombelico_cm / c.glutei_cm, w0 = prev.sopra_ombelico_cm / prev.glutei_cm;
+      if (Math.abs(w1 - w0) >= 0.01) righe.push(`• Rapporto vita/fianchi ${w1 < w0 ? "in miglioramento" : "in leggero aumento"} (${w0.toFixed(2).replace(".", ",")} → ${w1.toFixed(2).replace(".", ",")}).`);
+    }
+  } else {
+    const v = campi.filter((k) => c[k.key] != null).map((k) => `${k.label.toLowerCase()} ${f1(c[k.key])}`);
+    if (v.length) righe.push(`• Misure registrate: ${v.join(", ")} cm.`);
+  }
+  const sogg = [["energia", "energia"], ["sonno", "sonno"], ["aderenza_cibo", "aderenza all'alimentazione"], ["aderenza_allenamento", "aderenza all'allenamento"]].filter(([k]) => c[k] != null);
+  if (sogg.length) {
+    righe.push(`• Come ti sei sentita: ${sogg.map(([k, l]) => `${l} ${c[k]}/5`).join(", ")}.`);
+    const basse = sogg.filter(([k]) => c[k] <= 2).map(([, l]) => l);
+    if (basse.length) righe.push(`• Su ${basse.join(" e ")} ti vedo un po' sotto: ne parliamo e aggiustiamo il tiro insieme 🫶🏻`);
+    else if (sogg.every(([k]) => c[k] >= 4)) righe.push("• Parametri soggettivi ottimi: è un'ottima base per spingere sul programma 💪🏻");
+  }
+  if (client?.sesso !== "M" && c.fase_mestruale) righe.push(`• Fase del ciclo: ${c.fase_mestruale}. Tieni presente che il peso e le misure possono oscillare con la ritenzione idrica del ciclo.`);
+  righe.push("Un check è una fotografia di un giorno: conta il trend nel tempo. Sei sulla strada giusta ✨");
+  return righe.join("\n");
+}
+function CommentoCheck({ checkin, tutti, client }) {
+  const [riga, setRiga] = useState(undefined);
+  const [testo, setTesto] = useState("");
+  const [msg, setMsg] = useState("");
+  const [aperto, setAperto] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data } = await supabase.from("commenti_check").select("*").eq("checkin_id", checkin.id).maybeSingle();
+      if (!vivo) return;
+      if (data) { setRiga(data); setTesto(data.testo); return; }
+      const nuovo = { checkin_id: checkin.id, client_id: checkin.client_id, testo: generaCommentoCheck(checkin, tutti, client), visibile: false };
+      const { data: ins } = await supabase.from("commenti_check").insert(nuovo).select().single();
+      if (vivo) { setRiga(ins || nuovo); setTesto(nuovo.testo); }
+    })();
+    return () => { vivo = false; };
+  }, [checkin.id]);
+  if (riga === undefined) return null;
+  const salva = async (patch) => {
+    const { error } = await supabase.from("commenti_check").update({ ...patch, updated_at: new Date().toISOString() }).eq("checkin_id", checkin.id);
+    if (error) { setMsg("Non sono riuscita a salvare"); return; }
+    setRiga((r) => ({ ...r, ...patch }));
+    setMsg("Salvato ✓"); setTimeout(() => setMsg(""), 2000);
+  };
+  const visibile = !!riga.visibile;
+  return (
+    <div className="mt-2 rounded-xl border border-sky-100 bg-sky-50/60">
+      <button onClick={() => setAperto((a) => !a)} className="w-full flex items-center justify-between px-3 py-2 text-left">
+        <span className="text-[12px] font-semibold text-slate-700">Commento automatico <span className="font-normal text-slate-400">· {visibile ? "visibile alla cliente" : "solo tu"}</span></span>
+        <ChevronRight size={14} className={`text-sky-500 transition-transform ${aperto ? "rotate-90" : ""}`} />
+      </button>
+      {aperto && (
+        <div className="px-3 pb-3 space-y-2">
+          <textarea value={testo} onChange={(e) => setTesto(e.target.value)} onBlur={() => testo !== riga.testo && salva({ testo })} rows={9}
+            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white text-slate-700" />
+          <div className="flex flex-wrap gap-2 items-center">
+            <button onClick={() => salva({ visibile: !visibile, testo })} className={`text-xs font-medium rounded-lg px-3 py-2 ${visibile ? "bg-slate-100 text-slate-600" : "bg-slate-800 text-white"}`}>
+              {visibile ? "Nascondi alla cliente" : `Rendi visibile a ${client?.nome || "la cliente"}`}
+            </button>
+            <button onClick={() => { const t = generaCommentoCheck(checkin, tutti, client); setTesto(t); salva({ testo: t }); }} className="text-[11px] text-sky-600 underline">Rigenera</button>
+            {msg && <span className="text-[11px] text-sky-600">{msg}</span>}
+          </div>
+          <p className="text-[11px] text-slate-400">Puoi modificarlo prima di renderlo visibile. Finché non premi il tasto, la cliente non lo vede.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+// Lato cliente: i commenti che Morgana ha deciso di condividere
+function CommentiCheckCliente({ checkins }) {
+  const [lista, setLista] = useState([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("commenti_check").select("checkin_id, testo, updated_at").eq("visibile", true);
+      setLista(data || []);
+    })();
+  }, [checkins.length]);
+  const conData = lista.map((l) => ({ ...l, data: (checkins.find((c) => c.id === l.checkin_id) || {}).data_check || "" })).filter((l) => l.data).sort((a, b) => b.data.localeCompare(a.data));
+  if (!conData.length) return null;
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">I commenti di Morgana ✨</p>
+      <div className="space-y-2">
+        {conData.map((l, i) => (
+          <Card key={l.checkin_id} className="p-3">
+            <p className="text-[11px] text-sky-700 font-medium mb-1">Check del {l.data.split("-").reverse().join("/")}</p>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{l.testo}</p>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Appunti condivisi (al posto della chat): pagina a righe, scrivono sia Morgana sia la cliente ===== */
+function AppuntiPagina({ clientId, ruolo, onLetti, nomeCliente = "" }) {
+  const [testo, setTesto] = useState("");
+  const [stato, setStato] = useState("");
+  const [caricato, setCaricato] = useState(false);
+  const base = React.useRef({ testo: "", updated_at: null });
+  const sporco = React.useRef(false);
+  const fuoco = React.useRef(false);
+  const timer = React.useRef(null);
+  const ultimoTesto = React.useRef("");
+  const altro = ruolo === "coach" ? "cliente" : "coach";
+  const flagMio = ruolo === "coach" ? "nuovo_per_coach" : "nuovo_per_cliente";
+  const flagAltro = ruolo === "coach" ? "nuovo_per_cliente" : "nuovo_per_coach";
+
+  const carica = async () => {
+    const { data } = await supabase.from("appunti").select("*").eq("client_id", clientId).maybeSingle();
+    if (data) {
+      if (!sporco.current && !fuoco.current && data.testo !== ultimoTesto.current) { setTesto(data.testo); ultimoTesto.current = data.testo; }
+      base.current = { testo: data.testo, updated_at: data.updated_at };
+      if (data[flagMio]) { await supabase.from("appunti").update({ [flagMio]: false }).eq("client_id", clientId); onLetti?.(); }
+    }
+    setCaricato(true);
+  };
+  useEffect(() => { carica(); const t = setInterval(carica, 8000); return () => { clearInterval(t); clearTimeout(timer.current); }; }, [clientId]);
+
+  const salva = async (corrente) => {
+    clearTimeout(timer.current);
+    if (!sporco.current) return;
+    setStato("Salvo…");
+    let mio = corrente;
+    const { data: remoto } = await supabase.from("appunti").select("testo, updated_at").eq("client_id", clientId).maybeSingle();
+    if (remoto && base.current.updated_at && remoto.updated_at !== base.current.updated_at && remoto.testo !== base.current.testo) {
+      // nel frattempo l'altra persona ha scritto: tengo il suo testo e aggiungo in fondo ciò che ho aggiunto io
+      const aggiunto = mio.startsWith(base.current.testo) ? mio.slice(base.current.testo.length) : "\n" + mio;
+      mio = remoto.testo + (aggiunto.trim() ? (remoto.testo.endsWith("\n") || aggiunto.startsWith("\n") ? "" : "\n") + aggiunto : "");
+      setTesto(mio);
+    }
+    const adesso = new Date().toISOString();
+    const { error } = await supabase.from("appunti").upsert({ client_id: clientId, testo: mio, ultimo_autore: ruolo, [flagAltro]: true, [flagMio]: false, updated_at: adesso }, { onConflict: "client_id" });
+    if (error) { setStato("Non salvato: riprova"); return; }
+    base.current = { testo: mio, updated_at: adesso };
+    ultimoTesto.current = mio;
+    sporco.current = false;
+    setStato("Salvato ✓");
+    setTimeout(() => setStato(""), 2000);
+  };
+  const cambia = (v) => {
+    setTesto(v); sporco.current = true; ultimoTesto.current = v; setStato("");
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => salva(v), 1500);
+  };
+  const firma = () => {
+    const d = new Date();
+    const riga = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} · ${ruolo === "coach" ? "Morgana" : (nomeCliente || "Io")}: `;
+    cambia((testo && !testo.endsWith("\n") ? testo + "\n" : testo) + riga);
+  };
+  const H = 32;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-[12px]" style={{ color: "#7a8da3" }}>Una pagina sola per noi due: scriviamo qui appunti, promemoria e domande ✨</p>
+        <span className="text-[11px] text-sky-600 flex-shrink-0 ml-2">{stato}</span>
+      </div>
+      <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #C9E0F7", background: "#FFFDF7" }}>
+        <textarea value={testo} onChange={(e) => cambia(e.target.value)} onFocus={() => { fuoco.current = true; }} onBlur={() => { fuoco.current = false; salva(testo); }}
+          placeholder={caricato ? "Scrivi qui…" : ""} spellCheck
+          style={{
+            display: "block", width: "100%", minHeight: "62vh", resize: "none", border: 0, outline: "none", color: "#27466D",
+            fontSize: 16, lineHeight: `${H}px`, padding: `0 14px ${H}px 52px`, background: "transparent",
+            backgroundImage: `linear-gradient(to right, transparent 40px, #8EBDED 40px, #8EBDED 41px, transparent 41px), repeating-linear-gradient(to bottom, transparent 0, transparent ${H - 1}px, #C9E0F7 ${H - 1}px, #C9E0F7 ${H}px)`,
+            backgroundAttachment: "local",
+          }} />
+      </div>
+      <button onClick={firma} className="text-xs font-semibold rounded-full px-3 py-2" style={{ background: "#E1EEFB", color: "#3F78B3" }}>+ Aggiungi data e nome</button>
+    </div>
+  );
+}
+
 /* Pallino chat mobile: si trascina dove si vuole (la posizione resta salvata) e, toccandolo, apre la chat sopra la sezione in cui si è */
 function ChatBolla({ chiave, conteggio = 0, titolo, onChiudi, children }) {
   const DIM = 56;
@@ -4040,7 +4248,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
   const contaChat = async () => {
     try {
       if (!client || anteprima) return;
-      const { count } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("mittente", "coach").eq("letto", false);
+      const { count } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("client_id", client.id).eq("nuovo_per_cliente", true);
       setChatNonLetti(count || 0);
     } catch (e) { /* ignora */ }
   };
@@ -4117,7 +4325,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
     ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
     { key: "extra", label: "Extra", icon: BookOpen },
-    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
+    { key: "chat", label: "Appunti con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
 
   return (
@@ -4142,7 +4350,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
-        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
+        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Appunti con Morgana</p><AppuntiPagina clientId={client.id} ruolo="cliente" nomeCliente={client.nome} onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
         {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioClienteHost clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false) && (
@@ -6848,7 +7056,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
             {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
           </button>
-          <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Chat</button>
+          <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Appunti</button>
           <StatoBadge stato={client.stato_check} />
         </div>
       </div>
@@ -7121,8 +7329,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {chatAperta && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={() => setChatAperta(false)}>
           <div className="w-full max-w-md bg-white h-full overflow-y-auto p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-800">Chat con {client.nome}</p><button onClick={() => setChatAperta(false)} className="text-slate-500 text-lg px-2" aria-label="Chiudi">✕</button></div>
-            <ChatMessaggi clientId={clientId} ruolo="coach" onLetti={() => onChanged?.()} />
+            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-800">Appunti con {client.nome}</p><button onClick={() => setChatAperta(false)} className="text-slate-500 text-lg px-2" aria-label="Chiudi">✕</button></div>
+            <AppuntiPagina clientId={clientId} ruolo="coach" nomeCliente={client.nome} onLetti={() => onChanged?.()} />
           </div>
         </div>
       )}
@@ -7166,6 +7374,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                       </button>
                     </div>
                     <FotoCheck checkin={r} />
+                    <CommentoCheck checkin={r} tutti={checkins} client={client} />
                   </li>
                 ))}
                 {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
@@ -8277,12 +8486,9 @@ function ChatCoach({ clients, onChanged }) {
   const [ultimi, setUltimi] = useState({});
   const [ricerca, setRicerca] = useState("");
   const carica = async () => {
-    const { data } = await supabase.from("messaggi").select("client_id, mittente, testo, foto_path, letto, created_at").order("created_at", { ascending: false }).limit(1000);
+    const { data } = await supabase.from("appunti").select("client_id, testo, ultimo_autore, nuovo_per_coach, updated_at").limit(1000);
     const m = {};
-    (data || []).forEach((x) => {
-      if (!m[x.client_id]) m[x.client_id] = { ultimo: x, nuovi: 0 };
-      if (x.mittente === "cliente" && !x.letto) m[x.client_id].nuovi += 1;
-    });
+    (data || []).forEach((x) => { m[x.client_id] = { ultimo: { mittente: x.ultimo_autore, testo: (x.testo || "").trim().split("\n").filter(Boolean).pop() || "", created_at: x.updated_at }, nuovi: x.nuovo_per_coach ? 1 : 0 }; });
     setUltimi(m);
   };
   useEffect(() => { carica(); }, [aperta]);
@@ -8291,9 +8497,9 @@ function ChatCoach({ clients, onChanged }) {
     const c = clients.find((x) => x.id === aperta);
     return (
       <div className="space-y-3">
-        <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutte le chat</button>
+        <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti gli appunti</button>
         <p className="text-lg font-semibold text-slate-800">{c?.nome} {c?.cognome}</p>
-        <ChatMessaggi clientId={aperta} ruolo="coach" nomeCliente={c?.nome || ""} onLetti={() => onChanged?.()} />
+        <AppuntiPagina clientId={aperta} ruolo="coach" nomeCliente={c?.nome || ""} onLetti={() => onChanged?.()} />
       </div>
     );
   }
@@ -8320,7 +8526,7 @@ function ChatCoach({ clients, onChanged }) {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-slate-700 text-sm"><NomeCl c={c} /></p>
                   <p className="text-slate-500 text-xs truncate">
-                    {u ? `${u.ultimo.mittente === "coach" ? "Tu: " : ""}${u.ultimo.testo || "📷 Foto"}` : "Nessun messaggio"}
+                    {u ? (u.ultimo.testo || "Pagina vuota") : "Nessun appunto"}
                   </p>
                 </div>
                 {u?.nuovi > 0 && <span className="bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
@@ -10936,7 +11142,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
-    const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+    const { count: m } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("nuovo_per_coach", true);
     const { count: a } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%");
     setChatNonLette(m || 0);
     setNonLetteCoach((r || 0) + (c || 0) + (a || 0));
@@ -11028,7 +11234,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
           { k: "oggi", l: "Oggi" }, { k: "lista", l: "Lista" }, { k: "calendario", l: "Calendario" },
           { k: "notifiche", l: "Notifiche", b: nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length },
           { k: "guadagni", l: "Guadagni" }, { k: "candidature", l: "Candidature", b: candidatureNuove },
-          { k: "chat", l: "Chat", b: chatNonLette }, { k: "statistiche", l: "Statistiche" },
+          { k: "chat", l: "Appunti", b: chatNonLette }, { k: "statistiche", l: "Statistiche" },
           { k: "esercizi", l: "Esercizi" }, { k: "sfide", l: "Sfide", b: sfideDaFare },
         ];
         const totale = voci.reduce((t, v) => t + (v.b || 0), 0);
@@ -11331,7 +11537,7 @@ function AdminApp({ onVistaCliente }) {
   const [chatCoachNuove, setChatCoachNuove] = useState(0);
   const contaChatCoach = async () => {
     try {
-      const { count } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
+      const { count } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("nuovo_per_coach", true);
       setChatCoachNuove(count || 0);
     } catch (e) { /* ignora */ }
   };
