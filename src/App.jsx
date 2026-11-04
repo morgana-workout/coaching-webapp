@@ -2347,6 +2347,8 @@ function trovaEsercizioVideo(nome, libreria) {
   if (sc) { if (sc.nessuno || !sc.video_id) return null; return (libreria || []).find((e) => e.id === sc.video_id) || null; }
   let best = null, bestLen = 0;
   (libreria || []).forEach((e) => {
+    // voci ancora vuote (senza video né testo) non si mostrano alle clienti
+    if (!(e.video_url || e.posizionamento || e.movimento || e.errori || e.senza_video)) return;
     (e.parole_chiave || "").split(",").map((k) => normVideoNome(k)).filter(Boolean).forEach((k) => {
       if (n.includes(k) && k.length > bestLen) { best = e; bestLen = k.length; }
     });
@@ -2448,6 +2450,7 @@ function LibreriaEserciziCoach() {
   const [lista, setLista] = useState([]);
   const [richieste, setRichieste] = useState([]);
   const [cerca, setCerca] = useState("");
+  const [soloMancanti, setSoloMancanti] = useState(false);
   const [edit, setEdit] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
@@ -2489,7 +2492,9 @@ function LibreriaEserciziCoach() {
   const eliminaRichiesta = async (id) => { await supabase.from("esercizi_richieste").delete().eq("id", id); carica(); };
 
   const q = cerca.trim().toLowerCase();
-  const filtrati = lista.filter((e) => !q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""}`.toLowerCase().includes(q));
+  const mancaVideo = (e) => !e.video_url && !e.senza_video;
+  const nMancanti = lista.filter(mancaVideo).length;
+  const filtrati = lista.filter((e) => (!q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""}`.toLowerCase().includes(q)) && (!soloMancanti || mancaVideo(e)));
   const nuove = richieste.filter((r) => r.stato === "nuova");
 
   if (edit) {
@@ -2541,7 +2546,13 @@ function LibreriaEserciziCoach() {
         <input value={cerca} onChange={(e) => setCerca(e.target.value)} placeholder="Cerca esercizio..." className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
         <button onClick={() => nuovo()} className="bg-slate-800 text-white rounded-xl px-4 text-sm font-medium flex items-center gap-1"><Plus size={16} /> Nuovo</button>
       </div>
-      <p className="text-xs text-slate-400">{lista.length} esercizi · {lista.filter((e) => e.video_url).length} con video</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-400">{lista.length} esercizi · {lista.filter((e) => e.video_url).length} con video · {nMancanti} da completare</p>
+        <button onClick={() => setSoloMancanti((v) => !v)} className={`text-xs font-medium rounded-full px-3 py-1.5 flex-shrink-0 ${soloMancanti ? "bg-slate-800 text-white" : "bg-sky-50 text-sky-700"}`}>
+          {soloMancanti ? "Mostra tutti" : `Solo video mancanti (${nMancanti})`}
+        </button>
+      </div>
+      {soloMancanti && filtrati.length === 0 && <p className="text-center text-sm text-slate-400 py-6">Tutti i video sono stati aggiunti ✨</p>}
       {filtrati.map((e) => (
         <button key={e.id} onClick={() => setEdit({ ...e })} className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-2">
           <div>
