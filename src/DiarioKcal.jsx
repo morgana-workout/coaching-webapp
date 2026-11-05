@@ -43,19 +43,19 @@ function mLine(m) { return m ? `P ${num(m.p)} · C ${num(m.c)} · G ${num(m.g)}`
 /* isAdmin, nella scheda cliente lato coach (stesso pattern di         */
 /* DiarioAllenamento).                                                 */
 /* ------------------------------------------------------------------ */
-export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null, vistaIniziale = "diario", senzaDiario = false }) {
+export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null, vistaIniziale = "diario", senzaDiario = false, soloPianoERicette = false }) {
   const [caricando, setCaricando] = useState(true);
   const [foods, setFoods] = useState([]);
   const [voci, setVoci] = useState([]);
   const [obiettivo, setObiettivo] = useState(null);
-  const [vista, setVista] = useState(senzaDiario ? "piano" : vistaIniziale); // diario | piano | ricette | pasti | storico | libreria | analisi
+  const [vista, setVista] = useState(soloPianoERicette ? "piano" : senzaDiario ? "piano" : vistaIniziale); // diario | piano | ricette | pasti | storico | libreria | analisi
   const [ricette, setRicette] = useState([]);
   const [pasti, setPasti] = useState([]);
   const [ricettaAperta, setRicettaAperta] = useState(null);
   const [date, setDate] = useState(todayStr());
 
   const carica = async () => {
-    if (senzaDiario) { setCaricando(false); return; }
+    if (senzaDiario && !soloPianoERicette) { setCaricando(false); return; }
     // libreria_con: eventuale persona con cui condivido gli alimenti (es. Morgana e Giacomo)
     const { data: cl } = await supabase.from("clients").select("nutrizione_attiva, libreria_con").eq("id", clientId).single();
     const idLibrerie = cl?.libreria_con ? [clientId, cl.libreria_con] : [clientId];
@@ -108,12 +108,12 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
 
   if (caricando) return <Spinner />;
 
-  if (senzaDiario) return <div>{pianoNode}</div>;
+  if (senzaDiario && !soloPianoERicette) return <div>{pianoNode}</div>;
 
   return (
     <div className="space-y-4">
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {[["diario", "Diario"], ...(pianoNode ? [["piano", "Piano"]] : []), ["ricette", "Ricette"], ["pasti", "Pasti standard"], ["libreria", "Alimenti"], ["storico", "Storico"], ...(isAdmin ? [["analisi", "Analisi"]] : [])].map(([k, l]) => (
+        {(soloPianoERicette ? [...(pianoNode ? [["piano", "Programma"]] : []), ["ricette", "Ricette"]] : [["diario", "Diario"], ...(pianoNode ? [["piano", "Piano"]] : []), ["ricette", "Ricette"], ["pasti", "Pasti standard"], ["libreria", "Alimenti"], ["storico", "Storico"], ...(isAdmin ? [["analisi", "Analisi"]] : [])]).map(([k, l]) => (
           <button key={k} onClick={() => setVista(k)}
             className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${vista === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
             {l}
@@ -129,7 +129,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
         />
       )}
       {vista === "piano" && pianoNode}
-      {vista === "ricette" && <RicetteVista ricette={ricette} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} aperta={ricettaAperta} setAperta={setRicettaAperta} />}
+      {vista === "ricette" && <RicetteVista ricette={ricette} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} aperta={ricettaAperta} setAperta={setRicettaAperta} senzaLog={soloPianoERicette} />}
       {vista === "pasti" && <PastiVista pasti={pasti} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} />}
       {vista === "storico" && <StoricoKcal voci={voci} obiettivo={obiettivo} onVaiAGiorno={(d) => { setDate(d); setVista("diario"); }} />}
       {vista === "libreria" && <LibreriaAlimenti clientId={clientId} foods={foods} onCambiato={carica} />}

@@ -18,6 +18,11 @@ function macroFor(f, amt) {
 }
 function perLabel(f) { return f.unit === "pz" ? "1 " + (f.uname || "pezzo") : num(f.per) + " " + f.unit; }
 function amtLabel(unit, uname, amt) { return unit === "pz" ? num(amt) + " × " + (uname || "pezzo") : num(amt) + " " + unit; }
+function etichettaIngr(v, k = 1, base = 1) {
+  if (v.testo) return v.testo;
+  const q = round1((Number(v.quantita) * k) / base);
+  return v.unit === "pz" ? num(q) + " " + (v.uname || "") : amtLabel(v.unit, v.uname, q);
+}
 function labelData(date) {
   if (date === oggiStr()) return "oggi";
   const p = date.split("-");
@@ -149,7 +154,7 @@ function ElencoVoci({ voci, setVoci, aggiungi }) {
         <div key={i} className="flex items-center gap-2 border-b border-slate-100 py-2">
           <div className="flex-1 min-w-0">
             <div className="text-sm text-slate-800 truncate">{v.nome}</div>
-            <div className="text-xs text-slate-400">{amtLabel(v.unit, v.uname, v.quantita)} · {Math.round(v.kcal)} kcal</div>
+            <div className="text-xs text-slate-400">{etichettaIngr(v)}{v.kcal != null ? ` · ${Math.round(v.kcal)} kcal` : ""}</div>
           </div>
           <button onClick={() => setVoci(voci.filter((_, j) => j !== i))} className="text-slate-400 p-1"><X size={16} /></button>
         </div>
@@ -160,7 +165,7 @@ function ElencoVoci({ voci, setVoci, aggiungi }) {
 }
 
 /* ====================== RICETTE ====================== */
-export function RicetteVista({ ricette, foods, clientId, isAdmin, date, onCambiato, aperta, setAperta }) {
+export function RicetteVista({ ricette, foods, clientId, isAdmin, date, onCambiato, aperta, setAperta, senzaLog = false }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("tutte");
   const [modifica, setModifica] = useState(undefined); // undefined chiuso, null nuova, oggetto
@@ -201,7 +206,7 @@ export function RicetteVista({ ricette, foods, clientId, isAdmin, date, onCambia
       ))}
       {!lista.length && <p className="text-slate-400 text-sm text-center py-6">{ricette.length ? "Nessuna ricetta con questi filtri." : "Ancora nessuna ricetta. Quando ne arriveranno, le trovi qui."}</p>}
       {aperta && (
-        <RicettaDettaglio r={aperta} clientId={clientId} isAdmin={isAdmin} date={date}
+        <RicettaDettaglio r={aperta} clientId={clientId} isAdmin={isAdmin} date={date} senzaLog={senzaLog}
           onChiudi={() => setAperta(null)}
           onModifica={() => { const r = aperta; setAperta(null); setModifica(r); }}
           onFatto={() => { setAperta(null); onCambiato(); }} />
@@ -210,7 +215,7 @@ export function RicetteVista({ ricette, foods, clientId, isAdmin, date, onCambia
   );
 }
 
-export function RicettaDettaglio({ r, clientId, isAdmin, date, mealIniziale, onChiudi, onModifica, onFatto, onEliminata }) {
+export function RicettaDettaglio({ r, clientId, isAdmin, date, mealIniziale, onChiudi, onModifica, onFatto, onEliminata, senzaLog = false }) {
   const [porz, setPorz] = useState(1);
   const [meal, setMeal] = useState(mealIniziale || (MEALS.some((m) => m[0] === r.categoria) ? r.categoria : "pranzo"));
   const [salvando, setSalvando] = useState(false);
@@ -255,7 +260,7 @@ export function RicettaDettaglio({ r, clientId, isAdmin, date, mealIniziale, onC
           {r.ingredienti.map((v, i) => (
             <div key={i} className="flex justify-between text-sm py-1.5 border-b border-slate-100">
               <span className="text-slate-700">{v.nome}</span>
-              <span className="text-slate-400 text-xs">{amtLabel(v.unit, v.uname, round1((Number(v.quantita) * k) / base))}</span>
+              <span className="text-slate-400 text-xs">{etichettaIngr(v, k, base)}</span>
             </div>
           ))}
         </div>
@@ -272,13 +277,13 @@ export function RicettaDettaglio({ r, clientId, isAdmin, date, mealIniziale, onC
           <button onClick={() => setPorz((v) => Math.max(0.5, round1(Number(v) - 0.5)))} className="w-9 h-9 rounded-full border border-slate-200 text-slate-500">−</button>
           <input type="number" inputMode="decimal" step="any" min="0" value={porz} onChange={(e) => setPorz(e.target.value)} className="w-16 border border-slate-200 rounded-lg px-2 py-1.5 text-center font-medium" />
           <button onClick={() => setPorz((v) => round1(Number(v) + 0.5))} className="w-9 h-9 rounded-full border border-slate-200 text-slate-500">+</button>
-          <select value={meal} onChange={(e) => setMeal(e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-2 text-sm bg-white">
+          {!senzaLog && <select value={meal} onChange={(e) => setMeal(e.target.value)} className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-2 text-sm bg-white">
             {MEALS.map(([key, l]) => <option key={key} value={key}>{l}</option>)}
-          </select>
+          </select>}
         </div>
-        <button onClick={aggiungi} disabled={salvando || !k} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-40">
+        {!senzaLog && <button onClick={aggiungi} disabled={salvando || !k} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-40">
           {salvando ? "Aggiungo..." : `Aggiungi a ${nomePasto(meal)} (${labelData(date)})`}
-        </button>
+        </button>}
         {puoModificare && onModifica && (
           <div className="flex gap-2">
             <button onClick={onModifica} className="flex-1 border border-slate-200 text-slate-600 text-sm rounded-xl py-2 flex items-center justify-center gap-1"><Pencil size={14} /> Modifica</button>
@@ -306,12 +311,13 @@ function RicettaForm({ r, foods, clientId, isAdmin, onAnnulla, onSalvata }) {
   const salva = async () => {
     if (!nome.trim() || !ingr.length) { alert("Inserisci almeno il nome e un ingrediente."); return; }
     setSalvando(true);
+    const senzaValori = tot.kcal === 0 && r?.kcal != null; // ricetta importata con macro fissi: non li azzero
     const riga = {
       nome: nome.trim(), categoria, porzioni: np, tempo_min: tempo ? Number(tempo) : null, ingredienti: ingr, procedimento: proc.trim() || null,
-      kcal: round1(tot.kcal / np),
-      proteine: tot.incompleto && !tot.p ? null : round1(tot.p / np),
-      carboidrati: tot.incompleto && !tot.p ? null : round1(tot.c / np),
-      grassi: tot.incompleto && !tot.p ? null : round1(tot.g / np),
+      kcal: senzaValori ? r.kcal : round1(tot.kcal / np),
+      proteine: senzaValori ? r.proteine : tot.incompleto && !tot.p ? null : round1(tot.p / np),
+      carboidrati: senzaValori ? r.carboidrati : tot.incompleto && !tot.p ? null : round1(tot.c / np),
+      grassi: senzaValori ? r.grassi : tot.incompleto && !tot.p ? null : round1(tot.g / np),
       client_id: isAdmin && per === "tutte" ? null : clientId,
     };
     const { error } = r?.id

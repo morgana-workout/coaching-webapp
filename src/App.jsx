@@ -6,7 +6,7 @@ import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
 import MessaggioPronto from "./MessaggioPronto";
 import AndamentoCliente from "./AndamentoCliente";
-import { ConsigliProgramma, ValutazioneEstetica } from "./ConsigliEstetica";
+import { ConsigliProgramma, ValutazioneEstetica, MOTIVI_CALO, etichettaMotivo, gruppoCarico } from "./ConsigliEstetica";
 import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale, PrimoEUltimoCheck } from "./QuadroCliente";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
@@ -1620,8 +1620,75 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
   );
 }
 
-function ProgressiCarichi({ clientId }) {
+function TrendCarichi({ trend, isAdmin }) {
+  const { punti, motiviTot, caliTot, senzaTot } = trend;
+  const ultimo = (k) => { for (let i = punti.length - 1; i >= 0; i--) if (punti[i][k] != null) return punti[i][k]; return null; };
+  const pct = (v) => (v == null ? null : Math.round((v - 100) * 10) / 10);
+  const fmtP = (v) => (v == null ? "—" : `${v > 0 ? "+" : ""}${String(v).replace(".", ",")}%`);
+  const pu = pct(ultimo("upper")), pl = pct(ultimo("lower"));
+  const motiviTxt = Object.entries(motiviTot).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${etichettaMotivo(k)} ×${n}`).join(" · ");
+  const conMotivo = caliTot - senzaTot;
+  const Punto = (colore) => (props) => {
+    const { cx, cy, payload, dataKey } = props;
+    if (cx == null || cy == null || payload[dataKey] == null) return null;
+    const cali = payload[dataKey + "Cali"] || 0;
+    return cali > 0
+      ? <g key={cx + "-" + dataKey}><circle cx={cx} cy={cy} r={7} fill="#fff" stroke={colore} strokeWidth={2} /><circle cx={cx} cy={cy} r={2.5} fill={colore} /></g>
+      : <circle key={cx + "-" + dataKey} cx={cx} cy={cy} r={3.5} fill={colore} />;
+  };
+  const Tip = ({ active, payload, label }) => {
+    if (!active || !payload || !payload.length) return null;
+    const p = payload[0].payload;
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs shadow">
+        <p className="font-semibold text-slate-700 mb-1">Settimana del {label}</p>
+        {[["upper", "Upper", "#27466D"], ["lower", "Lower", "#4F8FD0"]].map(([k, l, c]) => p[k] != null && (
+          <div key={k} className="mb-0.5">
+            <p style={{ color: c }}>{l}: {String(p[k]).replace(".", ",")}</p>
+            {p[k + "Cali"] > 0 && <p className="text-slate-500">carichi ridotti: {p[k + "Cali"]}{Object.keys(p[k + "Motivi"] || {}).length ? " · " + Object.keys(p[k + "Motivi"]).map(etichettaMotivo).join(", ") : ""}{p[k + "Senza"] > 0 ? ` · ${p[k + "Senza"]} senza motivo indicato` : ""}</p>}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div className="space-y-2">
+      <div className="px-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isAdmin ? "Trend dei carichi · upper e lower" : "Come vanno i tuoi carichi"}</p>
+        <p className="text-slate-400 text-xs mt-0.5">{isAdmin ? "Indice di progressione del carico (mediana della variazione settimanale per esercizio, base 100). I cerchi vuoti indicano settimane con carichi ridotti." : "Parte da 100 e sale quando i carichi crescono. I cerchi vuoti sono settimane in cui qualche carico è sceso."}</p>
+      </div>
+      <Card className="p-3">
+        <ResponsiveContainer width="100%" height={210}>
+          <LineChart data={punti} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="sett" tick={{ fontSize: 11, fill: "#64748b" }} />
+            <YAxis tick={{ fontSize: 11, fill: "#64748b" }} domain={["auto", "auto"]} />
+            <Tooltip content={<Tip />} />
+            <Line type="monotone" dataKey="upper" name="Upper" stroke="#27466D" strokeWidth={2.5} dot={Punto("#27466D")} activeDot={{ r: 6 }} connectNulls />
+            <Line type="monotone" dataKey="lower" name="Lower" stroke="#4F8FD0" strokeWidth={2.5} dot={Punto("#4F8FD0")} activeDot={{ r: 6 }} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+        <div className="flex gap-4 justify-center text-xs mt-1">
+          <span className="flex items-center gap-1.5" style={{ color: "#27466D" }}><i className="w-3 h-1 rounded-full inline-block" style={{ background: "#27466D" }} /> Upper {fmtP(pu)}</span>
+          <span className="flex items-center gap-1.5" style={{ color: "#4F8FD0" }}><i className="w-3 h-1 rounded-full inline-block" style={{ background: "#4F8FD0" }} /> Lower {fmtP(pl)}</span>
+        </div>
+        {caliTot > 0 && (
+          <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-0.5">
+            <p>{isAdmin ? `Riduzioni di carico: ${caliTot} (${conMotivo} con motivo dichiarato${senzaTot ? `, ${senzaTot} senza` : ""}).` : `Qualche carico è sceso (${caliTot} volte): capita, fa parte del percorso 🫶🏻`}</p>
+            {motiviTxt && <p className="text-slate-500">Motivi indicati: {motiviTxt}</p>}
+            {isAdmin
+              ? (senzaTot === 0 ? <p className="text-slate-500">Tutte le riduzioni hanno una causa dichiarata: l'andamento va letto come variazione contestuale, non come regressione.</p> : <p className="text-slate-500">{senzaTot} riduzioni senza causa indicata: da chiarire con la cliente prima di interpretarle.</p>)
+              : <p className="text-slate-500">Indicare il motivo aiuta Morgana a leggere meglio i tuoi progressi ✨</p>}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function ProgressiCarichi({ clientId, isAdmin = false }) {
   const [esercizi, setEsercizi] = useState(null);
+  const [trend, setTrend] = useState(null);
   const [aperto, setAperto] = useState(null);
   const [traguardi, setTraguardi] = useState({ streak: 0 });
 
@@ -1629,15 +1696,44 @@ function ProgressiCarichi({ clientId }) {
     let vivo = true;
     (async () => {
       try {
-        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, motivo_calo, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
         const mappa = {};
         righe.forEach((r) => {
           const kg = Number(r.kg);
           const nome = r.training_exercises?.nome;
           if (!nome || !r.data || !(kg > 0)) return;
-          const g = (mappa[nome] = mappa[nome] || { nome, date: {} });
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {} });
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
+          if (r.motivo_calo) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); String(r.motivo_calo).split(",").filter(Boolean).forEach((x) => m.add(x)); }
         });
+        // Trend dei carichi upper / lower: variazione settimanale mediana dei carichi, concatenata a partire da 100
+        const lun = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
+        const perSett = { upper: {}, lower: {} };
+        Object.values(mappa).forEach((g) => {
+          const gr = gruppoCarico(g.nome); if (!gr) return;
+          const dd = Object.keys(g.date).sort();
+          for (let i = 1; i < dd.length; i++) {
+            const prev = g.date[dd[i - 1]], cur = g.date[dd[i]]; const w = lun(dd[i]);
+            const o = (perSett[gr][w] = perSett[gr][w] || { rel: [], cali: 0, senza: 0, motivi: {} });
+            o.rel.push(cur / prev - 1);
+            if (cur < prev) { o.cali += 1; const m = g.mot[dd[i]]; if (m && m.size) m.forEach((x) => { o.motivi[x] = (o.motivi[x] || 0) + 1; }); else o.senza += 1; }
+          }
+        });
+        const settTrend = [...new Set([...Object.keys(perSett.upper), ...Object.keys(perSett.lower)])].sort();
+        const mediana = (a) => { const b = [...a].sort((x, y) => x - y); const m = Math.floor(b.length / 2); return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+        const idx = { upper: null, lower: null };
+        const punti = settTrend.map((w) => {
+          const riga = { w, sett: w.split("-").reverse().slice(0, 2).join("/") };
+          ["upper", "lower"].forEach((gr) => {
+            const o = perSett[gr][w];
+            if (o) { idx[gr] = (idx[gr] == null ? 100 : idx[gr]) * (1 + mediana(o.rel)); riga[gr + "Cali"] = o.cali; riga[gr + "Senza"] = o.senza; riga[gr + "Motivi"] = o.motivi; }
+            riga[gr] = idx[gr] == null ? null : Math.round(idx[gr] * 10) / 10;
+          });
+          return riga;
+        });
+        const motiviTot = {}; let caliTot = 0, senzaTot = 0;
+        ["upper", "lower"].forEach((gr) => Object.values(perSett[gr]).forEach((o) => { caliTot += o.cali; senzaTot += o.senza; Object.entries(o.motivi).forEach(([k, n]) => { motiviTot[k] = (motiviTot[k] || 0) + n; }); }));
+        if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot } : null);
         const lista = Object.values(mappa).map((g) => {
           const date = Object.keys(g.date).sort();
           const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
@@ -1647,7 +1743,7 @@ function ProgressiCarichi({ clientId }) {
           const record = date.length >= 2 && ultimo > maxPrec;
           const scorsa = date.length >= 2 ? g.date[date[date.length - 2]] : null;
           const diffScorsa = scorsa == null ? null : Math.round((ultimo - scorsa) * 10) / 10;
-          return { scorsa, diffScorsa, nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
+          const motUlt = g.mot[date[date.length - 1]] ? [...g.mot[date[date.length - 1]]] : []; return { scorsa, diffScorsa, motUlt, nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
         }).sort((a, b) => a.nome.localeCompare(b.nome));
         // Costanza: settimane consecutive (lunedì-domenica) con almeno un allenamento registrato
         const lunedi = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
@@ -1671,6 +1767,7 @@ function ProgressiCarichi({ clientId }) {
 
   return (
     <div className="space-y-2">
+      {trend && <TrendCarichi trend={trend} isAdmin={isAdmin} />}
       {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
         <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
           <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">I tuoi traguardi</p>
@@ -1684,7 +1781,7 @@ function ProgressiCarichi({ clientId }) {
         <Card className="p-4 bg-slate-100 border-slate-100 space-y-1.5">
           <p className="text-xs uppercase tracking-wide text-slate-700 font-medium">Da tenere d'occhio 👀</p>
           {inCalo.map((e) => (
-            <p key={e.nome} className="text-sm text-slate-700"><span className="font-semibold">{e.nome}</span>: {fmt(e.scorsa)} → {fmt(e.ultimo)} kg ({fmt(e.diffScorsa)} kg rispetto alla volta scorsa)</p>
+            <p key={e.nome} className="text-sm text-slate-700"><span className="font-semibold">{e.nome}</span>: {fmt(e.scorsa)} → {fmt(e.ultimo)} kg ({fmt(e.diffScorsa)} kg rispetto alla volta scorsa){e.motUlt.length > 0 && <span className="text-slate-500"> · motivo: {e.motUlt.map(etichettaMotivo).join(", ")}</span>}</p>
           ))}
           <p className="text-xs text-slate-500">Capita, è normale: è solo un'informazione utile per regolare recupero, sonno e programma 🫶🏻</p>
         </Card>
@@ -1983,7 +2080,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
       </div>
 
-      {clientId && <ProgressiCarichi clientId={clientId} />}
+      {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} />}
     </div>
   );
 }
@@ -2131,9 +2228,9 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   );
 }
 
-function ClientNutrizione({ piano, storico }) {
+function ClientNutrizione({ piano, storico, daNutrizionista = false }) {
   if (!piano) {
-    return <div className="px-5 pt-16 text-center text-slate-400 text-sm">Morgana non ha ancora impostato i tuoi valori nutrizionali.</div>;
+    return <div className="px-5 pt-16 text-center text-slate-400 text-sm">{daNutrizionista ? "Il programma della tua nutrizionista comparirà qui appena lo carichiamo ✨" : "Morgana non ha ancora impostato i tuoi valori nutrizionali."}</div>;
   }
   const macro = [
     { label: "Proteine", val: piano.proteine_g, color: "bg-sky-500" },
@@ -2143,8 +2240,8 @@ function ClientNutrizione({ piano, storico }) {
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-slate-800">Nutrizione</h1>
-        <p className="text-slate-500 text-sm mt-1">Valori indicativi, {formattaPeriodo(piano)}</p>
+        <h1 className="text-xl font-semibold text-slate-800">{daNutrizionista ? "Il programma della tua nutrizionista" : "Nutrizione"}</h1>
+        <p className="text-slate-500 text-sm mt-1">{daNutrizionista ? "Macros indicativi in linea con il tuo programma, " : "Valori indicativi, "}{formattaPeriodo(piano)}</p>
       </div>
       <div className="rounded-2xl border border-slate-700 shadow-sm p-5 bg-slate-800">
         <div className="flex items-center gap-2 text-slate-300 text-xs uppercase tracking-wide font-medium mb-1"><Apple size={14} /> Kcal indicative giornaliere</div>
@@ -2168,6 +2265,12 @@ function ClientNutrizione({ piano, storico }) {
               <p className="text-xs text-slate-500 mt-0.5">Proteine {x.proteine_g ?? "—"} g · Carboidrati {x.carboidrati_g ?? "—"} g · Grassi {x.grassi_g ?? "—"} g</p>
             </div>
           ))}
+        </Card>
+      )}
+      {daNutrizionista && piano.note && (
+        <Card className="p-4 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Dieta e indicazioni</p>
+          <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{piano.note}</p>
         </Card>
       )}
       <StoricoNutrizione storico={storico} />
@@ -3477,7 +3580,7 @@ function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichett
   );
 }
 
-function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo }) {
+function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true }) {
   const nSerie = Math.max(1, Math.min(serieDi(es), 10));
   const [bozza, setBozza] = useState({}); // { "n-kg": testo }
   const [nota, setNota] = useState("");
@@ -3490,6 +3593,18 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   const rec = recuperoSecondi(es);
   const fatta = (n) => { const e = entryDi(n); return !!e && (e.completata === true || (e.completata == null && (e.kg != null || e.ripetizioni))); };
   const fatteTot = Array.from({ length: nSerie }).filter((_, i) => fatta(i + 1)).length;
+  // carico più basso dell'ultima volta (stessa serie): si chiede il motivo
+  const calo = Array.from({ length: nSerie }).some((_, i) => { const e = entryDi(i + 1); const u = ultime[i + 1]; return !!e && e.kg != null && !!u && u.kg != null && Number(e.kg) < Number(u.kg); });
+  const motiviSalvati = ((entries.find((e) => e.motivo_calo) || {}).motivo_calo || "").split(",").filter(Boolean);
+  const scegliMotivo = async (codice) => {
+    const nuovi = motiviSalvati.includes(codice) ? motiviSalvati.filter((x) => x !== codice) : [...motiviSalvati, codice];
+    const riga = entries.find((x) => x.numero_serie === 1) || entries[0];
+    if (!riga) return;
+    await supabase.from("training_entries").update({ motivo_calo: nuovi.join(",") || null }).eq("id", riga.id);
+    const altre = entries.filter((x) => x.id !== riga.id && x.motivo_calo);
+    if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
+    onSaved();
+  };
 
   const valore = (n, campo, p = 1) => {
     const k = p === 1 ? `${n}-${campo}` : `${n}-${campo}${p}`;
@@ -3607,6 +3722,18 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
               );
             })}
           </div>
+          {(calo || motiviSalvati.length > 0) && (
+            <div className="mt-3 rounded-2xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+              <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Carico più basso dell'ultima volta: com'è andata?</p>
+              <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Capita, è normale! Scegli cosa c'entra di più: aiuta a leggere bene i progressi ✨</p>
+              <div className="flex flex-wrap gap-2 mt-2.5">
+                {MOTIVI_CALO.filter((m) => mostraCiclo || m[0] !== "ciclo").map(([k, l]) => {
+                  const on = motiviSalvati.includes(k);
+                  return <button key={k} onClick={() => scegliMotivo(k)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
+                })}
+              </div>
+            </div>
+          )}
           {notaAperta ? (
             <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} placeholder="Come è andata? Scrivi qui una nota ✨"
               className="w-full mt-3 rounded-xl px-3 py-3 text-sm focus:outline-none" style={{ border: "1.5px dashed #C9E0F7", color: "#27466D" }} />
@@ -3627,6 +3754,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
   const [entries, setEntries] = useState([]);
   const [storicoEntries, setStoricoEntries] = useState([]);
   const [libreria, setLibreria] = useState([]);
+  const [sessoCl, setSessoCl] = useState("");
   const [aperti, setAperti] = useState({});
   const [prep, setPrep] = useState([]);
   const [infoEs, setInfoEs] = useState(null);
@@ -3642,7 +3770,8 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
       if (attivi.length) setGiornoId((cur) => cur || attivi[0].id);
       setCaricando(false);
       try {
-        const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
+        const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi, sesso").eq("id", clientId).maybeSingle();
+        if (c) setSessoCl(c.sesso || "");
         if (c && c.video_attivi !== false && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")) {
           await caricaSceltaVideo();
           const { data: v } = await supabase.from("esercizi_video").select("*").order("ordine");
@@ -3795,7 +3924,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
             <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? correnteKey === es.id}
               onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? correnteKey === es.id) }))}
               entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
-              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} />
+              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} />
           ))}
           {tuttiFatti ? (
             <div id="fine-allenamento" className="rounded-3xl p-5 text-center" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7" }}>
@@ -4447,7 +4576,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
   const nav = [
     { key: "home", label: "Home", icon: Home },
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
-    ...(client.nutrizione_attiva !== false || client.kcal_attivo !== false ? [{ key: "kcal", label: "Macros", icon: Apple }] : []),
+    ...(client.nutrizione_attiva !== false || client.kcal_attivo !== false || client.seguita_da_nutrizionista ? [{ key: "kcal", label: client.seguita_da_nutrizionista ? "Nutrizione" : "Macros", icon: Apple }] : []),
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
     ...(cicloAttivoPer(client, cicloImp) ? [{ key: "ciclo", label: "Il mio ciclo", icon: Droplets }] : []),
@@ -4485,11 +4614,12 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Appunti con Morgana</p><AppuntiPagina clientId={client.id} ruolo="cliente" nomeCliente={client.nome} onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
         {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioClienteHost clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
-        {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false) && (
+        {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false || client.seguita_da_nutrizionista) && (
           <div className="px-5 pt-6 pb-24">
             <DiarioKcal clientId={client.id} vistaIniziale={tab === "nutrizione" ? "piano" : "diario"}
               senzaDiario={client.kcal_attivo === false}
-              pianoNode={client.nutrizione_attiva !== false ? <ClientNutrizione piano={piano} storico={pianoStorico} /> : null} />
+              soloPianoERicette={!!client.seguita_da_nutrizionista}
+              pianoNode={client.nutrizione_attiva !== false || client.seguita_da_nutrizionista ? <ClientNutrizione piano={piano} storico={pianoStorico} daNutrizionista={!!client.seguita_da_nutrizionista} /> : null} />
           </div>
         )}
         {tab === "ciclo" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Il mio ciclo</p><CicloCliente client={client} /></div>}
@@ -7173,7 +7303,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "progressi", label: "Progressi" },
     ...(isBulb ? [] : [tabAll]),
     { key: "nutrizione", label: "Macros" },
-    ...(client.kcal_attivo !== false ? [{ key: "analisi", label: "Cosa mangia" }] : []),
+    ...(client.kcal_attivo !== false && !client.seguita_da_nutrizionista ? [{ key: "analisi", label: "Cosa mangia" }] : []),
     ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
     { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
@@ -7216,7 +7346,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="space-y-3 min-w-0">
               <AttivitaClienti clients={[client]} singola />
-              {client.kcal_attivo !== false && <button onClick={() => setTab("analisi")} className="w-full bg-sky-50 text-sky-700 rounded-xl py-2 text-[13px] font-medium">Apri analisi alimentazione →</button>}
+              {client.kcal_attivo !== false && !client.seguita_da_nutrizionista && <button onClick={() => setTab("analisi")} className="w-full bg-sky-50 text-sky-700 rounded-xl py-2 text-[13px] font-medium">Apri analisi alimentazione →</button>}
               <button onClick={() => setTab("dati")} className="w-full bg-slate-100 text-slate-600 rounded-xl py-2 text-[13px]">Anagrafica e percorso →</button>
             </div>
             <Card className="p-4 space-y-3 min-w-0">
@@ -7329,6 +7459,16 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
+          </div>
+          <div className="col-span-2 bg-slate-50 rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-700">Seguita da nutrizionista</span>
+              <button onClick={() => salvaCliente({ seguita_da_nutrizionista: !client.seguita_da_nutrizionista })}
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.seguita_da_nutrizionista ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                <span className="w-5 h-5 bg-white rounded-full block" />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Alla cliente compaiono il programma della nutrizionista (macros indicativi e dieta, da inserire nella tab Nutrizione) e le ricette. Il log dell'alimentazione sparisce.</p>
           </div>
           <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Diario Kcal visibile alla cliente</span>
@@ -8148,7 +8288,7 @@ function AttivitaClienti({ clients, singola = false }) {
   const righe = clients.filter((c) => singola || (!c.archiviato && c.stato_pacchetto !== "scaduto" && c.tipo_servizio !== "presenza")).map((c) => {
     const v = [];
     v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log", intro: "il Log allenamento 💪🏻 Apri \"Log allenamento\", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci" });
-    if (c.kcal_attivo !== false) { const vc = voce("Cibo", d.kc[c.id], 2, 5); v.push({ ...vc, stato: vc.testo === "mai" ? "n" : vc.stato, chiave: "cibo", frase: "l'alimentazione nel diario" }); }
+    if (c.kcal_attivo !== false && !c.seguita_da_nutrizionista) { const vc = voce("Cibo", d.kc[c.id], 2, 5); v.push({ ...vc, stato: vc.testo === "mai" ? "n" : vc.stato, chiave: "cibo", frase: "l'alimentazione nel diario" }); }
     if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario", intro: "il calendario del ciclo 🌸 Apri \"Il mio ciclo\" e tocca il giorno in cui arrivano le mestruazioni: l'app ti dice in che fase sei e ti dà consigli su come allenarti e come potresti sentirti" });
     if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "", soloInfo: true });
     return { c, v, rossi: v.filter((x) => x.stato === "r" && !x.soloInfo) };

@@ -39,6 +39,26 @@ function quote(nome, leve) {
   const g = gruppoDi(n);
   return g ? { [g]: 1 } : {};
 }
+// Motivi indicati quando il carico scende (scelti da cliente o coach)
+export const MOTIVI_CALO = [
+  ["tecnica", "Tecnica migliorata", "miglioramento della tecnica"],
+  ["tut", "Più tempo sotto tensione", "tempo sotto tensione maggiore"],
+  ["fatica", "Fatica", "fatica"],
+  ["ciclo", "Ciclo", "fase del ciclo"],
+  ["stanchezza", "Stanchezza", "stanchezza"],
+  ["recupero", "Poco recupero", "recupero insufficiente"],
+  ["fastidio", "Fastidio o dolore", "fastidio/dolore"],
+  ["altro", "Altro", "altro"],
+];
+export const etichettaMotivo = (k) => (MOTIVI_CALO.find((m) => m[0] === k) || [])[2] || k;
+const UPPER = ["Petto", "Spalle", "Dorso", "Bicipiti", "Tricipiti"], LOWER = ["Quadricipiti", "Glutei", "Femorali", "Polpacci"];
+// "upper" / "lower" / null (core e simili) in base al nome dell'esercizio
+export function gruppoCarico(nome) {
+  const q = quote(nome);
+  const up = UPPER.reduce((a, g) => a + (q[g] || 0), 0), lo = LOWER.reduce((a, g) => a + (q[g] || 0), 0);
+  if (!up && !lo) return null;
+  return up >= lo ? "upper" : "lower";
+}
 // Serie effettive di un esercizio: quelle indicate nel programma; se mancano, top set = 1 e back-off = 2;
 // altrimenti quelle realmente registrate nel log (valore più frequente); se non c'è nulla, restano "non indicate" (null) e non vengono contate.
 function serieEffettive(programma, righe) {
@@ -172,7 +192,7 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
   // --- per esercizio (ultime 8 settimane): massimale di sessione e ripetizioni a quel carico
   const canon = mappaCanonica(esercizi, new Set(programma.map((e) => e.id))); // esercizi con nomi simili = un'unica progressione
   const perEs = {};
-  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[cid][r.data] || { kg: 0, reps: 0 }); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
+  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[cid][r.data] || { kg: 0, reps: 0, motivi: new Set() }); if (r.motivo_calo) String(r.motivo_calo).split(",").filter(Boolean).forEach((m) => s.motivi.add(m)); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
   const nomeDi = canon.nomi;
   const su = [], giu = [], ok = [];
   Object.entries(perEs).forEach(([id, sess]) => {
@@ -235,7 +255,19 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
     const quanteFerme = (() => { let n = 0; for (let i = date.length - 1; i >= 0 && sess[date[i]].kg === ult.kg; i--) n++; return n; })();
     const calo = date.length >= 3 && ultimi[2].kg < ultimi[0].kg && ultimi[2].kg <= ultimi[1].kg;
     let prova, tecnica = null, motivo;
-    if (calo) { prova = `${kgFmt(ult.kg)} kg × ${Math.max(rr[0], ult.reps || rr[0])}, senza forzare`; motivo = "carico in calo: priorità al recupero"; tecnica = { t: "", testo: "Valuta −1 serie o una settimana di scarico (−30/40% del volume)." }; }
+    // motivo del calo indicato nell'ultima sessione (solo se il carico è sceso rispetto alla precedente)
+    const prec = date.length >= 2 ? sess[date[date.length - 2]] : null;
+    const caloUlt = prec && ult.kg < prec.kg;
+    const motiviUlt = caloUlt && ult.motivi ? [...ult.motivi] : [];
+    const qualitativo = motiviUlt.some((m) => m === "tecnica" || m === "tut");
+    const fisiologico = motiviUlt.some((m) => ["fatica", "ciclo", "stanchezza", "recupero"].includes(m));
+    const dolore = motiviUlt.includes("fastidio");
+    const etMot = motiviUlt.map(etichettaMotivo).join(", ");
+    if (caloUlt && motiviUlt.length && (qualitativo || fisiologico || dolore)) {
+      if (qualitativo) { prova = `${kgFmt(ult.kg)} kg, consolida e cerca +1 ripetizione`; motivo = `carico ridotto per ${etMot}: non è una regressione di performance, si consolida prima di risalire`; }
+      else if (dolore) { prova = `${kgFmt(ult.kg)} kg, solo se senza dolore`; motivo = `carico ridotto per ${etMot}: valutare variante o range di movimento alternativo`; tecnica = { t: "", testo: "Indagare sede e comportamento del fastidio; se persiste, sostituire l'esercizio e non forzare la progressione." }; }
+      else { prova = `${kgFmt(ult.kg)} kg × ${Math.max(rr[0], ult.reps || rr[0])}, senza forzare`; motivo = `carico ridotto per ${etMot}: variazione contestuale, si mantiene il carico e si rivaluta alla seduta successiva`; }
+    } else if (calo) { prova = `${kgFmt(ult.kg)} kg × ${Math.max(rr[0], ult.reps || rr[0])}, senza forzare`; motivo = "carico in calo: priorità al recupero"; tecnica = { t: "", testo: "Valuta −1 serie o una settimana di scarico (−30/40% del volume)." }; }
     else if (ult.reps >= rr[1]) { prova = `${kgFmt(Math.round((ult.kg + step) * 100) / 100)} kg × ${rr[0]}–${rr[0] + 1}`; motivo = `top del range (${ult.reps} rip a ${kgFmt(ult.kg)} kg): si sale di carico`; }
     else if (ult.reps > 0) { prova = `${kgFmt(ult.kg)} kg × ${Math.min(rr[1], ult.reps + 1)}`; motivo = `doppia progressione: +1 ripetizione fino a ${rr[1]}, poi si sale di carico`; }
     else { prova = `${kgFmt(ult.kg)} kg, +1 ripetizione`; motivo = "ripetizioni non registrate"; }
@@ -245,6 +277,7 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
     } else if (!calo && isol && !e.tecnica && ult.reps >= rr[1] && (e.serieEff || 0) >= 3 && quanteFerme >= 2) {
       tecnica = { t: "drop", testo: "Progressione lenta: sull'ultima serie un drop set (−20/25% del carico, fino al cedimento tecnico)." };
     }
+    if (caloUlt && !motiviUlt.length) motivo += " · calo senza motivo indicato: chiedere alla cliente";
     prossimo.push({ id: e.id, nome, ultimo: `${kgFmt(ult.kg)} kg × ${ult.reps || "—"}`, prova, motivo, tecnica, serieEff: e.serieEff || 0, giorno: e.training_day_id });
   });
   const mantenere = ok.slice(0, 5);
@@ -265,7 +298,7 @@ export function ConsigliProgramma({ client }) {
       try {
         const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, training_day_id, ordine, tecnica, serie_top, serie_backoff").eq("client_id", client.id);
         const { data: gg } = await supabase.from("training_days").select("id, nome, scheda_archiviata").eq("client_id", client.id);
-        const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni, numero_serie").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
+        const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni, numero_serie, motivo_calo").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
         if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso, leve));
       } catch (e) { if (vivo) setR({ errore: true }); }
     })();
