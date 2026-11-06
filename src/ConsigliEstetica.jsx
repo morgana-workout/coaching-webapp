@@ -48,6 +48,7 @@ export const MOTIVI_CALO = [
   ["stanchezza", "Stanchezza", "stanchezza"],
   ["recupero", "Poco recupero", "recupero insufficiente"],
   ["fastidio", "Fastidio o dolore", "fastidio/dolore"],
+  ["scarico", "Scarico programmato", "scarico programmato"],
   ["altro", "Altro", "altro"],
 ];
 export const etichettaMotivo = (k) => (MOTIVI_CALO.find((m) => m[0] === k) || [])[2] || k;
@@ -180,7 +181,9 @@ async function leggi(q) {
   return tutto;
 }
 
-function analizza(esercizi, giorni, righe, sesso, leve) {
+const inScaricoDi = (scarichi, d) => (scarichi || []).some((x) => d >= x.dal && d <= x.al);
+
+function analizza(esercizi, giorni, righe, sesso, leve, scarichi = []) {
   let tabella = [];
   const idGiorniAttivi = new Set(giorni.filter((g) => !g.scheda_archiviata).map((g) => g.id));
   const programma = serieEffettive(esercizi.filter((e) => idGiorniAttivi.has(e.training_day_id)), righe);
@@ -192,7 +195,7 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
   // --- per esercizio (ultime 8 settimane): massimale di sessione e ripetizioni a quel carico
   const canon = mappaCanonica(esercizi, new Set(programma.map((e) => e.id))); // esercizi con nomi simili = un'unica progressione
   const perEs = {};
-  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[cid][r.data] || { kg: 0, reps: 0, motivi: new Set() }); if (r.motivo_calo) String(r.motivo_calo).split(",").filter(Boolean).forEach((m) => s.motivi.add(m)); const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
+  righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[cid][r.data] || { kg: 0, reps: 0, motivi: new Set() }); if (r.motivo_calo) String(r.motivo_calo).split(",").filter(Boolean).forEach((m) => s.motivi.add(m)); if (inScaricoDi(scarichi, r.data)) { s.motivi.add("scarico"); s.scar = true; } const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
   const nomeDi = canon.nomi;
   const su = [], giu = [], ok = [];
   Object.entries(perEs).forEach(([id, sess]) => {
@@ -253,17 +256,23 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
     const ultimi = date.slice(-3).map((d) => sess[d]);
     const ferma = date.length >= 3 && ultimi.every((x) => x.kg === ultimi[0].kg);
     const quanteFerme = (() => { let n = 0; for (let i = date.length - 1; i >= 0 && sess[date[i]].kg === ult.kg; i--) n++; return n; })();
-    const calo = date.length >= 3 && ultimi[2].kg < ultimi[0].kg && ultimi[2].kg <= ultimi[1].kg;
+    const calo = date.length >= 3 && ultimi[2].kg < ultimi[0].kg && ultimi[2].kg <= ultimi[1].kg && !ultimi.some((u) => u.scar);
     let prova, tecnica = null, motivo;
     // motivo del calo indicato nell'ultima sessione (solo se il carico è sceso rispetto alla precedente)
     const prec = date.length >= 2 ? sess[date[date.length - 2]] : null;
     const caloUlt = prec && ult.kg < prec.kg;
     const motiviUlt = caloUlt && ult.motivi ? [...ult.motivi] : [];
+    const inScarico = !!ult.scar;
+    // ultimo carico registrato fuori dallo scarico: è da lì che si riparte
+    const preScarico = (() => { for (let i = date.length - 1; i >= 0; i--) if (!sess[date[i]].scar) return sess[date[i]]; return null; })();
     const qualitativo = motiviUlt.some((m) => m === "tecnica" || m === "tut");
     const fisiologico = motiviUlt.some((m) => ["fatica", "ciclo", "stanchezza", "recupero"].includes(m));
     const dolore = motiviUlt.includes("fastidio");
     const etMot = motiviUlt.map(etichettaMotivo).join(", ");
-    if (caloUlt && motiviUlt.length && (qualitativo || fisiologico || dolore)) {
+    if (inScarico) {
+      prova = preScarico ? `scarico in corso; alla ripresa torna a ${kgFmt(preScarico.kg)} kg × ${Math.max(rr[0], preScarico.reps || rr[0])}` : `scarico in corso, nessun carico di riferimento precedente`;
+      motivo = "scarico programmato: riduzione intenzionale del carico/volume, non è una regressione; alla ripresa si riparte dai carichi pre-scarico";
+    } else if (caloUlt && motiviUlt.length && (qualitativo || fisiologico || dolore)) {
       if (qualitativo) { prova = `${kgFmt(ult.kg)} kg, consolida e cerca +1 ripetizione`; motivo = `carico ridotto per ${etMot}: non è una regressione di performance, si consolida prima di risalire`; }
       else if (dolore) { prova = `${kgFmt(ult.kg)} kg, solo se senza dolore`; motivo = `carico ridotto per ${etMot}: valutare variante o range di movimento alternativo`; tecnica = { t: "", testo: "Indagare sede e comportamento del fastidio; se persiste, sostituire l'esercizio e non forzare la progressione." }; }
       else { prova = `${kgFmt(ult.kg)} kg × ${Math.max(rr[0], ult.reps || rr[0])}, senza forzare`; motivo = `carico ridotto per ${etMot}: variazione contestuale, si mantiene il carico e si rivaluta alla seduta successiva`; }
@@ -277,7 +286,7 @@ function analizza(esercizi, giorni, righe, sesso, leve) {
     } else if (!calo && isol && !e.tecnica && ult.reps >= rr[1] && (e.serieEff || 0) >= 3 && quanteFerme >= 2) {
       tecnica = { t: "drop", testo: "Progressione lenta: sull'ultima serie un drop set (−20/25% del carico, fino al cedimento tecnico)." };
     }
-    if (caloUlt && !motiviUlt.length) motivo += " · calo senza motivo indicato: chiedere alla cliente";
+    if (caloUlt && !motiviUlt.length && !inScarico) motivo += " · calo senza motivo indicato: chiedere alla cliente";
     prossimo.push({ id: e.id, nome, ultimo: `${kgFmt(ult.kg)} kg × ${ult.reps || "—"}`, prova, motivo, tecnica, serieEff: e.serieEff || 0, giorno: e.training_day_id });
   });
   const mantenere = ok.slice(0, 5);
@@ -299,7 +308,9 @@ export function ConsigliProgramma({ client }) {
         const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, training_day_id, ordine, tecnica, serie_top, serie_backoff").eq("client_id", client.id);
         const { data: gg } = await supabase.from("training_days").select("id, nome, scheda_archiviata").eq("client_id", client.id);
         const righe = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg, ripetizioni, numero_serie, motivo_calo").eq("client_id", client.id).gte("data", giorniFa(56)).order("id"));
-        if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso, leve));
+        let scar = [];
+        try { const { data: sc } = await supabase.from("scarichi").select("dal, al").eq("client_id", client.id); scar = sc || []; } catch (e) { /* tabella non raggiungibile: si prosegue senza */ }
+        if (vivo) setR(analizza(es || [], gg || [], righe, client.sesso, leve, scar));
       } catch (e) { if (vivo) setR({ errore: true }); }
     })();
     return () => { vivo = false; };

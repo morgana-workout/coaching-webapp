@@ -15,7 +15,7 @@ import {
   Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy, User as UserIcon, Search,
 } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
+  LineChart, Line, ReferenceArea, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
 } from "recharts";
 
 /* ------------------------------------------------------------------ */
@@ -1622,6 +1622,7 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
 
 function TrendCarichi({ trend, isAdmin }) {
   const { punti, motiviTot, caliTot, senzaTot } = trend;
+  const haScarico = (trend.bande || []).length > 0;
   const ultimo = (k) => { for (let i = punti.length - 1; i >= 0; i--) if (punti[i][k] != null) return punti[i][k]; return null; };
   const pct = (v) => (v == null ? null : Math.round((v - 100) * 10) / 10);
   const fmtP = (v) => (v == null ? "—" : `${v > 0 ? "+" : ""}${String(v).replace(".", ",")}%`);
@@ -1664,6 +1665,7 @@ function TrendCarichi({ trend, isAdmin }) {
             <XAxis dataKey="sett" tick={{ fontSize: 11, fill: "#64748b" }} />
             <YAxis tick={{ fontSize: 11, fill: "#64748b" }} domain={["auto", "auto"]} />
             <Tooltip content={<Tip />} />
+            {(trend.bande || []).map((b, i) => <ReferenceArea key={i} x1={b.x1} x2={b.x2} fill="#C9E0F7" fillOpacity={0.55} stroke="none" ifOverflow="visible" />)}
             <Line type="monotone" dataKey="upper" name="Upper" stroke="#27466D" strokeWidth={2.5} dot={Punto("#27466D")} activeDot={{ r: 6 }} connectNulls />
             <Line type="monotone" dataKey="lower" name="Lower" stroke="#4F8FD0" strokeWidth={2.5} dot={Punto("#4F8FD0")} activeDot={{ r: 6 }} connectNulls />
           </LineChart>
@@ -1672,6 +1674,7 @@ function TrendCarichi({ trend, isAdmin }) {
           <span className="flex items-center gap-1.5" style={{ color: "#27466D" }}><i className="w-3 h-1 rounded-full inline-block" style={{ background: "#27466D" }} /> Upper {fmtP(pu)}</span>
           <span className="flex items-center gap-1.5" style={{ color: "#4F8FD0" }}><i className="w-3 h-1 rounded-full inline-block" style={{ background: "#4F8FD0" }} /> Lower {fmtP(pl)}</span>
         </div>
+        {haScarico && <p className="text-xs text-center mt-1" style={{ color: "#3F78B3" }}>La fascia azzurra indica una settimana di scarico programmato: il calo è voluto, non una regressione ✨</p>}
         {caliTot > 0 && (
           <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-0.5">
             <p>{isAdmin ? `Riduzioni di carico: ${caliTot} (${conMotivo} con motivo dichiarato${senzaTot ? `, ${senzaTot} senza` : ""}).` : `Qualche carico è sceso (${caliTot} volte): capita, fa parte del percorso 🫶🏻`}</p>
@@ -1686,9 +1689,52 @@ function TrendCarichi({ trend, isAdmin }) {
   );
 }
 
+function ScarichiCoach({ clientId, scarichi, onChange }) {
+  const [aperto, setAperto] = useState(false);
+  const [dal, setDal] = useState("");
+  const [al, setAl] = useState("");
+  const [nota, setNota] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fmtD = (d) => d.split("-").reverse().join("/");
+  const aggiungi = async () => {
+    if (!dal || !al || al < dal) return;
+    setBusy(true);
+    await supabase.from("scarichi").insert({ client_id: clientId, dal, al, nota: nota.trim() || null });
+    setDal(""); setAl(""); setNota(""); setBusy(false); onChange();
+  };
+  const togli = async (id) => { await supabase.from("scarichi").delete().eq("id", id); onChange(); };
+  return (
+    <Card className="p-3">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Scarico programmato{scarichi.length ? ` · ${scarichi.length}` : ""}</span>
+        <span className="text-xs" style={{ color: "#3F78B3" }}>{aperto ? "chiudi" : "segna periodo"}</span>
+      </button>
+      {aperto && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-slate-500">In questi giorni i carichi più bassi vengono letti come scarico voluto: niente allarmi, nessun "motivo mancante", e alla ripresa il sistema riparte dai carichi di prima.</p>
+          {scarichi.map((x) => (
+            <div key={x.id} className="flex items-center justify-between text-sm text-slate-700 rounded-xl px-3 py-2" style={{ background: "#E1EEFB" }}>
+              <span>{fmtD(x.dal)} → {fmtD(x.al)}{x.nota ? ` · ${x.nota}` : ""}</span>
+              <button onClick={() => togli(x.id)} className="text-xs text-slate-500 underline">togli</button>
+            </div>
+          ))}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-slate-500">Dal<input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
+            <label className="text-xs text-slate-500">Al<input type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
+          </div>
+          <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nota (facoltativa), es. deload −30% volume" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
+          <button onClick={aggiungi} disabled={busy || !dal || !al || al < dal} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Aggiungi scarico</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function ProgressiCarichi({ clientId, isAdmin = false }) {
   const [esercizi, setEsercizi] = useState(null);
   const [trend, setTrend] = useState(null);
+  const [scarichi, setScarichi] = useState([]);
+  const [ricarica, setRicarica] = useState(0);
   const [aperto, setAperto] = useState(null);
   const [traguardi, setTraguardi] = useState({ streak: 0 });
 
@@ -1697,6 +1743,10 @@ function ProgressiCarichi({ clientId, isAdmin = false }) {
     (async () => {
       try {
         const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, motivo_calo, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        let scar = [];
+        try { const { data: sc } = await supabase.from("scarichi").select("id, dal, al, nota").eq("client_id", clientId).order("dal"); scar = sc || []; } catch (e) { /* ignora */ }
+        if (vivo) setScarichi(scar);
+        const inScar = (d) => scar.some((x) => d >= x.dal && d <= x.al);
         const mappa = {};
         righe.forEach((r) => {
           const kg = Number(r.kg);
@@ -1704,6 +1754,7 @@ function ProgressiCarichi({ clientId, isAdmin = false }) {
           if (!nome || !r.data || !(kg > 0)) return;
           const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {} });
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
+          if (inScar(r.data)) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); m.add("scarico"); }
           if (r.motivo_calo) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); String(r.motivo_calo).split(",").filter(Boolean).forEach((x) => m.add(x)); }
         });
         // Trend dei carichi upper / lower: variazione settimanale mediana dei carichi, concatenata a partire da 100
@@ -1733,7 +1784,8 @@ function ProgressiCarichi({ clientId, isAdmin = false }) {
         });
         const motiviTot = {}; let caliTot = 0, senzaTot = 0;
         ["upper", "lower"].forEach((gr) => Object.values(perSett[gr]).forEach((o) => { caliTot += o.cali; senzaTot += o.senza; Object.entries(o.motivi).forEach(([k, n]) => { motiviTot[k] = (motiviTot[k] || 0) + n; }); }));
-        if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot } : null);
+        const bande = scar.map((x) => { const ws = punti.filter((q) => q.w >= lun(x.dal) && q.w <= lun(x.al)); return ws.length ? { x1: ws[0].sett, x2: ws[ws.length - 1].sett } : null; }).filter(Boolean);
+        if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot, bande } : null);
         const lista = Object.values(mappa).map((g) => {
           const date = Object.keys(g.date).sort();
           const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
@@ -1757,16 +1809,17 @@ function ProgressiCarichi({ clientId, isAdmin = false }) {
       } catch (e) { if (vivo) setEsercizi([]); }
     })();
     return () => { vivo = false; };
-  }, [clientId]);
+  }, [clientId, ricarica]);
 
   if (!esercizi || esercizi.length === 0) return null;
   const inAumento = esercizi.filter((e) => e.diff > 0).length;
   const fmt = (n) => String(n).replace(".", ",");
   const oggiStr = formatDataLocale(new Date());
-  const inCalo = esercizi.filter((e) => e.diffScorsa != null && e.diffScorsa < 0 && e.ultimaData >= addGiorni(oggiStr, -21));
+  const inCalo = esercizi.filter((e) => e.diffScorsa != null && e.diffScorsa < 0 && e.ultimaData >= addGiorni(oggiStr, -21) && !e.motUlt.includes("scarico"));
 
   return (
     <div className="space-y-2">
+      {isAdmin && <ScarichiCoach clientId={clientId} scarichi={scarichi} onChange={() => setRicarica((n) => n + 1)} />}
       {trend && <TrendCarichi trend={trend} isAdmin={isAdmin} />}
       {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
         <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
@@ -3580,7 +3633,7 @@ function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichett
   );
 }
 
-function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true }) {
+function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true, inScarico = false }) {
   const nSerie = Math.max(1, Math.min(serieDi(es), 10));
   const [bozza, setBozza] = useState({}); // { "n-kg": testo }
   const [nota, setNota] = useState("");
@@ -3722,12 +3775,12 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
               );
             })}
           </div>
-          {(calo || motiviSalvati.length > 0) && (
+          {!inScarico && (calo || motiviSalvati.length > 0) && (
             <div className="mt-3 rounded-2xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
               <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Carico più basso dell'ultima volta: com'è andata?</p>
               <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Capita, è normale! Scegli cosa c'entra di più: aiuta a leggere bene i progressi ✨</p>
               <div className="flex flex-wrap gap-2 mt-2.5">
-                {MOTIVI_CALO.filter((m) => mostraCiclo || m[0] !== "ciclo").map(([k, l]) => {
+                {MOTIVI_CALO.filter((m) => m[0] !== "scarico" && (mostraCiclo || m[0] !== "ciclo")).map(([k, l]) => {
                   const on = motiviSalvati.includes(k);
                   return <button key={k} onClick={() => scegliMotivo(k)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
                 })}
@@ -3746,6 +3799,40 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   );
 }
 
+function NotaFinaleAllenamento({ clientId, data }) {
+  const [nota, setNota] = useState("");
+  const [salvata, setSalvata] = useState("");
+  const [stato, setStato] = useState("");
+  useEffect(() => {
+    let vivo = true;
+    setNota(""); setSalvata(""); setStato("");
+    (async () => {
+      try {
+        const { data: r } = await supabase.from("note_allenamento").select("nota").eq("client_id", clientId).eq("data", data).maybeSingle();
+        if (vivo) { setNota(r?.nota || ""); setSalvata(r?.nota || ""); }
+      } catch (e) { /* ignora */ }
+    })();
+    return () => { vivo = false; };
+  }, [clientId, data]);
+  const salva = async () => {
+    if (nota === salvata) return;
+    setStato("Salvo…");
+    const { error } = nota.trim()
+      ? await supabase.from("note_allenamento").upsert({ client_id: clientId, data, nota: nota.trim(), updated_at: new Date().toISOString() })
+      : await supabase.from("note_allenamento").delete().eq("client_id", clientId).eq("data", data);
+    if (error) { setStato("Non sono riuscita a salvare, riprova 🫶🏻"); return; }
+    setSalvata(nota); setStato("Nota salvata ✓");
+  };
+  return (
+    <div className="rounded-2xl p-3" style={{ background: "#fff", border: "1px solid #C9E0F7" }}>
+      <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Nota finale dell'allenamento</p>
+      <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Com'è andata in generale? Energia, sensazioni, cosa ricordare per la prossima volta.</p>
+      <textarea value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salva} rows={3} placeholder="Scrivi qui la tua nota finale ✨" className="w-full mt-2 text-sm rounded-xl px-3 py-2 border" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
+      {stato && <p className="text-xs mt-1" style={{ color: "#3F78B3" }}>{stato}</p>}
+    </div>
+  );
+}
+
 function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" }) {
   const [giorni, setGiorni] = useState([]);
   const [giornoId, setGiornoId] = useState(null);
@@ -3755,6 +3842,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
   const [storicoEntries, setStoricoEntries] = useState([]);
   const [libreria, setLibreria] = useState([]);
   const [sessoCl, setSessoCl] = useState("");
+  const [scarCl, setScarCl] = useState([]);
   const [aperti, setAperti] = useState({});
   const [prep, setPrep] = useState([]);
   const [infoEs, setInfoEs] = useState(null);
@@ -3772,6 +3860,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
       try {
         const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi, sesso").eq("id", clientId).maybeSingle();
         if (c) setSessoCl(c.sesso || "");
+        try { const { data: sc } = await supabase.from("scarichi").select("dal, al").eq("client_id", clientId); setScarCl(sc || []); } catch (e) { /* ignora */ }
         if (c && c.video_attivi !== false && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")) {
           await caricaSceltaVideo();
           const { data: v } = await supabase.from("esercizi_video").select("*").order("ordine");
@@ -3924,7 +4013,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
             <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? correnteKey === es.id}
               onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? correnteKey === es.id) }))}
               entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
-              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} />
+              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} inScarico={scarCl.some((x) => data >= x.dal && data <= x.al)} />
           ))}
           {tuttiFatti ? (
             <div id="fine-allenamento" className="rounded-3xl p-5 text-center" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7" }}>
@@ -3932,6 +4021,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
               <p className="text-sm mt-1" style={{ color: "#3F78B3" }}>Ora dedica 5 minuti allo stretching 🧘🏻‍♀️ aiuta il recupero e scioglie la tensione. Brava, grande lavoro 💪🏻</p>
             </div>
           ) : esercizi.length > 0 && <p className="text-center text-xs pt-1" style={{ color: "#7a8da3" }}>Ogni serie conta: brava, stai andando alla grande 💪🏻</p>}
+          {esercizi.length > 0 && <NotaFinaleAllenamento clientId={clientId} data={data} />}
         </>
       )}
       {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
@@ -7883,14 +7973,32 @@ async function avvisaLezioneCliente(ev, tipoAvviso) {
   } catch (e) { /* non blocca mai il salvataggio */ }
 }
 
+async function prenotaLezioneGruppo(gruppoId, { data, ora, luogo, nota }) {
+  const { data: membri } = await supabase.from("clients").select("id").eq("gruppo_id", gruppoId);
+  for (const m of membri || []) {
+    const { data: creato } = await supabase.from("calendar_events").insert({ client_id: m.id, tipo: "lezione", data, ora: ora || null, nota: nota || null, luogo: luogo || null, stato: "confermato", gruppo_id: gruppoId }).select().single();
+    if (creato) { try { await collegaLezionePacchetto(m.id, creato); await avvisaLezioneCliente(creato, "nuova"); } catch (e) { /* una cliente senza pacchetto/app non blocca le altre */ } }
+  }
+  return (membri || []).length;
+}
+
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
   const [f, setF] = useState({
     client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10),
     ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "", titolo: "",
   });
   const [salvando, setSalvando] = useState(false);
+  const [gruppiForm, setGruppiForm] = useState([]);
+  const [gruppoSel, setGruppoSel] = useState("");
+  useEffect(() => { (async () => { try { const { data } = await supabase.from("gruppi_bulb").select("id, nome").order("created_at"); setGruppiForm(data || []); if (data?.length) setGruppoSel((g) => g || data[0].id); } catch (e) { /* ignora */ } })(); }, []);
 
   const salva = async () => {
+    if (f.tipo === "gruppo") {
+      if (!gruppoSel) return;
+      setSalvando(true);
+      await prenotaLezioneGruppo(gruppoSel, { data: f.data, ora: f.ora, luogo: f.luogo, nota: f.nota });
+      setSalvando(false); onSalvato(); return;
+    }
     if (f.tipo === "personale" ? !f.titolo.trim() : !f.client_id) return;
     setSalvando(true);
     const payload = f.tipo === "personale"
@@ -7907,6 +8015,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       <p className="text-sm font-medium text-slate-700">Nuovo evento</p>
       <div className="flex gap-2">
         <button onClick={() => setF({ ...f, tipo: "lezione" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "lezione" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Lezione 1:1</button>
+        {gruppiForm.length > 0 && <button onClick={() => setF({ ...f, tipo: "gruppo" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "gruppo" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Gruppo</button>}
         <button onClick={() => setF({ ...f, tipo: "call" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "call" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600"}`}>Call</button>
         <button onClick={() => setF({ ...f, tipo: "personale" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "personale" ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"}`}>Personale/extra</button>
       </div>
@@ -7921,6 +8030,13 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
             ))}
           </div>
         </div>
+      ) : f.tipo === "gruppo" ? (
+        <div>
+          <label className="text-xs text-slate-500">Gruppo (la lezione viene prenotata per tutte le clienti del gruppo)</label>
+          <select value={gruppoSel} onChange={(e) => setGruppoSel(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            {gruppiForm.map((g) => <option key={g.id} value={g.id}>{g.nome}</option>)}
+          </select>
+        </div>
       ) : (
         <div>
           <label className="text-xs text-slate-500">Cliente</label>
@@ -7933,7 +8049,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
         <OraCoach value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
-      {f.tipo === "lezione" && (
+      {(f.tipo === "lezione" || f.tipo === "gruppo") && (
         <div>
           <label className="text-xs text-slate-500">Sede</label>
           <SelezionaLuogo value={f.luogo} onChange={(v) => setF({ ...f, luogo: v })} />
@@ -7955,16 +8071,17 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
   });
   const [salvando, setSalvando] = useState(false);
   const isPersonale = evento.tipo === "personale";
+  const tutti = evento.tutti && evento.tutti.length ? evento.tutti : [evento]; // lezione di gruppo: modifica per tutte
 
   const salva = async () => {
     setSalvando(true);
     const payload = isPersonale
       ? { data: f.data, ora: f.ora || null, titolo: f.titolo.trim() || evento.titolo, nota: f.nota || null }
       : { data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato };
-    await supabase.from("calendar_events").update(payload).eq("id", evento.id);
-    if (!isPersonale) await sincronizzaLezionePacchetto(evento.id);
+    await supabase.from("calendar_events").update(payload).in("id", tutti.map((x) => x.id));
+    if (!isPersonale) for (const x of tutti) await sincronizzaLezionePacchetto(x.id);
     if (evento.tipo === "lezione" && f.stato === "confermato" && (f.data !== evento.data || (f.ora || "") !== (evento.ora ? evento.ora.slice(0, 5) : "") || (f.luogo || "") !== (evento.luogo || ""))) {
-      await avvisaLezioneCliente({ ...evento, data: f.data, ora: f.ora || null, luogo: f.luogo || null }, "mod");
+      for (const x of tutti) await avvisaLezioneCliente({ ...x, data: f.data, ora: f.ora || null, luogo: f.luogo || null }, "mod");
     }
     setSalvando(false);
     onSalvato();
@@ -7972,8 +8089,8 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
   const elimina = async () => {
     if (!confirm("Eliminare definitivamente questo evento?")) return;
     setSalvando(true);
-    await scollegaLezionePacchetto(evento.id);
-    await supabase.from("calendar_events").delete().eq("id", evento.id);
+    for (const x of tutti) await scollegaLezionePacchetto(x.id);
+    await supabase.from("calendar_events").delete().in("id", tutti.map((x) => x.id));
     setSalvando(false);
     onSalvato();
   };
@@ -7981,7 +8098,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">
-        Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : evento.tipo === "call" ? "Call" : "Personale/extra"})
+        Modifica evento ({evento.tipo === "lezione" ? (evento.tutti && evento.tutti.length > 1 ? `Lezione di gruppo · ${evento.tutti.length} clienti` : "Lezione 1:1") : evento.tipo === "call" ? "Call" : "Personale/extra"})
       </p>
       {isPersonale && (
         <input value={f.titolo} onChange={(e) => setF({ ...f, titolo: e.target.value })} placeholder="Titolo attività"
@@ -8022,10 +8139,13 @@ function CalendarioAgenda({ clients, onSelect }) {
   const [promemoriaRighe, setPromemoriaRighe] = useState([]);
   const [mostraForm, setMostraForm] = useState(false);
   const [eventoInModifica, setEventoInModifica] = useState(null);
+  const [gruppiCal, setGruppiCal] = useState({});
+  const [gruppoAperto, setGruppoAperto] = useState(null);
 
   const caricaEventi = async () => {
     const { data } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").order("data");
     setEventiCalendario(data || []);
+    try { const { data: gg } = await supabase.from("gruppi_bulb").select("*"); setGruppiCal(Object.fromEntries((gg || []).map((g) => [g.id, g]))); } catch (e) { /* ignora */ }
     const { data: pr } = await supabase.from("promemoria_messaggi").select("client_id, settimana, inviato");
     setPromemoriaRighe(pr || []);
   };
@@ -8058,12 +8178,25 @@ function CalendarioAgenda({ clients, onSelect }) {
       });
     }
   });
+  const gruppiViste = {};
   eventiCalendario.forEach((e) => {
     if (e.tipo === "personale") {
       const pezzi = [];
       if (e.stato === "annullata") pezzi.push("annullata");
       if (e.nota) pezzi.push(e.nota);
       eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: "personale", nome: e.titolo || "Attività personale", label: pezzi.join(" — "), clientId: null });
+      return;
+    }
+    if (e.gruppo_id && e.tipo === "lezione") {
+      const chiave = `${e.gruppo_id}|${e.data}|${e.ora}|${e.stato}`;
+      const gia = gruppiViste[chiave];
+      if (gia) { gia.tutti.push(e); gia.label = gia.etichetta(gia.tutti.length); return; }
+      const g = gruppiCal[e.gruppo_id];
+      const voce = { id: e.id, raw: e, tutti: [e], gruppoId: e.gruppo_id, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: "lezione", nome: g ? g.nome : "Gruppo Bulb", clientId: null,
+        etichetta: (n) => ["Lezione di gruppo", `${n} client${n === 1 ? "e" : "i"}`, e.luogo, e.stato === "annullata" ? "annullata" : null, e.stato === "persa" ? "persa" : null].filter(Boolean).join(" — ") };
+      voce.label = voce.etichetta(1);
+      gruppiViste[chiave] = voce;
+      eventi.push(voce);
       return;
     }
     const nomeCliente = e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente";
@@ -8167,10 +8300,20 @@ function CalendarioAgenda({ clients, onSelect }) {
           <EditEventoForm evento={eventoInModifica} onAnnulla={() => setEventoInModifica(null)}
             onSalvato={() => { setEventoInModifica(null); caricaEventi(); }} />
         )}
+        {gruppoAperto && <SessioneGruppo gruppo={gruppoAperto} onClose={() => setGruppoAperto(null)} onChanged={caricaEventi} onSelect={onSelect} />}
         {eventiVisibili.length === 0 && <p className="text-slate-400 text-sm px-1">Nessun evento {giornoFiltro ? "in questo giorno" : "in programma"}.</p>}
         {eventiVisibili.map((e, i) => (
           <Card key={i} className="p-3 flex items-center gap-3">
-            {e.clientId ? (
+            {e.gruppoId ? (
+              <button onClick={() => setGruppoAperto(gruppiCal[e.gruppoId] || { id: e.gruppoId, nome: e.nome })} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+                {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 ">👥 {e.nome}</p>
+                  <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                </div>
+              </button>
+            ) : e.clientId ? (
               <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
                 <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
                 {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
@@ -8190,9 +8333,10 @@ function CalendarioAgenda({ clients, onSelect }) {
               </div>
             )}
             {e.id && (
-              <button onClick={() => setEventoInModifica(e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
+              <button onClick={() => setEventoInModifica(e.tutti ? { ...e.raw, tutti: e.tutti } : e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
             )}
-            {e.clientId && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
+            {(e.clientId || e.gruppoId) && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
+            
           </Card>
         ))}
       </div>
@@ -11420,6 +11564,243 @@ function CercaClienti({ clienti, onSelect }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* GRUPPI BULB — più clienti che si allenano insieme, in una schermata */
+/* ------------------------------------------------------------------ */
+function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato }) {
+  const [nome, setNome] = useState(cl.nome || "");
+  const [cognome, setCognome] = useState(cl.cognome || "");
+  const [note, setNote] = useState(cl.note_particolari || "");
+  const [sezione, setSezione] = useState(null); // null | "progressi" | "consigli"
+  const salva = async (campi) => { await supabase.from("clients").update(campi).eq("id", cl.id); onCambiato(); };
+  const salute = (cl.problematiche_salute || []).filter(Boolean);
+  const chip = (t) => <span className="px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>{t}</span>;
+  return (
+    <div id={`membro-${cl.id}`} className="bg-white rounded-2xl border border-slate-200 overflow-hidden" style={{ scrollMarginTop: 70 }}>
+      <div className="px-3 pt-3 pb-2" style={{ background: "#F5FAFE", borderBottom: "1px solid #C9E0F7" }}>
+        <div className="flex gap-2">
+          <input value={nome} onChange={(e) => setNome(e.target.value)} onBlur={() => nome.trim() && nome !== cl.nome && salva({ nome: nome.trim() })} placeholder="Nome" className="flex-1 min-w-0 bg-transparent font-semibold text-slate-800 text-base border-b border-dashed border-slate-300 focus:outline-none focus:border-sky-500" />
+          <input value={cognome} onChange={(e) => setCognome(e.target.value)} onBlur={() => cognome !== (cl.cognome || "") && salva({ cognome: cognome.trim() })} placeholder="Cognome" className="flex-1 min-w-0 bg-transparent font-semibold text-slate-800 text-base border-b border-dashed border-slate-300 focus:outline-none focus:border-sky-500" />
+        </div>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {cl.obiettivo_attuale && chip(cl.obiettivo_attuale)}
+          {cl.livello_allenamento && chip(cl.livello_allenamento)}
+          {salute.map((x) => <span key={x}>{chip(x)}</span>)}
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (cl.note_particolari || "") && salva({ note_particolari: note.trim() || null })} rows={2} placeholder="Note particolari (infortuni, limiti, cose da ricordare in sala)…" className="w-full mt-2 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700" />
+      </div>
+      <div className="px-1 py-1"><DiarioClienteHost clientId={cl.id} isAdmin /></div>
+      <div className="px-3 pb-3 space-y-2">
+        <div className="flex gap-2">
+          <button onClick={() => setSezione(sezione === "progressi" ? null : "progressi")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "progressi" ? "#27466D" : "#fff", color: sezione === "progressi" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Progressi carichi</button>
+          <button onClick={() => setSezione(sezione === "consigli" ? null : "consigli")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "consigli" ? "#27466D" : "#fff", color: sezione === "consigli" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prossimo allenamento</button>
+        </div>
+        {sezione === "progressi" && <ProgressiCarichi clientId={cl.id} isAdmin />}
+        {sezione === "consigli" && <ConsigliProgramma client={cl} />}
+        <div className="flex justify-between text-xs pt-1">
+          <button onClick={() => onApri(cl.id)} className="underline" style={{ color: "#3F78B3" }}>Apri scheda completa</button>
+          <button onClick={onToglila} className="text-slate-400 underline">Togli dal gruppo</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
+  const [membri, setMembri] = useState(null);
+  const [candidate, setCandidate] = useState([]);
+  const [nomeG, setNomeG] = useState(gruppo.nome);
+  const [giorno, setGiorno] = useState(gruppo.giorno || "");
+  const [ora, setOra] = useState(gruppo.ora || "");
+  const [menu, setMenu] = useState(false);
+  const [copia, setCopia] = useState({ da: "", a: [] });
+  const [msg, setMsg] = useState("");
+  const [notaG, setNotaG] = useState(gruppo.nota || "");
+  const [prenota, setPrenota] = useState(false);
+  const [lez, setLez] = useState({ data: formatDataLocale(new Date()), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
+  const [prossime, setProssime] = useState([]);
+  const caricaProssime = async () => {
+    const { data } = await supabase.from("calendar_events").select("data, ora, luogo, stato").eq("gruppo_id", gruppo.id).eq("tipo", "lezione").in("stato", ["confermato", "richiesta"]).gte("data", formatDataLocale(new Date())).order("data").order("ora");
+    const viste = new Set(); const lista = [];
+    (data || []).forEach((x) => { const k = `${x.data}|${x.ora}`; if (!viste.has(k)) { viste.add(k); lista.push(x); } });
+    setProssime(lista);
+  };
+  useEffect(() => { caricaProssime(); }, [gruppo.id]);
+  const prenotaOra = async () => {
+    setMsg("Prenoto…");
+    const n = await prenotaLezioneGruppo(gruppo.id, lez);
+    setMsg(n ? `Lezione prenotata per ${n} clienti ✨` : "Il gruppo non ha clienti: aggiungile prima 🫶🏻");
+    setPrenota(false); caricaProssime(); onChanged();
+    setTimeout(() => setMsg(""), 4000);
+  };
+  const carica = async () => {
+    const { data } = await supabase.from("clients").select("*").eq("gruppo_id", gruppo.id).order("codice");
+    setMembri(data || []);
+    const { data: altre } = await supabase.from("clients").select("id, nome, cognome").is("gruppo_id", null).in("tipo_servizio", ["presenza", "ibrido"]).eq("archiviato", false).order("nome");
+    setCandidate(altre || []);
+  };
+  useEffect(() => { carica(); }, [gruppo.id]);
+  const salvaG = async (campi) => { await supabase.from("gruppi_bulb").update(campi).eq("id", gruppo.id); onChanged(); };
+  const aggiungi = async (id) => { await supabase.from("clients").update({ gruppo_id: gruppo.id }).eq("id", id); await carica(); };
+  const nuovoProfilo = async () => {
+    const n = (membri || []).length + 1;
+    const codice = `GR-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+    await supabase.from("clients").insert({ codice, nome: `Cliente ${n}`, cognome: "", tipo_servizio: "presenza", sede_abituale: "Via San Secondo 39, Torino", gruppo_id: gruppo.id });
+    await carica();
+  };
+  const togli = async (id) => { if (!confirm("Tolgo questa cliente dal gruppo? Il suo profilo e i suoi allenamenti restano.")) return; await supabase.from("clients").update({ gruppo_id: null }).eq("id", id); await carica(); };
+  const nomeCompleto = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Senza nome";
+
+  const eseguiCopia = async () => {
+    if (!copia.da || !copia.a.length) return;
+    const dest = copia.a.filter((x) => x !== copia.da);
+    const nomiDest = dest.map((id) => nomeCompleto(membri.find((m) => m.id === id))).join(", ");
+    if (!confirm(`Copio il programma di ${nomeCompleto(membri.find((m) => m.id === copia.da))} a: ${nomiDest}? Viene AGGIUNTO ai programmi che hanno già (niente viene cancellato). Poi potrai ritoccare ogni cliente con le sue variazioni.`)) return;
+    setMsg("Copio…");
+    try {
+      const { data: giorni } = await supabase.from("training_days").select("*").eq("client_id", copia.da).order("ordine");
+      const attivi = (giorni || []).filter((g) => !g.scheda_archiviata);
+      const { data: esAll } = await supabase.from("training_exercises").select("*").eq("client_id", copia.da).order("ordine");
+      for (const dst of dest) {
+        const { data: esistenti } = await supabase.from("training_days").select("ordine").eq("client_id", dst);
+        let base = Math.max(-1, ...(esistenti || []).map((x) => x.ordine ?? 0)) + 1;
+        for (const g of attivi) {
+          const { data: nuovo, error } = await supabase.from("training_days").insert({ client_id: dst, nome: g.nome, ordine: base++ }).select().single();
+          if (error || !nuovo) throw error || new Error("giorno");
+          const righe = (esAll || []).filter((e) => e.training_day_id === g.id).map((e) => ({
+            client_id: dst, training_day_id: nuovo.id, nome: e.nome, ordine: e.ordine, serie: e.serie, ripetizioni: e.ripetizioni, note: e.note,
+            tipo: e.tipo, esecuzione: e.esecuzione, recupero_sec: e.recupero_sec, tecnica: e.tecnica, serie_top: e.serie_top, serie_backoff: e.serie_backoff,
+          }));
+          if (righe.length) { const { error: e2 } = await supabase.from("training_exercises").insert(righe); if (e2) throw e2; }
+        }
+      }
+      setMsg("Fatto! Programma copiato ✨ (ricarico le schede)");
+      setCopia({ da: "", a: [] });
+      setMenu(false);
+      setMembri(null); await carica();
+      setTimeout(() => setMsg(""), 4000);
+    } catch (e) { setMsg("Non sono riuscita a copiare tutto: controlla le schede prima di riprovare."); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: "#F1F6FB" }}>
+      <div className="sticky top-0 z-10 px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: "#27466D" }}>
+        <button onClick={() => { onChanged(); onClose(); }} className="text-white text-sm font-semibold flex items-center gap-1"><ArrowLeft size={16} /> Gruppi</button>
+        <input value={nomeG} onChange={(e) => setNomeG(e.target.value)} onBlur={() => nomeG.trim() && nomeG !== gruppo.nome && salvaG({ nome: nomeG.trim() })} className="bg-transparent text-white font-semibold text-sm border-b border-dashed border-white/40 focus:outline-none min-w-0 w-36" />
+        <input value={giorno} onChange={(e) => setGiorno(e.target.value)} onBlur={() => salvaG({ giorno: giorno.trim() || null })} placeholder="giorno" className="bg-transparent text-sky-100 text-xs border-b border-dashed border-white/30 focus:outline-none w-20 placeholder:text-sky-200/60" />
+        <input value={ora} onChange={(e) => setOra(e.target.value)} onBlur={() => salvaG({ ora: ora.trim() || null })} placeholder="ora" className="bg-transparent text-sky-100 text-xs border-b border-dashed border-white/30 focus:outline-none w-14 placeholder:text-sky-200/60" />
+        <div className="flex gap-1.5 ml-auto overflow-x-auto">
+          {(membri || []).map((m) => <a key={m.id} href={`#membro-${m.id}`} onClick={(e) => { e.preventDefault(); document.getElementById(`membro-${m.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: "#C9E0F7", color: "#27466D" }}>{m.nome || "?"}</a>)}
+        </div>
+      </div>
+      <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
+        {!membri ? <Spinner /> : (
+          <>
+            <div className="flex flex-wrap gap-2 items-center">
+              <button onClick={() => setMenu(!menu)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Copia programma tra le clienti</button>
+              <button onClick={nuovoProfilo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo profilo vuoto</button>
+              {candidate.length > 0 && (
+                <select value="" onChange={(e) => e.target.value && aggiungi(e.target.value)} className="px-3 py-2 rounded-xl text-xs border border-slate-200 bg-white text-slate-700">
+                  <option value="">+ Aggiungi cliente esistente…</option>
+                  {candidate.map((c) => <option key={c.id} value={c.id}>{`${c.nome} ${c.cognome || ""}`.trim()}</option>)}
+                </select>
+              )}
+              <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
+              {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
+            </div>
+            {prenota && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs text-slate-600">Crea la lezione per tutte le clienti del gruppo in un colpo solo: compare nel calendario come un unico evento e scala la lezione dal pacchetto di ognuna.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <InputData value={lez.data} onChange={(e) => setLez({ ...lez, data: e.target.value })} />
+                  <OraCoach value={lez.ora} onChange={(e) => setLez({ ...lez, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <SelezionaLuogo value={lez.luogo} onChange={(v) => setLez({ ...lez, luogo: v })} />
+                <input value={lez.nota} onChange={(e) => setLez({ ...lez, nota: e.target.value })} placeholder="Nota (facoltativa)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                <button onClick={prenotaOra} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Prenota per {membri.length} clienti</button>
+              </div>
+            )}
+            <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+              <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Informazioni comuni del gruppo</p>
+              <textarea value={notaG} onChange={(e) => setNotaG(e.target.value)} onBlur={() => notaG !== (gruppo.nota || "") && salvaG({ nota: notaG.trim() || null })} rows={2} placeholder="Cose valide per tutte: obiettivo del gruppo, attrezzi da preparare, focus della sessione…" className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2" />
+              <p className="text-xs text-slate-500">{prossime.length ? "Prossime lezioni: " + prossime.map((x) => `${x.data.split("-").reverse().join("/")} ${x.ora ? x.ora.slice(0, 5) : ""}`).join(" · ") : "Nessuna lezione di gruppo in programma."}</p>
+            </div>
+            {menu && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs text-slate-600">Copia i giorni di allenamento (con esercizi, serie, ripetizioni e note) da una cliente alle altre. Poi ritocchi le variazioni di ognuna dal suo programma.</p>
+                <label className="block text-xs text-slate-500">Da
+                  <select value={copia.da} onChange={(e) => setCopia({ ...copia, da: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5">
+                    <option value="">Scegli…</option>
+                    {membri.map((m) => <option key={m.id} value={m.id}>{nomeCompleto(m)}</option>)}
+                  </select>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {membri.filter((m) => m.id !== copia.da).map((m) => {
+                    const on = copia.a.includes(m.id);
+                    return <button key={m.id} onClick={() => setCopia({ ...copia, a: on ? copia.a.filter((x) => x !== m.id) : [...copia.a, m.id] })} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{nomeCompleto(m)}</button>;
+                  })}
+                </div>
+                <button onClick={eseguiCopia} disabled={!copia.da || !copia.a.length} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Copia a {copia.a.length || "…"} clienti</button>
+              </div>
+            )}
+            {membri.length === 0 && <p className="text-sm text-slate-500 text-center py-8">Nessuna cliente nel gruppo: aggiungi un profilo vuoto o una cliente già esistente 🫶🏻</p>}
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-start">
+              {membri.map((m) => <CardMembroGruppo key={m.id} cl={m} gruppoNome={gruppo.nome} onToglila={() => togli(m.id)} onApri={(id) => { onChanged(); onClose(); onSelect(id); }} onCambiato={() => {}} />)}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GruppiBulb({ onSelect }) {
+  const [gruppi, setGruppi] = useState(null);
+  const [conta, setConta] = useState({});
+  const [aperto, setAperto] = useState(null);
+  const carica = async () => {
+    const { data } = await supabase.from("gruppi_bulb").select("*").order("created_at");
+    setGruppi(data || []);
+    const { data: cl } = await supabase.from("clients").select("id, nome, gruppo_id").not("gruppo_id", "is", null).order("codice");
+    const m = {};
+    (cl || []).forEach((c) => { (m[c.gruppo_id] = m[c.gruppo_id] || []).push(c.nome); });
+    setConta(m);
+  };
+  useEffect(() => { carica(); }, []);
+  const nuovo = async () => {
+    const n = (gruppi || []).length + 1;
+    const { data } = await supabase.from("gruppi_bulb").insert({ nome: `Gruppo Bulb ${n}` }).select().single();
+    await carica();
+    if (data) setAperto(data);
+  };
+  const elimina = async (g) => {
+    if (!confirm(`Elimino il gruppo "${g.nome}"? Le clienti e i loro allenamenti restano, escono solo dal gruppo.`)) return;
+    await supabase.from("gruppi_bulb").delete().eq("id", g.id);
+    carica();
+  };
+  if (!gruppi) return <Spinner />;
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">Clienti che si allenano a Bulb insieme, nello stesso momento: le vedi tutte in una schermata, con programma, carichi e progressi di ognuna.</p>
+      {gruppi.map((g) => (
+        <div key={g.id} className="bg-white border border-slate-200 rounded-2xl p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-semibold text-slate-800">{g.nome}</p>
+              <p className="text-xs text-slate-500">{[g.giorno, g.ora].filter(Boolean).join(" · ") || "giorno e ora da impostare"}</p>
+              <p className="text-xs text-slate-500 mt-1">{(conta[g.id] || []).join(", ") || "nessuna cliente"}</p>
+            </div>
+            <button onClick={() => elimina(g)} className="text-xs text-slate-400 underline">elimina</button>
+          </div>
+          <button onClick={() => setAperto(g)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Apri la sessione</button>
+        </div>
+      ))}
+      <button onClick={nuovo} className="w-full py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo gruppo</button>
+      {aperto && <SessioneGruppo gruppo={aperto} onClose={() => setAperto(null)} onChanged={carica} onSelect={onSelect} />}
+    </div>
+  );
+}
+
 function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [menuAperto, setMenuAperto] = useState(false);
@@ -11528,7 +11909,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
           { k: "notifiche", l: "Notifiche", b: nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length },
           { k: "guadagni", l: "Guadagni" }, { k: "candidature", l: "Candidature", b: candidatureNuove },
           { k: "chat", l: "Appunti", b: chatNonLette }, { k: "statistiche", l: "Statistiche" },
-          { k: "esercizi", l: "Esercizi" }, { k: "sfide", l: "Sfide", b: sfideDaFare },
+          { k: "gruppi", l: "Gruppi Bulb" }, { k: "esercizi", l: "Esercizi" }, { k: "sfide", l: "Sfide", b: sfideDaFare },
         ];
         const totale = voci.reduce((t, v) => t + (v.b || 0), 0);
         const corrente = voci.find((v) => v.k === vista);
@@ -11557,6 +11938,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         );
       })()}
 
+      {vista === "gruppi" && <GruppiBulb onSelect={onSelect} />}
       {vista === "esercizi" && <LibreriaEserciziCoach />}
       {vista === "sfide" && <SfideCoach clients={clientiAttivi} onCambiato={caricaNonLetteCoach} />}
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
