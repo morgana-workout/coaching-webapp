@@ -11801,6 +11801,9 @@ function GruppiBulb({ onSelect }) {
   );
 }
 
+// cliente che non porta guadagno (piano o stato "gratuito")
+const eClienteGratuito = (c) => c.stato_pacchetto === "gratuito" || (c.piano || "").trim().toLowerCase() === "gratuito";
+
 function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
   const [menuAperto, setMenuAperto] = useState(false);
@@ -11831,6 +11834,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   // I clienti archiviati (percorso non attivo) restano fuori da liste, calendario, promemoria e
   // rinnovi finché non vengono riattivati — ma restano recuperabili con "Mostra archiviati".
   const clientiAttivi = clients.filter((c) => !c.archiviato);
+  // i clienti gratuiti non portano guadagno: sezione a parte, fuori dai totali e dalle statistiche
+  const clientiGratuiti = clientiAttivi.filter(eClienteGratuito);
+  const clientiPaganti = clientiAttivi.filter((c) => !eClienteGratuito(c));
   const clientiArchiviati = clients.filter((c) => c.archiviato);
 
   // Clienti che si sono registrate da sole e a cui manca ancora il pacchetto/prezzo: compaiono
@@ -11838,9 +11844,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano && !c.notifica_vista);
 
   const promemoriaDomani = clientiAttivi.flatMap((c) => promemoriaCliente(c).map((v) => ({ ...v, cliente: c })));
-  const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
-  const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
-  const scaduti = clientiAttivi.filter((c) => c.stato_pacchetto === "scaduto");
+  const inScadenza = clientiPaganti.filter((c) => c.stato_pacchetto === "in scadenza");
+  const daFare = clientiPaganti.filter((c) => c.stato_check === "da_compilare");
+  const scaduti = clientiPaganti.filter((c) => c.stato_pacchetto === "scaduto");
 
   const spostaOrdine = async (clienteId, direzione) => {
     const ordinati = [...clients].filter((c) => !c.archiviato).sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
@@ -11853,7 +11859,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     onChanged();
   };
 
-  const baseVisibili = filtro === "archiviati" ? clientiArchiviati : clientiAttivi;
+  const baseVisibili = filtro === "archiviati" ? clientiArchiviati : filtro === "gratuiti" ? clientiGratuiti : clientiPaganti;
   const chiaveData = (d) => d || "9999-12-31";
   let visibili = [...baseVisibili].sort((a, b) => {
     if (ordinamento === "check") return chiaveData(a.prossimo_check).localeCompare(chiaveData(b.prossimo_check));
@@ -11944,8 +11950,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} onAggiorna={caricaNonLetteCoach} />}
-      {vista === "statistiche" && <StatisticheCoach clients={clientiAttivi} />}
-      {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
+      {vista === "statistiche" && <StatisticheCoach clients={clientiPaganti} />}
+      {vista === "guadagni" && <GuadagniCoach clients={clientiPaganti} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
       {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
       {vista === "lista" && (
@@ -11961,15 +11967,20 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       <div className="flex gap-2">
         <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
-          ONLINE ({clientiAttivi.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
+          ONLINE ({clientiPaganti.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
         </button>
         <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
-          BULB ({clientiAttivi.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
+          BULB ({clientiPaganti.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
         </button>
       </div>
       {filtro !== "tutti" && (
         <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
+      )}
+      {clientiGratuiti.length > 0 && (
+        <button onClick={() => setFiltro(filtro === "gratuiti" ? "tutti" : "gratuiti")} className="text-slate-500 text-xs font-medium block">
+          {filtro === "gratuiti" ? "← Torna ai clienti" : `🎁 Clienti gratuiti (${clientiGratuiti.length}) · non contati nei totali`}
+        </button>
       )}
       {clientiArchiviati.length > 0 && (
         <button onClick={() => setFiltro(filtro === "archiviati" ? "tutti" : "archiviati")} className="text-slate-400 text-xs font-medium">
@@ -11979,7 +11990,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
 
       <div>
         <div className="flex items-center justify-between px-1 mb-2">
-          <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
+          <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : filtro === "gratuiti" ? "Clienti gratuiti (fuori dai totali)" : "Clienti"} ({visibili.length})</p>
           <select value={ordinamento} onChange={(e) => setOrdinamento(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white">
             <option value="check">Ordine: prossimo check</option>
             <option value="scadenza">Ordine: scadenza pacchetto</option>
