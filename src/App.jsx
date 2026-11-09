@@ -12121,6 +12121,28 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
     return () => clearTimeout(t);
   }, [secondi]);
 
+  const importaCsvCircuito = async (file) => {
+    if (!file) return;
+    try {
+      const righe = parseCSV(await file.text()).filter((r) => r.some((v) => v && v.trim()));
+      if (!righe.length) throw new Error("vuoto");
+      const h = righe[0].map((x) => (x || "").trim().toLowerCase());
+      const ie = h.indexOf("esercizio"); const ip = h.indexOf("postazione");
+      let lista;
+      if (ie !== -1) {
+        let corpo = righe.slice(1).map((r, i) => ({ p: ip !== -1 ? parseInt(r[ip], 10) : NaN, n: (r[ie] || "").trim(), i })).filter((x) => x.n);
+        corpo = corpo.sort((a, b) => ((isNaN(a.p) ? a.i : a.p) - (isNaN(b.p) ? b.i : b.p)) || a.i - b.i);
+        lista = corpo.map((x) => x.n);
+        const ig = h.indexOf("giri"); const ir = h.indexOf("recupero");
+        if (ig !== -1 && righe[1] && parseInt(righe[1][ig], 10) > 0) setGiri(parseInt(righe[1][ig], 10));
+        if (ir !== -1 && righe[1] && parseInt(righe[1][ir], 10) > 0) setRecupero(parseInt(righe[1][ir], 10));
+      } else lista = righe.map((r) => (r[0] || "").trim()).filter(Boolean);
+      if (lista.length < 2) throw new Error("poche");
+      setPostazioni(lista); if (ie === -1 || h.indexOf("giri") === -1) setGiri(lista.length);
+      setMsg(`Importate ${lista.length} postazioni: controlla e premi "Salva circuito" ✨`);
+    } catch (e) { setMsg("File non leggibile: serve una colonna \"esercizio\" con almeno 2 righe 🫶🏻"); }
+    setTimeout(() => setMsg(""), 6000);
+  };
   const salvaSetup = async () => {
     const pulite = post;
     if (pulite.length < 2) { setMsg("Servono almeno 2 postazioni 🫶🏻"); setTimeout(() => setMsg(""), 3000); return; }
@@ -12232,7 +12254,13 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
               {postazioni.length > 2 && <button onClick={() => setPostazioni(postazioni.filter((_, j) => j !== i))} className="text-slate-400 text-lg leading-none">×</button>}
             </div>
           ))}
-          <button onClick={() => setPostazioni([...postazioni, ""])} className="text-xs underline" style={{ color: "#3F78B3" }}>+ aggiungi postazione</button>
+          <div className="flex gap-4 items-center">
+            <button onClick={() => setPostazioni([...postazioni, ""])} className="text-xs underline" style={{ color: "#3F78B3" }}>+ aggiungi postazione</button>
+            <label className="text-xs underline cursor-pointer" style={{ color: "#3F78B3" }}>Importa da CSV
+              <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; importaCsvCircuito(f); }} />
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-400">CSV: una colonna "esercizio" (una riga per postazione, nell'ordine). Facoltative: "postazione" (numero), "giri" e "recupero" (compilati nella prima riga).</p>
           <div className="flex gap-3">
             <label className="text-xs text-slate-500 flex-1">Giri<input type="number" min="1" max="12" value={giri} onChange={(e) => setGiri(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
             <label className="text-xs text-slate-500 flex-1">Recupero (sec)<input type="number" min="0" value={recupero} onChange={(e) => setRecupero(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
