@@ -11851,11 +11851,12 @@ function RestrizioniCliente({ clientId }) {
   );
 }
 
-function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato }) {
+function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoValutazione = false }) {
   const [nome, setNome] = useState(cl.nome || "");
   const [cognome, setCognome] = useState(cl.cognome || "");
   const [note, setNote] = useState(cl.note_particolari || "");
-  const [sezione, setSezione] = useState(null); // null | "progressi" | "consigli"
+  const [sezione, setSezione] = useState(null); // null | "progressi" | "consigli" | "valutazione"
+  useEffect(() => { setSezione(modoValutazione ? "valutazione" : null); }, [modoValutazione]);
   const salva = async (campi) => { await supabase.from("clients").update(campi).eq("id", cl.id); onCambiato(); };
   const salute = (cl.problematiche_salute || []).filter(Boolean);
   const chip = (t) => <span className="px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>{t}</span>;
@@ -11879,9 +11880,11 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato }) {
         <div className="flex gap-2">
           <button onClick={() => setSezione(sezione === "progressi" ? null : "progressi")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "progressi" ? "#27466D" : "#fff", color: sezione === "progressi" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Progressi carichi</button>
           <button onClick={() => setSezione(sezione === "consigli" ? null : "consigli")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "consigli" ? "#27466D" : "#fff", color: sezione === "consigli" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prossimo allenamento</button>
+          <button onClick={() => setSezione(sezione === "valutazione" ? null : "valutazione")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "valutazione" ? "#27466D" : "#fff", color: sezione === "valutazione" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazione</button>
         </div>
         {sezione === "progressi" && <ProgressiCarichi clientId={cl.id} isAdmin />}
         {sezione === "consigli" && <ConsigliProgramma client={cl} />}
+        {sezione === "valutazione" && <ValutazioniBulb client={cl} />}
         <div className="flex justify-between text-xs pt-1">
           <button onClick={() => onApri(cl.id)} className="underline" style={{ color: "#3F78B3" }}>Apri scheda completa</button>
           <button onClick={onToglila} className="text-slate-400 underline">Togli dal gruppo</button>
@@ -11901,6 +11904,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [copia, setCopia] = useState({ da: "", a: [] });
   const [msg, setMsg] = useState("");
   const [notaG, setNotaG] = useState(gruppo.nota || "");
+  const [modoVal, setModoVal] = useState(false);
   const [prenota, setPrenota] = useState(false);
   const [lez, setLez] = useState({ data: formatDataLocale(new Date()), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
   const [prossime, setProssime] = useState([]);
@@ -11991,6 +11995,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
                 </select>
               )}
               <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
+              <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
               {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
             </div>
             {prenota && (
@@ -12030,7 +12035,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
             )}
             {membri.length === 0 && <p className="text-sm text-slate-500 text-center py-8">Nessuna cliente nel gruppo: aggiungi un profilo vuoto o una cliente già esistente 🫶🏻</p>}
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-start">
-              {membri.map((m) => <CardMembroGruppo key={m.id} cl={m} gruppoNome={gruppo.nome} onToglila={() => togli(m.id)} onApri={(id) => { onChanged(); onClose(); onSelect(id); }} onCambiato={() => {}} />)}
+              {membri.map((m) => <CardMembroGruppo key={m.id} cl={m} gruppoNome={gruppo.nome} onToglila={() => togli(m.id)} onApri={(id) => { onChanged(); onClose(); onSelect(id); }} onCambiato={() => {}} modoValutazione={modoVal} />)}
             </div>
           </>
         )}
