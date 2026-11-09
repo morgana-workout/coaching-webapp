@@ -5361,7 +5361,7 @@ function mesiDelPagamento(p, pianoCliente) {
 }
 function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
   const validi = (pagamenti || [])
-    .filter((p) => p.stato === "saldato" && mesiDelPagamento(p, pianoCliente) > 0)
+    .filter((p) => (p.stato === "saldato" || p.scadenza_saldo) && mesiDelPagamento(p, pianoCliente) > 0)
     .slice()
     .sort((a, b) => (a.data_pagamento || "").localeCompare(b.data_pagamento || ""));
   let scadenza = null;
@@ -5381,7 +5381,7 @@ function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
 // cadenza fissa, sia dopo averne cancellato uno, cosi' un doppione eliminato non lascia
 // la scadenza avanzata "a vuoto".
 async function ricalcolaEAggiornaScadenza(clientId) {
-  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note").eq("client_id", clientId);
+  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note, scadenza_saldo").eq("client_id", clientId);
   const { data: cli } = await supabase.from("clients").select("piano, data_inizio").eq("id", clientId).single();
   const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio);
   if (!scadenza) return;
@@ -5471,6 +5471,10 @@ function FatturazioneCliente({ clientId }) {
   );
 }
 
+async function chiudiEventoSaldo(paymentId) {
+  try { await supabase.from("calendar_events").delete().eq("pagamento_id", paymentId); } catch (e) { /* ignora */ }
+}
+
 function AccontoDaSaldare({ p, onSalvato }) {
   const [valore, setValore] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -5485,6 +5489,7 @@ function AccontoDaSaldare({ p, onSalvato }) {
     await supabase.from("payments").update(
       completato ? { importo_saldato: Number(p.importo), stato: "saldato" } : { importo_saldato: nuovoSaldato }
     ).eq("id", p.id);
+    if (completato) await chiudiEventoSaldo(p.id);
     if (completato && MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
     setSalvando(false);
     setValore("");
@@ -5511,7 +5516,12 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   const [nota, setNota] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [fatto, setFatto] = useState(false);
+  const [rate, setRate] = useState(false);
+  const [primaRata, setPrimaRata] = useState("");
+  const [scadSaldo, setScadSaldo] = useState("");
   const isGratuito = tipo === "Gratuito";
+  const inRate = rate && tipo === "Semestrale";
+  const scadSaldoEff = scadSaldo || addMesi(dataPagamento, 3);
   const aggiornaScadenza = ["Mensile", "Trimestrale", "Semestrale"].includes(tipo);
 
   const registra = async () => {
@@ -5521,10 +5531,22 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
     if (isGratuito) {
       await supabase.from("clients").update({ piano: "Gratuito", stato_pacchetto: "gratuito" }).eq("id", client.id);
     } else {
-      await supabase.from("payments").insert({
+      const totale = importo === "" ? null : Number(importo);
+      const versato = inRate && primaRata !== "" ? Math.min(Number(primaRata), totale ?? Number(primaRata)) : 0;
+      const { data: pagNuovo } = await supabase.from("payments").insert({
         client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo,
-        importo: importo === "" ? null : Number(importo), metodo_pagamento: metodo || null, stato, note: nota || null,
-      });
+        importo: totale, metodo_pagamento: metodo || null, stato: inRate ? "da_saldare" : stato,
+        note: inRate ? ["Dilazionato in 2 rate", nota].filter(Boolean).join(" · ") : (nota || null),
+        ...(inRate ? { importo_saldato: versato, scadenza_saldo: scadSaldoEff } : {}),
+      }).select().single();
+      if (inRate && pagNuovo) {
+        const resta = totale != null ? Math.max(0, totale - versato) : null;
+        await supabase.from("calendar_events").insert({
+          tipo: "personale", data: scadSaldoEff, ora: null, stato: "confermato", pagamento_id: pagNuovo.id,
+          titolo: `💶 Saldo 2ª rata — ${`${client.nome || ""} ${client.cognome || ""}`.trim()}`,
+          nota: `Semestrale in 2 rate${resta != null ? ` · restano ${resta.toFixed(2)}€` : ""}. La cliente riceve la notifica di pagamento in questa data.`,
+        });
+      }
       if (aggiornaScadenza) {
         if (!client.data_inizio) {
           await supabase.from("clients").update({ data_inizio: dataPagamento }).eq("id", client.id);
@@ -5542,6 +5564,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
 
   const cambiaStato = async (p) => {
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (p.stato !== "saldato") await chiudiEventoSaldo(p.id);
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) await ricalcolaEAggiornaScadenza(client.id);
     onRegistrato();
   };
@@ -5600,6 +5623,26 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                 </select>
               </div>
             </div>
+            {tipo === "Semestrale" && (
+              <div className="rounded-xl p-3 space-y-2" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+                <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={rate} onChange={(e) => setRate(e.target.checked)} /> Dilazionato in 2 rate</label>
+                {rate && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-500">1ª rata versata (€)</label>
+                        <input type="number" step="0.01" value={primaRata} onChange={(e) => setPrimaRata(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 200" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">Saldo entro</label>
+                        <InputData value={scadSaldoEff} onChange={(e) => setScadSaldo(e.target.value)} className="mt-1" />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-500">L'importo sopra è il totale del semestrale. Il pagamento resta "da saldare" e la scadenza del percorso avanza di 6 mesi. Segno la scadenza del saldo sul tuo calendario e alla cliente arriva la notifica in quella data (ricordata nell'app finché non salda).</p>
+                  </>
+                )}
+              </div>
+            )}
             <div>
               <label className="text-xs text-slate-500">Nota (facoltativa)</label>
               <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. sconto amica, saldo pacchetto..." />
@@ -5640,6 +5683,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                     {Number(p.importo_saldato) > 0 && (
                       <span className="text-[11px] text-sky-600">saldati {Number(p.importo_saldato).toFixed(2)}€, restano {(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€</span>
                     )}
+                    {p.scadenza_saldo && <span className="text-[11px] text-slate-500">saldo entro {p.scadenza_saldo.split("-").reverse().join("/")}</span>}
                     <AccontoDaSaldare p={p} onSalvato={onRegistrato} />
                   </div>
                 )}
@@ -11163,6 +11207,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const cambiaStato = async (p) => {
     if (p.stato === "spesa") return; // le spese non si alternano tra saldato/da saldare
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (p.stato !== "saldato") await chiudiEventoSaldo(p.id);
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
     carica();
   };
