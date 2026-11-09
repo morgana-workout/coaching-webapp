@@ -1856,7 +1856,7 @@ function ScarichiCliente({ clientId }) {
   return <ScarichiCoach clientId={clientId} scarichi={lista} onChange={() => setN((x) => x + 1)} />;
 }
 
-function ProgressiCarichi({ clientId, isAdmin = false }) {
+function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
   const [esercizi, setEsercizi] = useState(null);
   const [trend, setTrend] = useState(null);
   const [scarichi, setScarichi] = useState([]);
@@ -1945,8 +1945,9 @@ function ProgressiCarichi({ clientId, isAdmin = false }) {
 
   return (
     <div className="space-y-2">
-      {isAdmin && <ScarichiCoach clientId={clientId} scarichi={scarichi} onChange={() => setRicarica((n) => n + 1)} />}
-      {trend && <TrendCarichi trend={trend} isAdmin={isAdmin} />}
+      {parte !== "resto" && isAdmin && <ScarichiCoach clientId={clientId} scarichi={scarichi} onChange={() => setRicarica((n) => n + 1)} />}
+      {parte !== "resto" && trend && <TrendCarichi trend={trend} isAdmin={isAdmin} />}
+      {parte !== "trend" && (<>
       {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
         <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
           <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">I tuoi traguardi</p>
@@ -1996,6 +1997,7 @@ function ProgressiCarichi({ clientId, isAdmin = false }) {
           )}
         </Card>
       ))}
+      </>)}
     </div>
   );
 }
@@ -2227,6 +2229,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
+      {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="trend" />}
       <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} obiettivoDal={obiettivoDal} />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {opzioni.map((o) => (
@@ -2259,7 +2262,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
       </div>
 
-      {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} />}
+      {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="resto" />}
     </div>
   );
 }
@@ -12084,6 +12087,197 @@ async function importaCsvPerCliente(righe, clientId, sostituisci) {
   return { giorniCreati, eserciziCreati };
 }
 
+/* ------------------------------------------------------------------ */
+/* CIRCUITO DI GRUPPO — ogni cliente cambia esercizio a ogni giro      */
+/* ------------------------------------------------------------------ */
+function CircuitoGruppo({ gruppo, membri, onChanged }) {
+  const salvato = gruppo.circuito || {};
+  const [aperto, setAperto] = useState(false);
+  const [modifica, setModifica] = useState(false);
+  const [postazioni, setPostazioni] = useState(Array.isArray(salvato.postazioni) && salvato.postazioni.length ? salvato.postazioni : ["", "", "", ""]);
+  const [giri, setGiri] = useState(salvato.giri || 4);
+  const [recupero, setRecupero] = useState(salvato.recupero || 45);
+  const [varianti, setVarianti] = useState(salvato.varianti || {});
+  const [giro, setGiro] = useState(0);
+  const [pronto, setPronto] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [ids, setIds] = useState({}); // clientId -> { nomeLower: exerciseId }
+  const [valori, setValori] = useState({}); // `${clientId}|${exerciseId}|${n}` -> { kg, rip }
+  const [ultime, setUltime] = useState({}); // exerciseId -> "37,5 kg × 10"
+  const [secondi, setSecondi] = useState(0);
+  const oggi = formatDataLocale(new Date());
+  const post = postazioni.map((p) => p.trim()).filter(Boolean);
+  const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const esercizioDi = (ci, g) => {
+    const v = varianti[`${membri[ci].id}|${g}`];
+    if (v) return v;
+    return post.length ? post[(ci + g) % post.length] : "";
+  };
+  const occorrenza = (ci, g) => { const nome = esercizioDi(ci, g).toLowerCase(); let n = 1; for (let k = 0; k < g; k++) if (esercizioDi(ci, k).toLowerCase() === nome) n += 1; return n; };
+
+  useEffect(() => {
+    if (secondi <= 0) return undefined;
+    const t = setTimeout(() => setSecondi((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [secondi]);
+
+  const salvaSetup = async () => {
+    const pulite = post;
+    if (pulite.length < 2) { setMsg("Servono almeno 2 postazioni 🫶🏻"); setTimeout(() => setMsg(""), 3000); return; }
+    const circ = { postazioni: pulite, giri: Math.max(1, Math.min(12, Number(giri) || pulite.length)), recupero: Number(recupero) || 45, varianti };
+    const { error } = await supabase.from("gruppi_bulb").update({ circuito: circ }).eq("id", gruppo.id);
+    if (error) { setMsg("Non sono riuscita a salvare: riprova 🫶🏻"); setTimeout(() => setMsg(""), 4000); return; }
+    setPostazioni(pulite); setModifica(false); setPronto(false); setMsg("Circuito salvato ✨"); onChanged(); setTimeout(() => setMsg(""), 3000);
+  };
+  const salvaVarianti = async (nuove) => {
+    setVarianti(nuove); setPronto(false);
+    await supabase.from("gruppi_bulb").update({ circuito: { postazioni: post, giri: Number(giri) || post.length, recupero: Number(recupero) || 45, varianti: nuove } }).eq("id", gruppo.id);
+  };
+
+  // crea (se mancano) il giorno "Circuito" e gli esercizi di ogni cliente, poi scarica i carichi di oggi e l'ultima volta
+  const prepara = async () => {
+    setMsg("Preparo il circuito…");
+    try {
+      const nomiNecessari = {};
+      membri.forEach((m, ci) => { nomiNecessari[m.id] = new Set(); for (let g = 0; g < giriTot; g++) { const n = esercizioDi(ci, g); if (n) nomiNecessari[m.id].add(n); } });
+      const nuoviIds = {};
+      for (const m of membri) {
+        const { data: giorni } = await supabase.from("training_days").select("id, nome, scheda_archiviata").eq("client_id", m.id);
+        let giorno = (giorni || []).find((g) => !g.scheda_archiviata && g.nome === "Circuito");
+        if (!giorno) {
+          const { data: nuovo, error } = await supabase.from("training_days").insert({ client_id: m.id, nome: "Circuito", ordine: (giorni || []).length + 1 }).select().single();
+          if (error) throw error; giorno = nuovo;
+        }
+        const { data: es } = await supabase.from("training_exercises").select("id, nome").eq("client_id", m.id).eq("training_day_id", giorno.id);
+        const lista = [...(es || [])]; nuoviIds[m.id] = {};
+        for (const nome of nomiNecessari[m.id]) {
+          let ex = lista.find((x) => x.nome.trim().toLowerCase() === nome.toLowerCase());
+          if (!ex) {
+            const { data: nuovo, error } = await supabase.from("training_exercises").insert({ client_id: m.id, training_day_id: giorno.id, nome, serie: 1, tipo: "forza", ordine: lista.length + 1 }).select("id, nome").single();
+            if (error) throw error; ex = nuovo; lista.push(ex);
+          }
+          nuoviIds[m.id][nome.toLowerCase()] = ex.id;
+        }
+      }
+      const tuttiId = Object.values(nuoviIds).flatMap((o) => Object.values(o));
+      const { data: righe } = await supabase.from("training_entries").select("client_id, exercise_id, data, numero_serie, kg, ripetizioni").in("exercise_id", tuttiId).order("data", { ascending: false });
+      const v = {}; const ult = {};
+      (righe || []).forEach((r) => {
+        if (r.data === oggi) v[`${r.client_id}|${r.exercise_id}|${r.numero_serie}`] = { kg: r.kg == null ? "" : String(r.kg).replace(".", ","), rip: r.ripetizioni || "" };
+        else if (r.kg != null && !ult[r.exercise_id]) ult[r.exercise_id] = { data: r.data, kg: r.kg, rip: r.ripetizioni };
+        else if (r.kg != null && ult[r.exercise_id].data === r.data && Number(r.kg) > Number(ult[r.exercise_id].kg)) ult[r.exercise_id] = { data: r.data, kg: r.kg, rip: r.ripetizioni };
+      });
+      leggiCoda().forEach((o) => { if (o.data === oggi) v[`${o.clientId}|${o.exerciseId}|${o.n}`] = { kg: o.payload.kg == null ? "" : String(o.payload.kg).replace(".", ","), rip: o.payload.ripetizioni || "" }; });
+      const testo = {}; Object.entries(ult).forEach(([k, x]) => { testo[k] = `${String(x.kg).replace(".", ",")} kg${x.rip ? ` × ${x.rip}` : ""}`; });
+      setIds(nuoviIds); setValori(v); setUltime(testo); setPronto(true); setMsg("");
+    } catch (e) { setMsg("Non sono riuscita a preparare il circuito: controlla la connessione e riprova 🫶🏻"); setTimeout(() => setMsg(""), 5000); }
+  };
+  const giriTot = Math.max(1, Number(giri) || post.length || 4);
+
+  const salvaCella = async (ci, g, campo, valore) => {
+    const m = membri[ci]; const nome = esercizioDi(ci, g); const exId = ids[m.id]?.[nome.toLowerCase()]; if (!exId) return;
+    const n = occorrenza(ci, g); const k = `${m.id}|${exId}|${n}`;
+    const nuovo = { ...(valori[k] || { kg: "", rip: "" }), [campo]: valore };
+    setValori((v) => ({ ...v, [k]: nuovo }));
+    const kg = num(nuovo.kg);
+    const payload = { kg, ripetizioni: nuovo.rip === "" ? null : String(nuovo.rip), completata: kg != null };
+    const op = { clientId: m.id, exerciseId: exId, data: oggi, n, payload };
+    const giaInCoda = leggiCoda().some((x) => x.k === chiaveOp(op));
+    if (giaInCoda) { accodaOp(op); inviaCoda(); return; }
+    try { await scriviSerieRemoto(op); if (kg != null) inviaPushCarichi(); } catch (err) { accodaOp(op); }
+  };
+
+  const Cella = ({ ci, g }) => {
+    const m = membri[ci]; const nome = esercizioDi(ci, g); const exId = ids[m.id]?.[nome.toLowerCase()];
+    const n = occorrenza(ci, g); const k = `${m.id}|${exId}|${n}`; const v = valori[k] || { kg: "", rip: "" };
+    return (
+      <div className="bg-white border rounded-2xl p-2.5" style={{ borderColor: "#C9E0F7" }}>
+        <p className="text-[11px] font-semibold text-slate-500 truncate">{nomeCl(m)}</p>
+        <div className="flex items-center gap-1">
+          <p className="flex-1 text-sm font-bold truncate" style={{ color: "#27466D" }}>{nome || "—"}</p>
+          <select value="" onChange={(e) => { const val = e.target.value; const nv = { ...varianti }; if (val === "__reset") delete nv[`${m.id}|${g}`]; else nv[`${m.id}|${g}`] = val; salvaVarianti(nv); }} className="text-[11px] w-6 bg-transparent" style={{ color: "#3F78B3" }} title="Cambia esercizio solo per lei">
+            <option value="">✎</option>
+            {post.map((p) => <option key={p} value={p}>{p}</option>)}
+            {varianti[`${m.id}|${g}`] && <option value="__reset">Torna al giro normale</option>}
+          </select>
+        </div>
+        <div className="flex gap-1.5 mt-1.5">
+          <input inputMode="decimal" value={v.kg} onChange={(e) => setValori((x) => ({ ...x, [k]: { ...v, kg: e.target.value } }))} onBlur={(e) => salvaCella(ci, g, "kg", e.target.value)} placeholder="kg" className="w-1/2 min-w-0 border rounded-lg px-2 py-1.5 text-sm text-center" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
+          <input inputMode="numeric" value={v.rip} onChange={(e) => setValori((x) => ({ ...x, [k]: { ...v, rip: e.target.value } }))} onBlur={(e) => salvaCella(ci, g, "rip", e.target.value)} placeholder="rip" className="w-1/2 min-w-0 border rounded-lg px-2 py-1.5 text-sm text-center" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
+        </div>
+        <p className="text-[11px] mt-1" style={{ color: "#3F78B3" }}>{ultime[exId] ? `Ultima volta: ${ultime[exId]}` : "Prima volta"}</p>
+      </div>
+    );
+  };
+
+  if (!aperto) return <button onClick={() => setAperto(true)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#3F78B3" }}>Circuito a rotazione</button>;
+  const giriArr = Array.from({ length: giriTot }, (_, i) => i);
+  return (
+    <div className="bg-white rounded-2xl border p-3 space-y-3 w-full" style={{ borderColor: "#C9E0F7" }}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Circuito a rotazione · {gruppo.nome}</p>
+        <div className="flex gap-3 text-xs">
+          <button onClick={() => setModifica(!modifica)} className="underline" style={{ color: "#3F78B3" }}>{modifica ? "Chiudi impostazioni" : "Imposta postazioni"}</button>
+          <button onClick={() => setAperto(false)} className="text-slate-400 underline">Chiudi</button>
+        </div>
+      </div>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      {modifica && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-600">Scrivi gli esercizi delle postazioni. La 1ª cliente parte dalla postazione 1, la 2ª dalla 2… e a ogni giro tutte scalano di una. Con meno postazioni che giri, si ricomincia da capo.</p>
+          {postazioni.map((p, i) => (
+            <div key={i} className="flex gap-2 items-center">
+              <span className="text-xs font-semibold w-5" style={{ color: "#27466D" }}>{i + 1}</span>
+              <input value={p} onChange={(e) => setPostazioni(postazioni.map((x, j) => (j === i ? e.target.value : x)))} placeholder="Esercizio" className="flex-1 border rounded-lg px-3 py-1.5 text-sm" style={{ borderColor: "#C9E0F7" }} />
+              {postazioni.length > 2 && <button onClick={() => setPostazioni(postazioni.filter((_, j) => j !== i))} className="text-slate-400 text-lg leading-none">×</button>}
+            </div>
+          ))}
+          <button onClick={() => setPostazioni([...postazioni, ""])} className="text-xs underline" style={{ color: "#3F78B3" }}>+ aggiungi postazione</button>
+          <div className="flex gap-3">
+            <label className="text-xs text-slate-500 flex-1">Giri<input type="number" min="1" max="12" value={giri} onChange={(e) => setGiri(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+            <label className="text-xs text-slate-500 flex-1">Recupero (sec)<input type="number" min="0" value={recupero} onChange={(e) => setRecupero(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+          </div>
+          <button onClick={salvaSetup} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva circuito</button>
+        </div>
+      )}
+      {!modifica && post.length < 2 && <p className="text-xs text-slate-500">Prima imposta le postazioni del circuito 🫶🏻</p>}
+      {!modifica && post.length >= 2 && membri.length === 0 && <p className="text-xs text-slate-500">Aggiungi le clienti al gruppo per usare il circuito.</p>}
+      {!modifica && post.length >= 2 && membri.length > 0 && !pronto && (
+        <button onClick={prepara} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avvia il circuito di oggi</button>
+      )}
+      {!modifica && pronto && (
+        <>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5 flex-1">
+              {giriArr.map((g) => <button key={g} onClick={() => setGiro(g)} className="flex-1 py-1.5 rounded-full text-xs font-bold" style={{ background: giro === g ? "#27466D" : "#fff", color: giro === g ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{g + 1}</button>)}
+            </div>
+            <button onClick={() => setSecondi(Number(recupero) || 45)} className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>{secondi > 0 ? `⏱ ${secondi}s` : `⏱ Recupero ${Number(recupero) || 45}s`}</button>
+          </div>
+          <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Giro {giro + 1} di {giriTot}</p>
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+            {membri.map((m, ci) => <div key={m.id}>{Cella({ ci, g: giro })}</div>)}
+          </div>
+          {giro < giriTot - 1 && <button onClick={() => { setGiro(giro + 1); setSecondi(0); }} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avanti: giro {giro + 2} →</button>}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs" style={{ color: "#27466D" }}>
+              <thead><tr><th className="text-left p-1.5 text-slate-500 font-medium"></th>{giriArr.map((g) => <th key={g} className="text-left p-1.5 font-medium" style={{ color: g === giro ? "#27466D" : "#7a8da3" }}>Giro {g + 1}</th>)}</tr></thead>
+              <tbody>
+                {membri.map((m, ci) => (
+                  <tr key={m.id} className="border-t border-slate-100">
+                    <td className="p-1.5 font-semibold">{nomeCl(m)}</td>
+                    {giriArr.map((g) => { const nome = esercizioDi(ci, g); const exId = ids[m.id]?.[nome.toLowerCase()]; const v = valori[`${m.id}|${exId}|${occorrenza(ci, g)}`]; return <td key={g} className="p-1.5 align-top" style={{ background: g === giro ? "#E1EEFB" : "transparent" }}>{nome}<div style={{ color: "#3F78B3" }}>{v && v.kg !== "" ? `${v.kg} × ${v.rip || "—"} ✓` : "—"}</div></td>; })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-400">I carichi si salvano nello storico personale di ogni cliente, nel giorno "Circuito". Se manca la connessione restano sul telefono e partono da soli.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoValutazione = false }) {
   const [nome, setNome] = useState(cl.nome || "");
   const [cognome, setCognome] = useState(cl.cognome || "");
@@ -12250,7 +12444,8 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
                 </select>
               )}
               <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
-              <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Importa programma da CSV</button>
+              <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
+              <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Importa programma da CSV (mobilità e stretching)</button>
               <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
               {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
             </div>
