@@ -7405,6 +7405,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "dati", label: "Dati" },
     ...(isOnline ? [{ key: "check", label: "Check" }] : []), // tab "Scheda" congelato temporaneamente (workflow spostato su CSV esterno)
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
+    ...(isBulb ? [{ key: "valutazione", label: "Valutazione" }] : []),
     { key: "progressi", label: "Progressi" },
     ...(isBulb ? [] : [tabAll]),
     { key: "nutrizione", label: "Macros" },
@@ -7768,8 +7769,11 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta tutto lo storico di questa cliente (Excel con foto)" />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
 
+      {tab === "valutazione" && <ValutazioniBulb client={client} />}
+
       {tab === "allenamento" && (
         <div className="space-y-5">
+          {isBulb && <RestrizioniCliente clientId={client.id} />}
           <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
           <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
           {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
@@ -11600,6 +11604,253 @@ function CercaClienti({ clienti, onSelect }) {
 /* ------------------------------------------------------------------ */
 /* GRUPPI BULB — più clienti che si allenano insieme, in una schermata */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* VALUTAZIONE BULB — anamnesi, test funzionali, restrizioni, foto     */
+/* ------------------------------------------------------------------ */
+const TEST_BASE = ["Overhead squat", "Mobilità caviglia", "Mobilità anche", "Mobilità spalle", "Plank / core", "Equilibrio monopodalico"];
+const ESITI_TEST = [["ok", "ok"], ["migliorare", "da migliorare"], ["limite", "limite"]];
+const RANGO_ESITO = { ok: 2, migliorare: 1, limite: 0 };
+const SLOT_FOTO_VAL = [["frontale", "Frontale"], ["laterale_dx", "Laterale dx"], ["posteriore", "Posteriore"], ["laterale_sx", "Laterale sx"]];
+const fmtDataIt = (d) => (d ? d.split("-").reverse().join("/") : "");
+
+function useUrlFirmato(path) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let vivo = true; setUrl(null);
+    if (!path) return;
+    supabase.storage.from("progress-photos").createSignedUrl(path, 3600).then(({ data }) => { if (vivo) setUrl(data?.signedUrl || null); });
+    return () => { vivo = false; };
+  }, [path]);
+  return url;
+}
+
+function FotoValutazione({ path, etichetta, onFile, onRimuovi, sola = false }) {
+  const url = useUrlFirmato(path);
+  return (
+    <div>
+      <div className="aspect-[3/4] rounded-xl overflow-hidden flex items-center justify-center text-center" style={{ background: "#F5FAFE", border: path ? "1px solid #C9E0F7" : "1.5px dashed #C9E0F7" }}>
+        {path ? (url ? <img src={url} alt={etichetta} className="w-full h-full object-cover" /> : <span className="text-[10px] text-slate-400">carico…</span>)
+          : sola ? <span className="text-[10px] text-slate-400">nessuna foto</span>
+          : <label className="text-[11px] cursor-pointer px-1" style={{ color: "#3F78B3" }}>+ {etichetta}<input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} /></label>}
+      </div>
+      <p className="text-[10px] text-slate-500 text-center mt-1">{etichetta}{path && !sola && <button onClick={onRimuovi} className="ml-1 underline text-slate-400">togli</button>}</p>
+    </div>
+  );
+}
+
+function Box({ titolo: t, children }) { return <Card className="p-3 space-y-2"><p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{t}</p>{children}</Card>; }
+
+function ModificaValutazione({ client, val, nPrecedenti, onFatto, onAnnulla }) {
+  const [titolo, setTitolo] = useState(val?.titolo || (nPrecedenti === 0 ? "1ª valutazione" : `Rivalutazione ${nPrecedenti}`));
+  const [data, setData] = useState(val?.data || formatDataLocale(new Date()));
+  const [an, setAn] = useState({ infortuni: "", patologie: "", stile: "", obiettivi: "", ...(val?.anamnesi || {}) });
+  const [test, setTest] = useState(() => {
+    const salvati = val?.test || [];
+    return salvati.length ? salvati : TEST_BASE.map((nome) => ({ nome, esito: null, nota: "" }));
+  });
+  const [restr, setRestr] = useState(val?.restrizioni || []);
+  const [nuovaRestr, setNuovaRestr] = useState("");
+  const [lavorare, setLavorare] = useState(val?.lavorare || "");
+  const [note, setNote] = useState(val?.note || "");
+  const [foto, setFoto] = useState(val?.foto || {});
+  const [nuovoTest, setNuovoTest] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+  const campo = (label, k, ph) => (
+    <label className="block text-xs text-slate-500">{label}
+      <textarea value={an[k]} onChange={(e) => setAn({ ...an, [k]: e.target.value })} rows={2} placeholder={ph} className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800" />
+    </label>
+  );
+  const caricaFoto = async (slot, file) => {
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${client.id}/valutazione/${data}-${slot}-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from("progress-photos").upload(path, file, { upsert: true });
+      if (error) throw error;
+      setFoto((f) => ({ ...f, [slot]: path }));
+    } catch (e) { setErrore("Non sono riuscita a caricare la foto, riprova 🫶🏻"); }
+  };
+  const salva = async () => {
+    setSalvando(true); setErrore("");
+    const riga = { client_id: client.id, data, titolo: titolo.trim() || null, anamnesi: an, test, restrizioni: restr, lavorare: lavorare.trim() || null, note: note.trim() || null, foto };
+    const { error } = val ? await supabase.from("valutazioni_bulb").update(riga).eq("id", val.id) : await supabase.from("valutazioni_bulb").insert(riga);
+    setSalvando(false);
+    if (error) { setErrore("Non sono riuscita a salvare, riprova."); return; }
+    onFatto();
+  };
+  return (
+    <div className="space-y-3">
+      <button onClick={onAnnulla} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#3F78B3" }}><ArrowLeft size={16} /> Valutazioni</button>
+      <div className="grid grid-cols-2 gap-3">
+        <input value={titolo} onChange={(e) => setTitolo(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800" />
+        <InputData value={data} onChange={(e) => setData(e.target.value)} />
+      </div>
+      <Box titolo="Anamnesi">
+        {campo("Infortuni e dolori", "infortuni", "Dolori ricorrenti, infortuni passati, zone sensibili…")}
+        {campo("Interventi, patologie, farmaci", "patologie", "Se non ce ne sono, lascia vuoto")}
+        {campo("Lavoro, sonno, stress, attività", "stile", "Es. ufficio 8h, sonno 6h, cammina poco…")}
+        {campo("Obiettivi e aspettative", "obiettivi", "Cosa vuole ottenere")}
+      </Box>
+      <Box titolo="Test funzionali">
+        {test.map((t, i) => (
+          <div key={i} className="py-1.5" style={{ borderTop: i ? "1px solid #EEF3F8" : "none" }}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm text-slate-700">{t.nome}</span>
+              <div className="flex gap-1">
+                {ESITI_TEST.map(([k, l]) => <button key={k} onClick={() => setTest(test.map((x, j) => (j === i ? { ...x, esito: x.esito === k ? null : k } : x)))} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: t.esito === k ? "#27466D" : "#fff", color: t.esito === k ? "#fff" : "#3F78B3", border: `1.5px solid ${t.esito === k ? "#27466D" : "#C9E0F7"}` }}>{l}</button>)}
+              </div>
+            </div>
+            <input value={t.nota || ""} onChange={(e) => setTest(test.map((x, j) => (j === i ? { ...x, nota: e.target.value } : x)))} placeholder="nota (facoltativa)" className="w-full mt-1 text-xs border-b border-slate-100 py-1 text-slate-600 focus:outline-none" />
+          </div>
+        ))}
+        <div className="flex gap-2 pt-1">
+          <input value={nuovoTest} onChange={(e) => setNuovoTest(e.target.value)} placeholder="+ aggiungi un test tuo" className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+          <button onClick={() => { if (!nuovoTest.trim()) return; setTest([...test, { nome: nuovoTest.trim(), esito: null, nota: "" }]); setNuovoTest(""); }} className="px-3 rounded-lg text-sm font-semibold text-white" style={{ background: "#27466D" }}>Aggiungi</button>
+        </div>
+      </Box>
+      <Box titolo="Restrizioni">
+        <p className="text-xs text-slate-500">Cose da evitare o limitare: le vedrai sempre nella scheda del gruppo e nell'allenamento della cliente.</p>
+        <div className="flex flex-wrap gap-1.5">
+          {restr.map((r, i) => <button key={i} onClick={() => setRestr(restr.filter((_, j) => j !== i))} className="px-3 py-1 rounded-full text-xs font-semibold text-white" style={{ background: "#27466D" }}>{r} ✕</button>)}
+        </div>
+        <div className="flex gap-2">
+          <input value={nuovaRestr} onChange={(e) => setNuovaRestr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && nuovaRestr.trim()) { setRestr([...restr, nuovaRestr.trim()]); setNuovaRestr(""); } }} placeholder="Es. Spalla dx: no overhead" className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+          <button onClick={() => { if (!nuovaRestr.trim()) return; setRestr([...restr, nuovaRestr.trim()]); setNuovaRestr(""); }} className="px-3 rounded-lg text-sm font-semibold text-white" style={{ background: "#27466D" }}>Aggiungi</button>
+        </div>
+      </Box>
+      <Box titolo="Su cosa lavorare">
+        <textarea value={lavorare} onChange={(e) => setLavorare(e.target.value)} rows={3} placeholder="Priorità: 1. … 2. … 3. …" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800" />
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Altre note del primo incontro" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800" />
+      </Box>
+      <Box titolo="Foto">
+        <div className="grid grid-cols-4 gap-2">
+          {SLOT_FOTO_VAL.map(([k, l]) => <FotoValutazione key={k} path={foto[k]} etichetta={l} onFile={(f) => caricaFoto(k, f)} onRimuovi={() => setFoto((x) => { const n = { ...x }; delete n[k]; return n; })} />)}
+        </div>
+      </Box>
+      {errore && <p className="text-xs text-slate-700">{errore}</p>}
+      <button onClick={salva} disabled={salvando} className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{salvando ? "Salvo…" : "Salva valutazione"}</button>
+    </div>
+  );
+}
+
+function ConfrontoValutazioni({ valutazioni }) {
+  const ordinate = [...valutazioni].sort((a, b) => a.data.localeCompare(b.data) || (a.created_at || "").localeCompare(b.created_at || ""));
+  const [ia, setIa] = useState(0);
+  const [ib, setIb] = useState(ordinate.length - 1);
+  const A = ordinate[ia], B = ordinate[ib];
+  if (!A || !B) return null;
+  const nomi = [...new Set([...(A.test || []).map((t) => t.nome), ...(B.test || []).map((t) => t.nome)])];
+  const es = (v, n) => (v.test || []).find((t) => t.nome === n)?.esito || null;
+  const eti = (k) => (k ? (ESITI_TEST.find((e) => e[0] === k) || [])[1] : "—");
+  const righe = nomi.map((n) => ({ n, a: es(A, n), b: es(B, n) })).filter((r) => r.a || r.b);
+  const selettore = (val, set) => (
+    <select value={val} onChange={(e) => set(Number(e.target.value))} className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white text-slate-700">
+      {ordinate.map((v, i) => <option key={v.id} value={i}>{v.titolo || "Valutazione"} · {fmtDataIt(v.data)}</option>)}
+    </select>
+  );
+  const slotConFoto = SLOT_FOTO_VAL.filter(([k]) => A.foto?.[k] || B.foto?.[k]);
+  const migliorati = righe.filter((r) => r.a != null && r.b != null && RANGO_ESITO[r.b] > RANGO_ESITO[r.a]).length;
+  return (
+    <div className="space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Confronto prima / dopo</p>
+      <div className="flex gap-2 items-center">{selettore(ia, setIa)}<span className="text-slate-400 text-xs">↔</span>{selettore(ib, setIb)}</div>
+      {slotConFoto.map(([k, l]) => (
+        <Card key={k} className="p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Foto · {l.toLowerCase()}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div><FotoValutazione path={A.foto?.[k]} etichetta={`Prima · ${fmtDataIt(A.data)}`} sola /></div>
+            <div><FotoValutazione path={B.foto?.[k]} etichetta={`Dopo · ${fmtDataIt(B.data)}`} sola /></div>
+          </div>
+        </Card>
+      ))}
+      <Card className="p-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Test funzionali{righe.length ? ` · ${migliorati} migliorat${migliorati === 1 ? "o" : "i"}` : ""}</p>
+        {righe.length === 0 && <p className="text-sm text-slate-400">Nessun test compilato in queste due valutazioni.</p>}
+        {righe.map((r) => {
+          const su = r.a != null && r.b != null && RANGO_ESITO[r.b] > RANGO_ESITO[r.a], giu = r.a != null && r.b != null && RANGO_ESITO[r.b] < RANGO_ESITO[r.a];
+          return (
+            <div key={r.n} className="flex items-center justify-between py-1.5 text-sm" style={{ borderTop: "1px solid #EEF3F8" }}>
+              <span className="text-slate-700">{r.n}</span>
+              <span className="text-slate-600">{eti(r.a)} → <span className="font-semibold" style={{ color: "#27466D" }}>{eti(r.b)}{su ? " ↑" : giu ? " ↓" : ""}</span></span>
+            </div>
+          );
+        })}
+      </Card>
+      {(A.restrizioni?.length > 0 || B.restrizioni?.length > 0) && (
+        <Card className="p-3 space-y-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Restrizioni</p>
+          <p className="text-xs text-slate-600">Prima: {(A.restrizioni || []).join(" · ") || "nessuna"}</p>
+          <p className="text-xs text-slate-600">Dopo: {(B.restrizioni || []).join(" · ") || "nessuna"}</p>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ValutazioniBulb({ client }) {
+  const [lista, setLista] = useState(null);
+  const [vista, setVista] = useState("elenco"); // "elenco" | "nuova" | id valutazione
+  const carica = async () => {
+    const { data } = await supabase.from("valutazioni_bulb").select("*").eq("client_id", client.id).order("data").order("created_at");
+    setLista(data || []);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+  if (!lista) return <Spinner />;
+  if (vista === "nuova") return <ModificaValutazione client={client} val={null} nPrecedenti={lista.length} onAnnulla={() => setVista("elenco")} onFatto={() => { setVista("elenco"); carica(); }} />;
+  const aperta = lista.find((v) => v.id === vista);
+  if (aperta) return <ModificaValutazione client={client} val={aperta} nPrecedenti={lista.length} onAnnulla={() => setVista("elenco")} onFatto={() => { setVista("elenco"); carica(); }} />;
+  const elimina = async (v) => {
+    if (!confirm(`Elimino "${v.titolo || "valutazione"}" del ${fmtDataIt(v.data)}? Non si può annullare.`)) return;
+    await supabase.from("valutazioni_bulb").delete().eq("id", v.id);
+    carica();
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">Anamnesi, test funzionali, restrizioni e foto del primo incontro e delle rivalutazioni. Sono visibili solo a te.</p>
+      {[...lista].reverse().map((v) => {
+        const nTest = (v.test || []).filter((t) => t.esito).length;
+        return (
+          <Card key={v.id} className="p-3">
+            <div className="flex items-start justify-between gap-2">
+              <button onClick={() => setVista(v.id)} className="text-left flex-1 min-w-0">
+                <p className="font-semibold text-slate-800">{v.titolo || "Valutazione"} <span className="text-xs font-medium text-slate-500">· {fmtDataIt(v.data)}</span></p>
+                <p className="text-xs text-slate-500 mt-0.5">{[`${(v.restrizioni || []).length} restrizioni`, `${nTest} test compilati`, `${Object.keys(v.foto || {}).length} foto`].join(" · ")}</p>
+                {(v.restrizioni || []).length > 0 && <p className="text-xs mt-1" style={{ color: "#27466D" }}>⚠ {(v.restrizioni || []).join(" · ")}</p>}
+              </button>
+              <button onClick={() => elimina(v)} className="text-xs text-slate-400 underline">elimina</button>
+            </div>
+          </Card>
+        );
+      })}
+      {lista.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Ancora nessuna valutazione: inizia dal primo incontro ✨</Card>}
+      <button onClick={() => setVista("nuova")} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>{lista.length === 0 ? "+ Prima valutazione" : "+ Nuova rivalutazione"}</button>
+      {lista.length >= 2 && <ConfrontoValutazioni valutazioni={lista} />}
+    </div>
+  );
+}
+
+// Restrizioni dell'ultima valutazione: sempre sotto gli occhi in sala
+function RestrizioniCliente({ clientId }) {
+  const [v, setV] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data } = await supabase.from("valutazioni_bulb").select("restrizioni, lavorare, data").eq("client_id", clientId).order("data", { ascending: false }).order("created_at", { ascending: false }).limit(1);
+        if (vivo) setV(data?.[0] || null);
+      } catch (e) { /* ignora */ }
+    })();
+    return () => { vivo = false; };
+  }, [clientId]);
+  if (!v || (!(v.restrizioni || []).length && !v.lavorare)) return null;
+  return (
+    <div className="rounded-xl px-3 py-2 text-xs space-y-1" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
+      {(v.restrizioni || []).length > 0 && <p className="font-semibold">⚠ {(v.restrizioni || []).join(" · ")}</p>}
+      {v.lavorare && <p><span className="font-semibold">Da lavorare:</span> {v.lavorare}</p>}
+    </div>
+  );
+}
+
 function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato }) {
   const [nome, setNome] = useState(cl.nome || "");
   const [cognome, setCognome] = useState(cl.cognome || "");
@@ -11622,6 +11873,7 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato }) {
         </div>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (cl.note_particolari || "") && salva({ note_particolari: note.trim() || null })} rows={2} placeholder="Note particolari (infortuni, limiti, cose da ricordare in sala)…" className="w-full mt-2 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700" />
       </div>
+      <div className="px-3 pt-2"><RestrizioniCliente clientId={cl.id} /></div>
       <div className="px-1 py-1"><DiarioClienteHost clientId={cl.id} isAdmin /></div>
       <div className="px-3 pb-3 space-y-2">
         <div className="flex gap-2">
