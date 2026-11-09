@@ -12097,6 +12097,7 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
   const [postazioni, setPostazioni] = useState(Array.isArray(salvato.postazioni) && salvato.postazioni.length ? salvato.postazioni : ["", "", "", ""]);
   const [giri, setGiri] = useState(salvato.giri || 4);
   const [recupero, setRecupero] = useState(salvato.recupero || 45);
+  const [lavoro, setLavoro] = useState(salvato.lavoro || 40);
   const [varianti, setVarianti] = useState(salvato.varianti || {});
   const [giro, setGiro] = useState(0);
   const [pronto, setPronto] = useState(false);
@@ -12104,7 +12105,8 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
   const [ids, setIds] = useState({}); // clientId -> { nomeLower: exerciseId }
   const [valori, setValori] = useState({}); // `${clientId}|${exerciseId}|${n}` -> { kg, rip }
   const [ultime, setUltime] = useState({}); // exerciseId -> "37,5 kg × 10"
-  const [secondi, setSecondi] = useState(0);
+  const [timer, setTimer] = useState({ fase: null, s: 0 });
+  const [autoRec, setAutoRec] = useState(true);
   const oggi = formatDataLocale(new Date());
   const post = postazioni.map((p) => p.trim()).filter(Boolean);
   const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
@@ -12116,10 +12118,15 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
   const occorrenza = (ci, g) => { const nome = esercizioDi(ci, g).toLowerCase(); let n = 1; for (let k = 0; k < g; k++) if (esercizioDi(ci, k).toLowerCase() === nome) n += 1; return n; };
 
   useEffect(() => {
-    if (secondi <= 0) return undefined;
-    const t = setTimeout(() => setSecondi((s) => s - 1), 1000);
+    if (!timer.fase) return undefined;
+    const t = setTimeout(() => {
+      if (timer.s > 1) { setTimer({ fase: timer.fase, s: timer.s - 1 }); return; }
+      try { if (navigator.vibrate) navigator.vibrate(timer.fase === "lavoro" ? [200, 100, 200] : 400); } catch (e) { /* ignora */ }
+      if (timer.fase === "lavoro" && autoRec && Number(recupero) > 0) setTimer({ fase: "recupero", s: Number(recupero) });
+      else setTimer({ fase: null, s: 0 });
+    }, 1000);
     return () => clearTimeout(t);
-  }, [secondi]);
+  }, [timer, autoRec, recupero]);
 
   const importaCsvCircuito = async (file) => {
     if (!file) return;
@@ -12146,14 +12153,14 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
   const salvaSetup = async () => {
     const pulite = post;
     if (pulite.length < 2) { setMsg("Servono almeno 2 postazioni 🫶🏻"); setTimeout(() => setMsg(""), 3000); return; }
-    const circ = { postazioni: pulite, giri: Math.max(1, Math.min(12, Number(giri) || pulite.length)), recupero: Number(recupero) || 45, varianti };
+    const circ = { postazioni: pulite, giri: Math.max(1, Math.min(12, Number(giri) || pulite.length)), recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti };
     const { error } = await supabase.from("gruppi_bulb").update({ circuito: circ }).eq("id", gruppo.id);
     if (error) { setMsg("Non sono riuscita a salvare: riprova 🫶🏻"); setTimeout(() => setMsg(""), 4000); return; }
     setPostazioni(pulite); setModifica(false); setPronto(false); setMsg("Circuito salvato ✨"); onChanged(); setTimeout(() => setMsg(""), 3000);
   };
   const salvaVarianti = async (nuove) => {
     setVarianti(nuove); setPronto(false);
-    await supabase.from("gruppi_bulb").update({ circuito: { postazioni: post, giri: Number(giri) || post.length, recupero: Number(recupero) || 45, varianti: nuove } }).eq("id", gruppo.id);
+    await supabase.from("gruppi_bulb").update({ circuito: { postazioni: post, giri: Number(giri) || post.length, recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti: nuove } }).eq("id", gruppo.id);
   };
 
   // crea (se mancano) il giorno "Circuito" e gli esercizi di ogni cliente, poi scarica i carichi di oggi e l'ultima volta
@@ -12263,6 +12270,7 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
           <p className="text-[11px] text-slate-400">CSV: una colonna "esercizio" (una riga per postazione, nell'ordine). Facoltative: "postazione" (numero), "giri" e "recupero" (compilati nella prima riga).</p>
           <div className="flex gap-3">
             <label className="text-xs text-slate-500 flex-1">Giri<input type="number" min="1" max="12" value={giri} onChange={(e) => setGiri(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+            <label className="text-xs text-slate-500 flex-1">Lavoro (sec)<input type="number" min="0" value={lavoro} onChange={(e) => setLavoro(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
             <label className="text-xs text-slate-500 flex-1">Recupero (sec)<input type="number" min="0" value={recupero} onChange={(e) => setRecupero(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
           </div>
           <button onClick={salvaSetup} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva circuito</button>
@@ -12271,7 +12279,13 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
       {!modifica && post.length < 2 && <p className="text-xs text-slate-500">Prima imposta le postazioni del circuito 🫶🏻</p>}
       {!modifica && post.length >= 2 && membri.length === 0 && <p className="text-xs text-slate-500">Aggiungi le clienti al gruppo per usare il circuito.</p>}
       {!modifica && post.length >= 2 && membri.length > 0 && !pronto && (
-        <button onClick={prepara} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avvia il circuito di oggi</button>
+        <div className="space-y-2">
+          <div className="flex gap-3">
+            <label className="text-xs text-slate-500 flex-1">Lavoro (sec)<input type="number" min="0" value={lavoro} onChange={(e) => setLavoro(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+            <label className="text-xs text-slate-500 flex-1">Recupero (sec)<input type="number" min="0" value={recupero} onChange={(e) => setRecupero(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+          </div>
+          <button onClick={async () => { await supabase.from("gruppi_bulb").update({ circuito: { postazioni: post, giri: giriTot, recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti } }).eq("id", gruppo.id); prepara(); }} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avvia il circuito di oggi</button>
+        </div>
       )}
       {!modifica && pronto && (
         <>
@@ -12279,13 +12293,23 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
             <div className="flex gap-1.5 flex-1">
               {giriArr.map((g) => <button key={g} onClick={() => setGiro(g)} className="flex-1 py-1.5 rounded-full text-xs font-bold" style={{ background: giro === g ? "#27466D" : "#fff", color: giro === g ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{g + 1}</button>)}
             </div>
-            <button onClick={() => setSecondi(Number(recupero) || 45)} className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>{secondi > 0 ? `⏱ ${secondi}s` : `⏱ Recupero ${Number(recupero) || 45}s`}</button>
+            {timer.fase ? (
+              <button onClick={() => setTimer({ fase: null, s: 0 })} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-white" style={{ background: timer.fase === "lavoro" ? "#27466D" : "#4F8FD0" }}>{timer.fase === "lavoro" ? "Lavoro" : "Recupero"} {timer.s}s ■</button>
+            ) : (
+              <>
+                <button onClick={() => setTimer({ fase: "lavoro", s: Number(lavoro) || 40 })} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>▶ Lavoro {Number(lavoro) || 40}s</button>
+                <button onClick={() => setTimer({ fase: "recupero", s: Number(recupero) || 45 })} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1px solid #C9E0F7" }}>▶ Recupero {Number(recupero) || 45}s</button>
+              </>
+            )}
           </div>
-          <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Giro {giro + 1} di {giriTot}</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Giro {giro + 1} di {giriTot}</p>
+            <label className="text-[11px] text-slate-500 flex items-center gap-1"><input type="checkbox" checked={autoRec} onChange={(e) => setAutoRec(e.target.checked)} /> dopo il lavoro parte il recupero</label>
+          </div>
           <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
             {membri.map((m, ci) => <div key={m.id}>{Cella({ ci, g: giro })}</div>)}
           </div>
-          {giro < giriTot - 1 && <button onClick={() => { setGiro(giro + 1); setSecondi(0); }} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avanti: giro {giro + 2} →</button>}
+          {giro < giriTot - 1 && <button onClick={() => { setGiro(giro + 1); setTimer({ fase: null, s: 0 }); }} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avanti: giro {giro + 2} →</button>}
           <div className="overflow-x-auto">
             <table className="w-full text-xs" style={{ color: "#27466D" }}>
               <thead><tr><th className="text-left p-1.5 text-slate-500 font-medium"></th>{giriArr.map((g) => <th key={g} className="text-left p-1.5 font-medium" style={{ color: g === giro ? "#27466D" : "#7a8da3" }}>Giro {g + 1}</th>)}</tr></thead>
