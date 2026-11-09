@@ -3840,6 +3840,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
   const [esercizi, setEsercizi] = useState([]);
   const [entries, setEntries] = useState([]);
   const [storicoEntries, setStoricoEntries] = useState([]);
+  const [storicoNome, setStoricoNome] = useState([]); // carichi di programmi precedenti, ritrovati per nome dell'esercizio
   const [libreria, setLibreria] = useState([]);
   const [sessoCl, setSessoCl] = useState("");
   const [scarCl, setScarCl] = useState([]);
@@ -3882,14 +3883,28 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
     if (ids.length) {
       const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", ids);
       setStoricoEntries(en || []);
-    } else setStoricoEntries([]);
+      // Dopo un aggiornamento del programma gli esercizi mantenuti hanno un id nuovo: i vecchi carichi si ritrovano per nome
+      try {
+        const nn = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_()]/g, " ").replace(/\s+/g, " ").trim();
+        const { data: tuttiEs } = await supabase.from("training_exercises").select("id, nome").eq("client_id", clientId);
+        const perNome = {};
+        (tuttiEs || []).forEach((x) => { const k = nn(x.nome); if (k) (perNome[k] = perNome[k] || []).push(x.id); });
+        const mappaId = {}; // id vecchio -> id esercizio attuale
+        [...es, ...pr].forEach((cur) => { (perNome[nn(cur.nome)] || []).forEach((vecchio) => { if (!ids.includes(vecchio)) mappaId[vecchio] = cur.id; }); });
+        const vecchi = Object.keys(mappaId);
+        if (vecchi.length) {
+          const { data: en2 } = await supabase.from("training_entries").select("*").in("exercise_id", vecchi);
+          setStoricoNome((en2 || []).map((e) => ({ ...e, exercise_id: mappaId[e.exercise_id] })));
+        } else setStoricoNome([]);
+      } catch (e) { setStoricoNome([]); }
+    } else { setStoricoEntries([]); setStoricoNome([]); }
   };
   useEffect(() => { caricaGiorno(); setAperti({}); }, [giornoId]);
   useEffect(() => { setEntries(storicoEntries.filter((e) => e.data === data)); }, [storicoEntries, data]);
 
   // ultimi valori per esercizio: dalla data più recente precedente a quella scelta
   const ultimePer = (exId) => {
-    const prima = storicoEntries.filter((e) => e.exercise_id === exId && e.data < data && (e.kg != null || e.ripetizioni));
+    const prima = [...storicoEntries, ...storicoNome].filter((e) => e.exercise_id === exId && e.data < data && (e.kg != null || e.ripetizioni));
     if (!prima.length) return {};
     const d = prima.map((e) => e.data).sort().pop();
     const m = {}; prima.filter((e) => e.data === d).forEach((e) => { m[e.numero_serie] = e; });
@@ -8623,6 +8638,7 @@ function EserciziMancantiClienti({ clients, onSelect }) {
 
 function OggiCoach({ clients, onSelect, vai }) {
   const [dati, setDati] = useState(null);
+  const [gruppoAperto, setGruppoAperto] = useState(null);
   const oggi = formatDataLocale(new Date());
   const domani = addGiorni(oggi, 1);
   const giorniDa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
@@ -8633,6 +8649,8 @@ function OggiCoach({ clients, onSelect, vai }) {
     (async () => {
       try {
         const { data: ev } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").gte("data", oggi).lte("data", addGiorni(oggi, 7)).order("data").order("ora");
+        let gruppi = {};
+        try { const { data: gg0 } = await supabase.from("gruppi_bulb").select("*"); gruppi = Object.fromEntries((gg0 || []).map((g) => [g.id, g])); } catch (e) { /* ignora */ }
         const { count: richieste } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
         const { count: checkDaEsaminare } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
         const { data: msg } = await supabase.from("messaggi").select("client_id, mittente, created_at").order("created_at", { ascending: false }).limit(1000);
@@ -8652,7 +8670,7 @@ function OggiCoach({ clients, onSelect, vai }) {
         const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").order("id"));
         const pagato = {};
         pag.forEach((r) => { if (r.stato === "saldato") pagato[r.client_id] = true; });
-        if (vivo) setDati({ ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico, primoCheck, conGiorni, pagato });
+        if (vivo) setDati({ gruppi, ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico, primoCheck, conGiorni, pagato });
       } catch (e) { if (vivo) setDati({ ev: [], richieste: 0, checkDaEsaminare: 0, ultimoMsg: {}, ultimoCarico: {}, primoCheck: {}, conGiorni: {}, pagato: {} }); }
     })();
     return () => { vivo = false; };
@@ -8669,10 +8687,24 @@ function OggiCoach({ clients, onSelect, vai }) {
   const vociDelGiorno = (data) => {
     const v = [];
     nuoveClienti.filter((n) => n.scad === data).forEach((n) => v.push({ key: `sk-${n.c.id}`, ora: null, titolo: `${n.c.nome} ${n.c.cognome}`, sub: "Ultimo giorno per consegnare la scheda", clientId: n.c.id }));
-    attivi.filter((e) => e.data === data).forEach((e) => v.push({
+    const viste = {};
+    attivi.filter((e) => e.data === data).forEach((e) => {
+      if (e.gruppo_id && e.tipo === "lezione") {
+        // lezione di gruppo: una sola voce per il gruppo, non una per cliente
+        const k = `${e.gruppo_id}|${e.ora}|${e.stato}`;
+        if (viste[k]) { viste[k].n += 1; viste[k].sub = viste[k].mk(viste[k].n); return; }
+        const g = dati.gruppi?.[e.gruppo_id] || { id: e.gruppo_id, nome: "Gruppo Bulb" };
+        const voce = { key: `g-${k}`, ora: e.ora ? e.ora.slice(0, 5) : null, titolo: `👥 ${g.nome}`, clientId: null, gruppo: g, n: 1,
+          mk: (n) => `Lezione di gruppo · ${n} client${n === 1 ? "e" : "i"}${e.luogo ? ` · ${e.luogo}` : ""}${e.stato === "richiesta" ? " · da confermare" : ""}` };
+        voce.sub = voce.mk(1);
+        viste[k] = voce; v.push(voce);
+        return;
+      }
+      v.push({
       key: e.id, ora: e.ora ? e.ora.slice(0, 5) : null, titolo: nomeEv(e), clientId: e.client_id,
       sub: `${e.tipo === "lezione" ? "Lezione 1:1" : e.tipo === "personale" ? "Personale" : "Call"}${e.luogo ? ` · ${e.luogo}` : ""}${e.stato === "richiesta" ? " · da confermare" : ""}`,
-    }));
+      });
+    });
     clients.forEach((c) => {
       if (c.tipo_servizio !== "presenza" && c.prossimo_check === data) v.push({ key: `ck-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Check da fare", clientId: c.id });
       if (c.data_scadenza === data && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto") v.push({ key: `sc-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Pacchetto in scadenza", clientId: c.id });
@@ -8680,7 +8712,7 @@ function OggiCoach({ clients, onSelect, vai }) {
     return v.sort((x, y) => (x.ora || "").localeCompare(y.ora || ""));
   };
   const RigaVoce = ({ e }) => (
-    <button onClick={() => e.clientId && onSelect(e.clientId)} className="w-full flex items-center gap-3 text-left">
+    <button onClick={() => (e.gruppo ? setGruppoAperto(e.gruppo) : e.clientId && onSelect(e.clientId))} className="w-full flex items-center gap-3 text-left">
       <span className="text-sm font-semibold text-slate-700 w-12 flex-shrink-0">{e.ora || "•"}</span>
       <span className="flex-1 min-w-0">
         <span className="block text-sm text-slate-700 font-medium truncate">{e.titolo}</span>
@@ -8741,6 +8773,7 @@ function OggiCoach({ clients, onSelect, vai }) {
 
   return (
     <div className="space-y-4">
+      {gruppoAperto && <SessioneGruppo gruppo={gruppoAperto} onClose={() => setGruppoAperto(null)} onChanged={() => {}} onSelect={onSelect} />}
       <Giorno titolo="Oggi" data={oggi} />
       <Giorno titolo="In programma domani" data={domani} />
 
