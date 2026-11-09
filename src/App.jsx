@@ -800,6 +800,34 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         </Card>
       )}
 
+      {(() => {
+        // Avviso di rinnovo: compare quando il pacchetto è alle porte e resta finché non viene saldato il nuovo
+        if (client.stato_pacchetto === "gratuito") return null;
+        let testo = null, scaduto = false;
+        if (isOnline && client.data_scadenza) {
+          const oggiS = formatDataLocale(new Date());
+          const g = Math.round((new Date(`${client.data_scadenza}T12:00:00`) - new Date(`${oggiS}T12:00:00`)) / 86400000);
+          const dd = client.data_scadenza.split("-").reverse().slice(0, 2).join("/");
+          if (g < 0) { scaduto = true; testo = `Il tuo pacchetto è scaduto il ${dd} 🫶🏻 Appena puoi procedi con il saldo del nuovo così continuiamo il percorso senza interruzioni. Nel frattempo puoi continuare ad allenarti ✨`; }
+          else if (g === 0) testo = "Oggi si chiude il tuo pacchetto 🫶🏻 Quando riesci procedi con il saldo del nuovo, così proseguiamo senza pause ✨";
+          else if (g <= 7) testo = `Il tuo pacchetto scade il ${dd} (${g === 1 ? "domani" : `tra ${g} giorni`}) 🫶🏻 Quando riesci procedi con il saldo del rinnovo, così continuiamo senza pause ✨`;
+        } else if (isBulb && !pacchettoSingolo) {
+          const totale = infoPacchetto?.totale ?? lezioniIncluse;
+          const rimaste = totale ? Math.max(0, totale - (lezioniSvolte ?? 0)) : null;
+          if (totale && rimaste !== null && rimaste <= 2) testo = rimaste === 0
+            ? "Hai completato il pacchetto, che brava! 💪🏻 Per prenotare le prossime lezioni procedi con il saldo del nuovo pacchetto 🫶🏻"
+            : `Ti ${rimaste === 1 ? "resta una lezione" : "restano 2 lezioni"} nel pacchetto 🫶🏻 Quando riesci procedi con il saldo del rinnovo, così continuiamo senza pause ✨`;
+        }
+        if (!testo) return null;
+        return (
+          <div className="rounded-2xl px-3.5 py-3 text-sm" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
+            <p className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#3F78B3" }}>{scaduto ? "Pacchetto scaduto" : "Rinnovo del pacchetto"}</p>
+            <p className="mt-1">{testo}</p>
+            <p className="text-[11px] mt-1.5" style={{ color: "#7a8da3" }}>Quest'avviso sparisce da solo appena il nuovo pacchetto è registrato.</p>
+          </div>
+        );
+      })()}
+
       {schedaAperta && <SchedaRiassuntiva client={client} onClose={() => setSchedaAperta(false)} />}
       {sheetLezione && <ModificaLezioneSheet client={client} evento={sheetLezione} onChiudi={() => setSheetLezione(null)} onFatto={() => { caricaProssimoEv(); }} />}
 
@@ -940,6 +968,92 @@ let timerPushCarichi = null;
 function inviaPushCarichi() { // aspetta qualche secondo dall'ultimo carico salvato, poi controlla record e costanza
   clearTimeout(timerPushCarichi);
   timerPushCarichi = setTimeout(() => inviaPush({ evento: "carico" }), 8000);
+}
+
+/* ------------------------------------------------------------------ */
+/* CODA OFFLINE — i carichi segnati senza rete restano sul telefono    */
+/* e partono da soli appena torna la connessione                       */
+/* ------------------------------------------------------------------ */
+const CODA_KEY = "coda_log_v1";
+const leggiCoda = () => { try { return JSON.parse(localStorage.getItem(CODA_KEY) || "[]"); } catch (e) { return []; } };
+const scriviCoda = (c) => { try { localStorage.setItem(CODA_KEY, JSON.stringify(c)); } catch (e) { /* ignora */ } try { window.dispatchEvent(new Event("coda-log")); } catch (e) { /* ignora */ } };
+const chiaveOp = (o) => `${o.clientId}|${o.exerciseId}|${o.data}|${o.n}`;
+function accodaOp(op) {
+  const c = leggiCoda(); const k = chiaveOp(op);
+  const i = c.findIndex((x) => x.k === k);
+  if (i >= 0) c[i] = { ...c[i], payload: { ...c[i].payload, ...op.payload } };
+  else c.push({ ...op, k, tentativi: 0 });
+  scriviCoda(c);
+}
+async function scriviSerieRemoto(op) {
+  const { data: ex, error: e0 } = await supabase.from("training_entries").select("id").eq("client_id", op.clientId).eq("exercise_id", op.exerciseId).eq("data", op.data).eq("numero_serie", op.n).order("id").limit(1);
+  if (e0) throw e0;
+  if (ex && ex.length) {
+    const { error } = await supabase.from("training_entries").update(op.payload).eq("id", ex[0].id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("training_entries").insert({ client_id: op.clientId, exercise_id: op.exerciseId, data: op.data, numero_serie: op.n, ...op.payload });
+    if (error) throw error;
+  }
+}
+let codaInInvio = false;
+async function inviaCoda() {
+  if (codaInInvio) return;
+  const iniziale = leggiCoda();
+  if (!iniziale.length) return;
+  codaInInvio = true;
+  let inviate = 0;
+  try {
+    for (const op of iniziale) {
+      try {
+        await scriviSerieRemoto(op);
+        // toglie dalla coda solo se nel frattempo non è stato aggiornato un valore più recente
+        const ora = leggiCoda();
+        const k = chiaveOp(op);
+        const att = ora.find((x) => x.k === k);
+        if (att && JSON.stringify(att.payload) === JSON.stringify(op.payload)) scriviCoda(ora.filter((x) => x.k !== k));
+        else if (att) { /* è arrivato altro nel frattempo: resta in coda, parte al prossimo giro */ }
+        inviate += 1;
+      } catch (e) {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) break; // ancora senza rete
+        const ora = leggiCoda(); const k = chiaveOp(op);
+        const att = ora.find((x) => x.k === k);
+        if (att) { att.tentativi = (att.tentativi || 0) + 1; scriviCoda(att.tentativi > 40 ? ora.filter((x) => x.k !== k) : ora); }
+        break; // rete instabile: ci riprova al prossimo giro
+      }
+    }
+  } finally { codaInInvio = false; }
+  if (inviate > 0) { try { window.dispatchEvent(new Event("coda-sync")); } catch (e) { /* ignora */ } }
+}
+// aggiunge ai carichi scaricati quelli ancora in attesa di invio
+function sovrapponiCoda(entries, clientId) {
+  const coda = leggiCoda().filter((o) => o.clientId === clientId);
+  if (!coda.length) return entries;
+  const out = entries.map((e) => ({ ...e }));
+  coda.forEach((o) => {
+    const i = out.findIndex((e) => e.exercise_id === o.exerciseId && e.data === o.data && e.numero_serie === o.n);
+    if (i >= 0) out[i] = { ...out[i], ...o.payload, inAttesa: true };
+    else out.push({ id: `loc-${o.k}`, client_id: o.clientId, exercise_id: o.exerciseId, data: o.data, numero_serie: o.n, ...o.payload, inAttesa: true });
+  });
+  return out;
+}
+function StatoSyncLog() {
+  const [n, setN] = useState(() => leggiCoda().length);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine !== false));
+  useEffect(() => {
+    const agg = () => setN(leggiCoda().length);
+    const on = () => { setOnline(true); inviaCoda(); }; const off = () => setOnline(false);
+    window.addEventListener("coda-log", agg); window.addEventListener("coda-sync", agg);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { window.removeEventListener("coda-log", agg); window.removeEventListener("coda-sync", agg); window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  if (n === 0 && online) return null;
+  return (
+    <div className="rounded-2xl px-3 py-2 text-xs flex items-center justify-between gap-2" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
+      <span>{n > 0 ? `📴 ${n} ${n === 1 ? "serie salvata" : "serie salvate"} sul telefono: partono da sole appena c'è connessione ✨` : "📴 Sei senza connessione: puoi continuare, i carichi restano salvati sul telefono ✨"}</span>
+      {n > 0 && online && <button onClick={() => inviaCoda()} className="font-semibold underline flex-shrink-0">Riprova ora</button>}
+    </div>
+  );
 }
 
 function chiaveVapidInBytes(b64) {
@@ -1728,6 +1842,18 @@ function ScarichiCoach({ clientId, scarichi, onChange }) {
       )}
     </Card>
   );
+}
+
+// Scarico programmato segnabile ovunque (allenamento, scheda gruppo): carica da solo i periodi della cliente
+function ScarichiCliente({ clientId }) {
+  const [lista, setLista] = useState([]);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    (async () => { try { const { data } = await supabase.from("scarichi").select("id, dal, al, nota").eq("client_id", clientId).order("dal"); if (vivo) setLista(data || []); } catch (e) { /* ignora */ } })();
+    return () => { vivo = false; };
+  }, [clientId, n]);
+  return <ScarichiCoach clientId={clientId} scarichi={lista} onChange={() => setN((x) => x + 1)} />;
 }
 
 function ProgressiCarichi({ clientId, isAdmin = false }) {
@@ -3680,12 +3806,19 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
     const payload = { kg: num(kg), ripetizioni: rip === "" || rip == null ? null : String(rip) };
     if (parti.length > 1) payload.extra = extraDi(n, completata === true);
     if (completata !== undefined) payload.completata = completata;
-    if (e) await supabase.from("training_entries").update(payload).eq("id", e.id);
+    if (!e && payload.kg == null && !payload.ripetizioni && !payload.completata && !payload.extra) return;
+    const op = { clientId, exerciseId: es.id, data, n, payload };
+    const idVero = e && !String(e.id).startsWith("loc-") ? e.id : null;
+    const giaInCoda = leggiCoda().some((x) => x.k === chiaveOp(op));
+    let ok = true;
+    if (giaInCoda) { accodaOp(op); ok = false; inviaCoda(); }
     else {
-      if (payload.kg == null && !payload.ripetizioni && !payload.completata && !payload.extra) return;
-      await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: es.id, data, numero_serie: n, ...payload });
+      try {
+        if (idVero) { const { error } = await supabase.from("training_entries").update(payload).eq("id", idVero); if (error) throw error; }
+        else await scriviSerieRemoto(op);
+      } catch (err) { accodaOp(op); ok = false; } // senza rete: resta sul telefono e parte appena possibile
     }
-    if (payload.kg != null) inviaPushCarichi();
+    if (ok && payload.kg != null) inviaPushCarichi();
     setBozza((b) => { const c = { ...b }; Object.keys(c).forEach((k) => { if (k.startsWith(`${n}-`)) delete c[k]; }); return c; });
     onSaved();
   };
@@ -3709,8 +3842,10 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   const salvaNota = async () => {
     if (nota === notaSalvata) return;
     const prima = entries.find((x) => x.numero_serie === 1) || entries[0];
-    if (prima) await supabase.from("training_entries").update({ note: nota || null }).eq("id", prima.id);
-    else if (nota) await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: es.id, data, numero_serie: 1, note: nota });
+    if (prima || nota) {
+      const op = { clientId, exerciseId: es.id, data, n: prima?.numero_serie ?? 1, payload: { note: nota || null } };
+      try { await scriviSerieRemoto(op); } catch (err) { accodaOp(op); }
+    }
     onSaved();
   };
   const notaCoach = notaPulita(es.note);
@@ -3853,7 +3988,11 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
 
   useEffect(() => {
     (async () => {
-      const { data: g } = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
+      const rg = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
+      let g = rg.data;
+      const kG = `diario_giorni_${clientId}`;
+      if (rg.error || !g) { try { g = JSON.parse(localStorage.getItem(kG) || "null"); } catch (e) { g = null; } }
+      else { try { localStorage.setItem(kG, JSON.stringify(g)); } catch (e) { /* ignora */ } }
       const attivi = (g || []).filter((x) => !x.scheda_archiviata);
       setGiorni(attivi);
       if (attivi.length) setGiornoId((cur) => cur || attivi[0].id);
@@ -3873,16 +4012,31 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
 
   const caricaGiorno = async () => {
     if (!giornoId) return;
-    const { data: tutti } = await supabase.from("training_exercises").select("*").eq("training_day_id", giornoId).order("ordine");
-    const es = (tutti || []).filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
+    const cKey = `diario_cache_${clientId}_${giornoId}`;
+    let es, pr, ids, en = [];
+    try {
+      const r1 = await supabase.from("training_exercises").select("*").eq("training_day_id", giornoId).order("ordine");
+      if (r1.error) throw r1.error;
+      const tutti = r1.data || [];
+      const r2 = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
+      if (r2.error) throw r2.error;
+      es = tutti.filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
+      pr = [...(r2.data || []), ...tutti.filter((e) => e.tipo === "attivazione")];
+      ids = [...es, ...pr].map((e) => e.id);
+      if (ids.length) { const r3 = await supabase.from("training_entries").select("*").in("exercise_id", ids); if (r3.error) throw r3.error; en = r3.data || []; }
+    } catch (err) {
+      // senza rete: si tiene quello che è già a schermo (o l'ultima copia salvata) e si aggiungono i carichi in attesa
+      if (!esercizi.length) {
+        try { const c = JSON.parse(localStorage.getItem(cKey) || "null"); if (c) { setEsercizi(c.es); setPrep(c.pr); setStoricoEntries(sovrapponiCoda(c.en || [], clientId)); return; } } catch (e2) { /* ignora */ }
+      }
+      setStoricoEntries((prev) => sovrapponiCoda(prev, clientId));
+      return;
+    }
     setEsercizi(es);
-    const { data: mob } = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
-    const pr = [...(mob || []), ...(tutti || []).filter((e) => e.tipo === "attivazione")];
     setPrep(pr);
-    const ids = [...es, ...pr].map((e) => e.id);
+    try { localStorage.setItem(cKey, JSON.stringify({ es, pr, en })); } catch (e3) { /* ignora */ }
     if (ids.length) {
-      const { data: en } = await supabase.from("training_entries").select("*").in("exercise_id", ids);
-      setStoricoEntries(en || []);
+      setStoricoEntries(sovrapponiCoda(en, clientId));
       // Dopo un aggiornamento del programma gli esercizi mantenuti hanno un id nuovo: i vecchi carichi si ritrovano per nome
       try {
         const nn = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_()]/g, " ").replace(/\s+/g, " ").trim();
@@ -3896,10 +4050,12 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
           const { data: en2 } = await supabase.from("training_entries").select("*").in("exercise_id", vecchi);
           setStoricoNome((en2 || []).map((e) => ({ ...e, exercise_id: mappaId[e.exercise_id] })));
         } else setStoricoNome([]);
-      } catch (e) { setStoricoNome([]); }
-    } else { setStoricoEntries([]); setStoricoNome([]); }
+      } catch (e) { /* senza rete si tiene quanto già trovato */ }
+    } else { setStoricoEntries(sovrapponiCoda([], clientId)); setStoricoNome([]); }
   };
   useEffect(() => { caricaGiorno(); setAperti({}); }, [giornoId]);
+  const caricaRef = React.useRef(caricaGiorno); caricaRef.current = caricaGiorno;
+  useEffect(() => { const h = () => caricaRef.current(); window.addEventListener("coda-sync", h); return () => window.removeEventListener("coda-sync", h); }, []);
   useEffect(() => { setEntries(storicoEntries.filter((e) => e.data === data)); }, [storicoEntries, data]);
 
   // ultimi valori per esercizio: dalla data più recente precedente a quella scelta
@@ -3964,6 +4120,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
         <h1 className="text-2xl font-bold" style={{ color: "#27466D" }}>Diario allenamento</h1>
         <p className="text-sm mt-1" style={{ color: "#7a8da3" }}>Registra carichi e ripetizioni, serie dopo serie.</p>
       </div>
+      <StatoSyncLog />
 
       {giorni.length === 0 ? (
         <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
@@ -7774,6 +7931,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "allenamento" && (
         <div className="space-y-5">
           {isBulb && <RestrizioniCliente clientId={client.id} />}
+          <ScarichiCliente clientId={client.id} />
           <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
           <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
           {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
@@ -11874,7 +12032,7 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoV
         </div>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (cl.note_particolari || "") && salva({ note_particolari: note.trim() || null })} rows={2} placeholder="Note particolari (infortuni, limiti, cose da ricordare in sala)…" className="w-full mt-2 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700" />
       </div>
-      <div className="px-3 pt-2"><RestrizioniCliente clientId={cl.id} /></div>
+      <div className="px-3 pt-2 space-y-2"><RestrizioniCliente clientId={cl.id} /><ScarichiCliente clientId={cl.id} /></div>
       <div className="px-1 py-1"><DiarioClienteHost clientId={cl.id} isAdmin /></div>
       <div className="px-3 pb-3 space-y-2">
         <div className="flex gap-2">
@@ -12601,6 +12759,16 @@ export default function App() {
   // Il coach può guardare l'app come cliente (profilo Morgana) senza uscire; ricordo la scelta finché la scheda resta aperta
   const [vistaCliente, setVistaCliente] = useState(() => { try { return sessionStorage.getItem("vistaCliente") === "1"; } catch (e) { return false; } });
   const impostaVistaCliente = (v) => { setVistaCliente(v); try { sessionStorage.setItem("vistaCliente", v ? "1" : "0"); } catch (e) { /* ignora */ } };
+
+  // Carichi salvati offline: li invia quando torna la rete, quando riapri l'app e ogni tanto
+  useEffect(() => {
+    const prova = () => { if (leggiCoda().length) inviaCoda(); };
+    prova();
+    window.addEventListener("online", prova);
+    document.addEventListener("visibilitychange", prova);
+    const t = setInterval(prova, 15000);
+    return () => { window.removeEventListener("online", prova); document.removeEventListener("visibilitychange", prova); clearInterval(t); };
+  }, []);
 
   // Toglie il pallino rosso dall'icona quando apri l'app
   useEffect(() => {
