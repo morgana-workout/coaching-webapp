@@ -12009,6 +12009,81 @@ function RestrizioniCliente({ clientId }) {
   );
 }
 
+// Importa un programma da CSV su una cliente (usato per i gruppi: stesso file per tutte).
+// Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note, tipo, esecuzione (+ "scheda" facoltativa)
+async function importaCsvPerCliente(righe, clientId, sostituisci) {
+  const header = righe[0].map((h) => h.trim().toLowerCase());
+  const idx = {
+    scheda: header.indexOf("scheda"), giorno: header.indexOf("giorno"), esercizio: header.indexOf("esercizio"),
+    serie: header.indexOf("serie"), ripetizioni: header.indexOf("ripetizioni"), recupero: header.indexOf("recupero"),
+    tecnica: header.indexOf("tecnica"), note: header.indexOf("note"), tipo: header.indexOf("tipo"), esecuzione: header.indexOf("esecuzione"),
+  };
+  if ((idx.giorno === -1 && idx.tipo === -1) || idx.esercizio === -1) throw new Error('Il file deve avere almeno le colonne "giorno" e "esercizio" nella prima riga.');
+  const { data: tuttiGiorni } = await supabase.from("training_days").select("*").eq("client_id", clientId);
+  let giorniLocali = (tuttiGiorni || []).filter((g) => !g.scheda_archiviata);
+  if (sostituisci && giorniLocali.length) {
+    const numeri = (tuttiGiorni || []).map((g) => parseInt((g.scheda_archiviata || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+    const etichetta = "T." + ((numeri.length ? Math.max(...numeri) : 0) + 1);
+    await supabase.from("training_days").update({ scheda_archiviata: etichetta }).in("id", giorniLocali.map((g) => g.id));
+    giorniLocali = [];
+  }
+  const cacheGiorni = {};
+  let giorniCreati = 0, eserciziCreati = 0;
+  const { data: prepEsistenti } = await supabase.from("training_exercises").select("id, nome, tipo").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita");
+  const prepLista = [...(prepEsistenti || [])];
+  for (let r = 1; r < righe.length; r++) {
+    const riga = righe[r];
+    if (riga.every((v) => !v || !v.trim())) continue;
+    const schedaVal = idx.scheda !== -1 ? (riga[idx.scheda] || "").trim() : "";
+    const giornoVal = idx.giorno !== -1 ? (riga[idx.giorno] || "").trim() : "";
+    const nomeEsercizio = (riga[idx.esercizio] || "").trim();
+    const tipoGrezzo = idx.tipo !== -1 ? (riga[idx.tipo] || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") : "";
+    const tipoRiga = tipoGrezzo.startsWith("mobil") ? "mobilita" : tipoGrezzo.startsWith("attiv") ? "attivazione" : "forza";
+    if (!nomeEsercizio) continue;
+    if (tipoRiga === "mobilita") {
+      const campi = { note: idx.note !== -1 ? (riga[idx.note] || "").trim() || null : null, esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null };
+      const gia = prepLista.find((x) => x.nome.trim().toLowerCase() === nomeEsercizio.toLowerCase());
+      if (gia) await supabase.from("training_exercises").update(campi).eq("id", gia.id);
+      else {
+        const { data: nuova } = await supabase.from("training_exercises").insert({ client_id: clientId, training_day_id: null, nome: nomeEsercizio, tipo: tipoRiga, ordine: prepLista.length + 1, ...campi }).select("id, nome, tipo").single();
+        if (nuova) prepLista.push(nuova);
+      }
+      continue;
+    }
+    if (!giornoVal) continue;
+    const nomeGiornoCompleto = schedaVal ? `${schedaVal} - ${giornoVal}` : giornoVal;
+    let giornoId = cacheGiorni[nomeGiornoCompleto];
+    if (!giornoId) {
+      const esistente = giorniLocali.find((g) => g.nome === nomeGiornoCompleto);
+      if (esistente) giornoId = esistente.id;
+      else {
+        if (giorniLocali.length >= 30) continue;
+        const { data: nuovo } = await supabase.from("training_days").insert({ client_id: clientId, nome: nomeGiornoCompleto, ordine: giorniLocali.length + 1 }).select().single();
+        if (!nuovo) continue;
+        giorniLocali.push(nuovo); giornoId = nuovo.id; giorniCreati++;
+      }
+      cacheGiorni[nomeGiornoCompleto] = giornoId;
+    }
+    const { data: eserciziEsistenti } = await supabase.from("training_exercises").select("nome").eq("training_day_id", giornoId);
+    const nomiEsistenti = (eserciziEsistenti || []).map((e) => e.nome);
+    if (nomiEsistenti.includes(nomeEsercizio)) continue;
+    const noteParti = [];
+    if (idx.recupero !== -1 && riga[idx.recupero]?.trim()) noteParti.push(`Recupero: ${riga[idx.recupero].trim()}`);
+    if (idx.tecnica !== -1 && riga[idx.tecnica]?.trim()) noteParti.push(riga[idx.tecnica].trim());
+    if (idx.note !== -1 && riga[idx.note]?.trim()) noteParti.push(riga[idx.note].trim());
+    await supabase.from("training_exercises").insert({
+      client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: tipoRiga,
+      esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
+      ordine: nomiEsistenti.length + 1,
+      serie: idx.serie !== -1 && riga[idx.serie]?.trim() ? Number(riga[idx.serie].trim()) : null,
+      ripetizioni: idx.ripetizioni !== -1 ? (riga[idx.ripetizioni] || "").trim() || null : null,
+      note: noteParti.join(" — ") || null,
+    });
+    eserciziCreati++;
+  }
+  return { giorniCreati, eserciziCreati };
+}
+
 function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoValutazione = false }) {
   const [nome, setNome] = useState(cl.nome || "");
   const [cognome, setCognome] = useState(cl.cognome || "");
@@ -12063,6 +12138,28 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [msg, setMsg] = useState("");
   const [notaG, setNotaG] = useState(gruppo.nota || "");
   const [modoVal, setModoVal] = useState(false);
+  const [csvAperto, setCsvAperto] = useState(false);
+  const [csvDest, setCsvDest] = useState(null); // null = tutte le clienti del gruppo
+  const [csvSostituisci, setCsvSostituisci] = useState(false);
+  const [csvInCorso, setCsvInCorso] = useState(false);
+  const importaCsvGruppo = async (file) => {
+    if (!file) return;
+    const dest = (csvDest || (membri || []).map((m) => m.id));
+    if (!dest.length) return;
+    const nomi = dest.map((id) => (membri || []).find((m) => m.id === id)).filter(Boolean).map((m) => `${m.nome} ${m.cognome || ""}`.trim()).join(", ");
+    if (!confirm(`Importo il programma del file per: ${nomi}.${csvSostituisci ? " Il programma attuale di ognuna verrà archiviato (con tutti i carichi) e sostituito." : " Viene aggiunto a quello che hanno già."} Procedo?`)) return;
+    setCsvInCorso(true); setMsg("Importo…");
+    try {
+      const righe = parseCSV(await file.text());
+      if (righe.length < 2) throw new Error("File vuoto o non leggibile.");
+      let tot = { giorniCreati: 0, eserciziCreati: 0 };
+      for (const id of dest) { const r = await importaCsvPerCliente(righe, id, csvSostituisci); tot.giorniCreati += r.giorniCreati; tot.eserciziCreati += r.eserciziCreati; }
+      setMsg(`Fatto ✨ ${dest.length} clienti: ${tot.giorniCreati} giorni e ${tot.eserciziCreati} esercizi creati in totale.`);
+      setCsvAperto(false); setMembri(null); await carica();
+    } catch (e) { setMsg(e?.message ? `Import non riuscito: ${e.message}` : "Import non riuscito: controlla il file e riprova."); }
+    setCsvInCorso(false);
+    setTimeout(() => setMsg(""), 7000);
+  };
   const [prenota, setPrenota] = useState(false);
   const [lez, setLez] = useState({ data: formatDataLocale(new Date()), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
   const [prossime, setProssime] = useState([]);
@@ -12153,9 +12250,28 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
                 </select>
               )}
               <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
+              <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Importa programma da CSV</button>
               <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
               {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
             </div>
+            {csvAperto && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs text-slate-600">Carichi lo stesso file CSV del programma e viene importato per tutte le clienti scelte, ognuna col suo programma (poi ritocchi le variazioni). Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note (facoltative: scheda, tipo, esecuzione).</p>
+                <div className="flex flex-wrap gap-2">
+                  {membri.map((m) => {
+                    const on = (csvDest || membri.map((x) => x.id)).includes(m.id);
+                    return <button key={m.id} onClick={() => { const cur = csvDest || membri.map((x) => x.id); setCsvDest(on ? cur.filter((x) => x !== m.id) : [...cur, m.id]); }} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{`${m.nome} ${m.cognome || ""}`.trim()}</button>;
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  {[[false, "Aggiungi ai programmi esistenti"], [true, "Sostituisci (archivia l'attuale)"]].map(([v, l]) => <button key={String(v)} onClick={() => setCsvSostituisci(v)} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: csvSostituisci === v ? "#27466D" : "#fff", color: csvSostituisci === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>)}
+                </div>
+                <label className="block w-full py-2 rounded-xl text-sm font-semibold text-white text-center cursor-pointer" style={{ background: "#27466D", opacity: csvInCorso ? 0.5 : 1 }}>
+                  {csvInCorso ? "Importo…" : "Scegli il file CSV"}
+                  <input type="file" accept=".csv,text/csv" className="hidden" disabled={csvInCorso} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; importaCsvGruppo(f); }} />
+                </label>
+              </div>
+            )}
             {prenota && (
               <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
                 <p className="text-xs text-slate-600">Crea la lezione per tutte le clienti del gruppo in un colpo solo: compare nel calendario come un unico evento e scala la lezione dal pacchetto di ognuna.</p>
