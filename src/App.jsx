@@ -7629,7 +7629,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     { key: "progressi", label: "Progressi" },
     ...(isBulb ? [] : [tabAll]),
     { key: "nutrizione", label: "Macros" },
-    ...(client.kcal_attivo !== false && !client.seguita_da_nutrizionista ? [{ key: "analisi", label: "Cosa mangia" }] : []),
+    ...(client.kcal_attivo !== false || client.nutrizione_attiva !== false || client.seguita_da_nutrizionista ? [{ key: "analisi", label: "Analisi alimentazione" }] : []),
     ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
     { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
@@ -7672,7 +7672,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="space-y-3 min-w-0">
               <AttivitaClienti clients={[client]} singola />
-              {client.kcal_attivo !== false && !client.seguita_da_nutrizionista && <button onClick={() => setTab("analisi")} className="w-full bg-sky-50 text-sky-700 rounded-xl py-2 text-[13px] font-medium">Apri analisi alimentazione →</button>}
+              {(client.kcal_attivo !== false || client.nutrizione_attiva !== false || client.seguita_da_nutrizionista) && <button onClick={() => setTab("analisi")} className="w-full bg-sky-50 text-sky-700 rounded-xl py-2 text-[13px] font-medium">Apri analisi alimentazione →</button>}
               <button onClick={() => setTab("dati")} className="w-full bg-slate-100 text-slate-600 rounded-xl py-2 text-[13px]">Anagrafica e percorso →</button>
             </div>
             <Card className="p-4 space-y-3 min-w-0">
@@ -8032,7 +8032,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           } />
       )}
 
-      {tab === "analisi" && client.kcal_attivo !== false && <AnalisiCibo client={client} />}
+      {tab === "analisi" && <AnalisiCibo client={client} />}
       {tab === "ciclo" && <CicloCliente client={client} isAdmin />}
 
       {tab === "notifiche" && <NotificheDellaCliente client={client} />}
