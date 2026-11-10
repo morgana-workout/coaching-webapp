@@ -1770,7 +1770,7 @@ function TrendCarichi({ trend, isAdmin }) {
     <div className="space-y-2">
       <div className="px-1">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isAdmin ? "Trend dei carichi · upper e lower" : "Come vanno i tuoi carichi"}</p>
-        <p className="text-slate-400 text-xs mt-0.5">{isAdmin ? "Indice di progressione del carico (mediana della variazione settimanale per esercizio, base 100). I cerchi vuoti indicano settimane con carichi ridotti." : "Parte da 100 e sale quando i carichi crescono. I cerchi vuoti sono settimane in cui qualche carico è sceso."}</p>
+        <p className="text-slate-400 text-xs mt-0.5">{isAdmin ? "Indice globale di forza dall'inizio del percorso (base 100): variazione settimanale del volume-carico (kg × ripetizioni × serie) di tutti gli esercizi upper e lower, ponderata per il volume di ciascun esercizio. I cerchi vuoti indicano settimane con carichi ridotti." : "Parte da 100 all'inizio del percorso e sale quando aumentano carichi, ripetizioni e serie, su tutti gli esercizi upper e lower. I cerchi vuoti sono settimane in cui qualche carico è sceso."}</p>
       </div>
       <Card className="p-3">
         <ResponsiveContainer width="100%" height={210}>
@@ -1868,7 +1868,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
     let vivo = true;
     (async () => {
       try {
-        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, motivo_calo, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, ripetizioni, motivo_calo, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
         let scar = [];
         try { const { data: sc } = await supabase.from("scarichi").select("id, dal, al, nota").eq("client_id", clientId).order("dal"); scar = sc || []; } catch (e) { /* ignora */ }
         if (vivo) setScarichi(scar);
@@ -1878,8 +1878,10 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
           const kg = Number(r.kg);
           const nome = r.training_exercises?.nome;
           if (!nome || !r.data || !(kg > 0)) return;
-          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {} });
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {}, ton: {}, rep: {} });
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
+          const rip = parseFloat(String(r.ripetizioni ?? "").replace(",", "."));
+          if (rip > 0) { g.ton[r.data] = (g.ton[r.data] || 0) + kg * rip; g.rep[r.data] = true; }
           if (inScar(r.data)) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); m.add("scarico"); }
           if (r.motivo_calo) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); String(r.motivo_calo).split(",").filter(Boolean).forEach((x) => m.add(x)); }
         });
@@ -1889,10 +1891,13 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
         Object.values(mappa).forEach((g) => {
           const gr = gruppoCarico(g.nome); if (!gr) return;
           const dd = Object.keys(g.date).sort();
+          // misura per sessione: volume-carico (kg × ripetizioni × serie) se le ripetizioni sono sempre segnate, altrimenti il carico massimo
+          const conVolume = dd.every((d) => g.rep[d] && g.ton[d] > 0);
+          const misura = (d) => (conVolume ? g.ton[d] : g.date[d]);
           for (let i = 1; i < dd.length; i++) {
             const prev = g.date[dd[i - 1]], cur = g.date[dd[i]]; const w = lun(dd[i]);
-            const o = (perSett[gr][w] = perSett[gr][w] || { rel: [], cali: 0, senza: 0, motivi: {} });
-            o.rel.push(cur / prev - 1);
+            const o = (perSett[gr][w] = perSett[gr][w] || { rel: [], pesi: [], cali: 0, senza: 0, motivi: {} });
+            o.rel.push(misura(dd[i]) / misura(dd[i - 1]) - 1); o.pesi.push(misura(dd[i - 1]));
             if (cur < prev) { o.cali += 1; const m = g.mot[dd[i]]; if (m && m.size) m.forEach((x) => { o.motivi[x] = (o.motivi[x] || 0) + 1; }); else o.senza += 1; }
           }
         });
@@ -1903,7 +1908,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
           const riga = { w, sett: w.split("-").reverse().slice(0, 2).join("/") };
           ["upper", "lower"].forEach((gr) => {
             const o = perSett[gr][w];
-            if (o) { idx[gr] = (idx[gr] == null ? 100 : idx[gr]) * (1 + mediana(o.rel)); riga[gr + "Cali"] = o.cali; riga[gr + "Senza"] = o.senza; riga[gr + "Motivi"] = o.motivi; }
+            if (o) { const pTot = o.pesi.reduce((a, b) => a + b, 0); const variazione = pTot > 0 ? o.rel.reduce((a, r, k) => a + r * o.pesi[k], 0) / pTot : mediana(o.rel); idx[gr] = (idx[gr] == null ? 100 : idx[gr]) * (1 + variazione); riga[gr + "Cali"] = o.cali; riga[gr + "Senza"] = o.senza; riga[gr + "Motivi"] = o.motivi; }
             riga[gr] = idx[gr] == null ? null : Math.round(idx[gr] * 10) / 10;
           });
           return riga;
@@ -3878,6 +3883,13 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
           <div className="space-y-2 mt-1">
             {Array.from({ length: nSerie }).map((_, i) => {
               const n = i + 1; const ok = fatta(n); const u = ultime[n] || {};
+              const quandoVecchio = (() => {
+                if (ok || !u.data || !ultime._ultima || u.data >= ultime._ultima) return null;
+                const gg = Math.round((new Date(`${data}T12:00:00`) - new Date(`${u.data}T12:00:00`)) / 86400000);
+                const sett = Math.floor(gg / 7);
+                const dd = u.data.split("-").reverse().slice(0, 2).join("/");
+                return sett >= 1 ? `${sett} ${sett === 1 ? "settimana" : "settimane"} fa · ${dd}` : `${dd}`;
+              })();
               return (
                 <div key={n} className={parti.length > 1 ? "rounded-2xl p-1.5 space-y-1.5" : ""} style={parti.length > 1 ? { background: "#F5FAFE" } : undefined}>
                 {parti.length > 1 && <p className="text-[11px] font-semibold pl-8 truncate" style={{ color: "#3F78B3" }}>A · {parti[0]}</p>}
@@ -3893,6 +3905,7 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
                     <Check size={20} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
                   </button>
                 </div>
+                {quandoVecchio && <p className="pl-8" style={{ fontSize: 10, color: "#7a8da3" }}>Ultimo valore segnato: {quandoVecchio}</p>}
                 {parti.slice(1).map((nomeP, k) => {
                   const p = k + 2; const uu = ((u.extra || {})[p]) || {};
                   return (
@@ -4066,7 +4079,10 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
     const prima = [...storicoEntries, ...storicoNome].filter((e) => e.exercise_id === exId && e.data < data && (e.kg != null || e.ripetizioni));
     if (!prima.length) return {};
     const d = prima.map((e) => e.data).sort().pop();
-    const m = {}; prima.filter((e) => e.data === d).forEach((e) => { m[e.numero_serie] = e; });
+    // per ogni serie: il valore dell'ultimo allenamento; se in quell'allenamento quella serie non è stata segnata, si risale a quello prima
+    const m = {};
+    [...prima].sort((a, b) => a.data.localeCompare(b.data)).forEach((e) => { m[e.numero_serie] = e; });
+    m._ultima = d;
     return m;
   };
 
