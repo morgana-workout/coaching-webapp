@@ -614,10 +614,18 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   const invia = async () => {
     if (!data) return;
     setInviando(true);
-    const { data: creato } = await supabase.from("calendar_events").insert({
-      client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
-      stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
-    }).select().single();
+    let creato = null;
+    if (client.gruppo_id) {
+      // cliente di un gruppo: la richiesta vale per tutte le clienti del gruppo
+      const { data: idMio } = await supabase.rpc("richiedi_lezione_gruppo", { p_data: data, p_ora: ora, p_luogo: luogo, p_nota: nota || null, p_fuori: !disponibile, p_extra: extra ? 30 : null });
+      creato = idMio ? { id: idMio } : null;
+    } else {
+      const r = await supabase.from("calendar_events").insert({
+        client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
+        stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
+      }).select().single();
+      creato = r.data;
+    }
     // il collegamento al pacchetto avviene solo quando Morgana approva la richiesta
     if (creato?.id) inviaPush({ evento: "richiesta", event_id: creato.id });
     setInviando(false);
@@ -627,7 +635,7 @@ function PrenotaLezioneForm({ client, extra = false, onFatto }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min)</p>
-      <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
+      <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.{client.gruppo_id ? " La richiesta vale per tutte le clienti del tuo gruppo 🫶🏻" : ""}</p>
       {extra && (
         <div className="bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-xs">
           Questa lezione in presenza ha un costo aggiuntivo se non hai acquistato in precedenza un pacchetto lezioni.
@@ -9912,22 +9920,38 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
     const idOrig = (r || []).map((x) => x.sostituisce_id).filter(Boolean);
     let orig = {};
     if (idOrig.length) { const { data: o } = await supabase.from("calendar_events").select("id, data, ora, luogo").in("id", idOrig); (o || []).forEach((x) => { orig[x.id] = x; }); }
-    setRichieste((r || []).map((x) => ({ ...x, originale: x.sostituisce_id ? orig[x.sostituisce_id] || null : null })));
+    const grezze = (r || []).map((x) => ({ ...x, originale: x.sostituisce_id ? orig[x.sostituisce_id] || null : null }));
+    const gruppiR = {}; const rich = [];
+    grezze.forEach((x) => {
+      if (x.gruppo_id && !x.sostituisce_id) {
+        const k = `${x.gruppo_id}|${x.data}|${x.ora}`;
+        if (!gruppiR[k]) { gruppiR[k] = { ...x, tutti: [x.id], nomi: [x.clients?.nome || "Cliente"] }; rich.push(gruppiR[k]); }
+        else { gruppiR[k].tutti.push(x.id); gruppiR[k].nomi.push(x.clients?.nome || "Cliente"); }
+      } else rich.push(x);
+    });
+    setRichieste(rich);
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
     setCheckDaRivedere(c || []);
     setCaricando(false);
   };
   useEffect(() => { carica(); }, []);
 
-  const approva = async (id) => {
-    const { data: ev } = await supabase.from("calendar_events").select("sostituisce_id").eq("id", id).maybeSingle();
-    await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id);
-    await sincronizzaLezionePacchetto(id);
-    // se era una richiesta di spostamento, la lezione di prima viene liberata
-    if (ev?.sostituisce_id) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", ev.sostituisce_id); await scollegaLezionePacchetto(ev.sostituisce_id); }
+  const approva = async (idOIds) => {
+    const lista = Array.isArray(idOIds) ? idOIds : [idOIds];
+    for (const id of lista) {
+      const { data: ev } = await supabase.from("calendar_events").select("sostituisce_id").eq("id", id).maybeSingle();
+      await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id);
+      await sincronizzaLezionePacchetto(id);
+      // se era una richiesta di spostamento, la lezione di prima viene liberata
+      if (ev?.sostituisce_id) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", ev.sostituisce_id); await scollegaLezionePacchetto(ev.sostituisce_id); }
+    }
+    if (lista.length > 1) { // gruppo: avvisa tutte le clienti della lezione confermata
+      const { data: evs } = await supabase.from("calendar_events").select("*").in("id", lista);
+      for (const e of evs || []) { try { await avvisaLezioneCliente(e, "nuova"); } catch (err) { /* ignora */ } }
+    }
     carica();
   };
-  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); carica(); };
+  const rifiuta = async (idOIds) => { const lista = Array.isArray(idOIds) ? idOIds : [idOIds]; for (const id of lista) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); } carica(); };
   const segnaRevisionato = async (id) => {
     await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
     try {
@@ -10000,19 +10024,20 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
           {richieste.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
           {richieste.map((r) => (
             <Card key={r.id} className="p-3 space-y-2">
-              <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
-                <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
+              <button onClick={() => !r.tutti && onSelect(r.client_id)} className="w-full text-left">
+                <p className="font-medium text-slate-700 text-sm">{r.tutti ? `👥 Gruppo · ${r.nomi.join(", ")}` : `${r.clients?.nome || ""} ${r.clients?.cognome || ""}`}</p>
                 {r.sostituisce_id && <p className="text-slate-600 text-xs font-medium">🔁 Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
                 <p className="text-slate-500 text-xs">{r.sostituisce_id ? "Nuova data: " : ""}{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
                 {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
               </button>
               {proponiPer === r.id ? (
-                <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
+                r.tutti ? <CambiaOrarioGruppo ids={r.tutti} evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
+                  : <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={() => approva(r.id)} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">Approva</button>
-                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-slate-500 text-white text-xs font-medium rounded-lg py-2">Proponi altro</button>
-                  <button onClick={() => rifiuta(r.id)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                  <button onClick={() => approva(r.tutti || r.id)} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">{r.tutti ? "Approva per tutte" : "Approva"}</button>
+                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-slate-500 text-white text-xs font-medium rounded-lg py-2">{r.tutti ? "Cambia orario" : "Proponi altro"}</button>
+                  <button onClick={() => rifiuta(r.tutti || r.id)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
                 </div>
               )}
             </Card>
@@ -12877,6 +12902,178 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoV
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* GRUPPO — presenze alle lezioni e pagamento condiviso               */
+/* ------------------------------------------------------------------ */
+function PresenzeGruppo({ gruppo, membri }) {
+  const [eventi, setEventi] = useState(null);
+  const [dataSel, setDataSel] = useState(null);
+  const oggi = formatDataLocale(new Date());
+  const carica = async () => {
+    const { data } = await supabase.from("calendar_events").select("id, client_id, data, ora, assente").eq("gruppo_id", gruppo.id).eq("tipo", "lezione").eq("stato", "confermato").gte("data", addGiorni(oggi, -21)).lte("data", addGiorni(oggi, 21)).order("data");
+    const lista = data || [];
+    setEventi(lista);
+    const date = [...new Set(lista.map((e) => `${e.data}|${(e.ora || "").slice(0, 5)}`))];
+    setDataSel((cur) => cur || date.filter((d) => d.split("|")[0] <= oggi).pop() || date[0] || null);
+  };
+  useEffect(() => { carica(); }, [gruppo.id]);
+  const date = eventi ? [...new Set(eventi.map((e) => `${e.data}|${(e.ora || "").slice(0, 5)}`))] : [];
+  const imposta = async (ev, assente) => {
+    setEventi((l) => l.map((x) => (x.id === ev.id ? { ...x, assente } : x)));
+    await supabase.from("calendar_events").update({ assente }).eq("id", ev.id);
+  };
+  const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const evSel = (eventi || []).filter((e) => `${e.data}|${(e.ora || "").slice(0, 5)}` === dataSel);
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Presenze alla lezione</p>
+      <p className="text-xs text-slate-500">Segna chi è assente. L'assenza non cambia il pacchetto: la lezione viene scalata comunque.</p>
+      {!eventi ? <Spinner /> : date.length === 0 ? <p className="text-xs text-slate-400">Nessuna lezione di gruppo confermata nelle ultime/prossime 3 settimane.</p> : (
+        <>
+          <div className="flex gap-1.5 overflow-x-auto">
+            {date.map((d) => { const [dd, oo] = d.split("|"); return <button key={d} onClick={() => setDataSel(d)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: dataSel === d ? "#27466D" : "#fff", color: dataSel === d ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{dd.split("-").reverse().slice(0, 2).join("/")} {oo}</button>; })}
+          </div>
+          <div className="space-y-1.5">
+            {membri.map((m) => {
+              const ev = evSel.find((e) => e.client_id === m.id);
+              if (!ev) return <p key={m.id} className="text-xs text-slate-400">{nomeCl(m)}: non prenotata</p>;
+              return (
+                <div key={m.id} className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-slate-700">{nomeCl(m)}</span>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => imposta(ev, false)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: !ev.assente ? "#27466D" : "#fff", color: !ev.assente ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Presente</button>
+                    <button onClick={() => imposta(ev, true)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: ev.assente ? "#8DB8E8" : "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Assente</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PagamentoCondivisoGruppo({ membri, onFatto }) {
+  const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const [chi, setChi] = useState(membri[0]?.id || "");
+  const [tipo, setTipo] = useState("Pacchetto lezioni Bulb");
+  const [metodo, setMetodo] = useState("");
+  const [dataP, setDataP] = useState(formatDataLocale(new Date()));
+  const [tot, setTot] = useState("");
+  const [coperte, setCoperte] = useState(membri.map((m) => m.id));
+  const [uguali, setUguali] = useState(true);
+  const [quote, setQuote] = useState({});
+  const [lezioni, setLezioni] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [msg, setMsg] = useState("");
+  const totale = Number(String(tot).replace(",", ".")) || 0;
+  const n = coperte.length;
+  const quotaUguale = (i) => { if (!n) return 0; const base = Math.floor((totale * 100) / n) / 100; return i === n - 1 ? Math.round((totale - base * (n - 1)) * 100) / 100 : base; };
+  const importi = coperte.map((id, i) => (uguali ? quotaUguale(i) : Number(String(quote[id] ?? "").replace(",", ".")) || 0));
+  const somma = Math.round(importi.reduce((a, b) => a + b, 0) * 100) / 100;
+  const quadra = totale > 0 && Math.abs(somma - totale) < 0.01;
+  const registra = async () => {
+    if (!quadra || !n) { setMsg("Controlla che la somma delle quote sia uguale al totale 🫶🏻"); return; }
+    const pagante = membri.find((m) => m.id === chi);
+    setSalvando(true); setMsg("");
+    try {
+      let creati = 0, pacchetti = 0;
+      for (let i = 0; i < coperte.length; i++) {
+        const id = coperte[i];
+        const { error } = await supabase.from("payments").insert({
+          client_id: id, data_pagamento: dataP, tipo_piano: tipo, importo: importi[i], metodo_pagamento: metodo || null, stato: "saldato",
+          note: id === chi && n === 1 ? null : `Pagamento condiviso: ${nomeCl(pagante || {})} ha versato ${totale.toFixed(2).replace(".", ",")}€ per ${n} ${n === 1 ? "cliente" : "clienti"}`,
+        });
+        if (error) throw error;
+        creati += 1;
+        const nl = parseInt(lezioni, 10);
+        if (nl > 0 && tipo === "Pacchetto lezioni Bulb") {
+          const { data: att } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", id).eq("stato", "attivo").limit(1).maybeSingle();
+          if (!att) { await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: nl, stato: "attivo" }); pacchetti += 1; }
+        }
+      }
+      setMsg(`Registrato ✨ ${creati} ${creati === 1 ? "pagamento" : "pagamenti"}${pacchetti ? ` e ${pacchetti} ${pacchetti === 1 ? "pacchetto creato" : "pacchetti creati"}` : ""}.`);
+      setTot(""); setQuote({});
+      onFatto && onFatto();
+    } catch (e) { setMsg("Non sono riuscita a registrare tutto: controlla lo storico pagamenti prima di riprovare."); }
+    setSalvando(false);
+  };
+  const campo = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm";
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Pagamento condiviso</p>
+      <p className="text-xs text-slate-500">Una persona paga, tu scegli per chi e come dividere. Ogni cliente riceve la sua quota nel proprio storico, il totale resta giusto.</p>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="text-xs text-slate-500">Chi paga
+          <select value={chi} onChange={(e) => setChi(e.target.value)} className={campo + " mt-1"}>{membri.map((m) => <option key={m.id} value={m.id}>{nomeCl(m)}</option>)}</select></label>
+        <label className="text-xs text-slate-500">Tipo
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={campo + " mt-1"}><option>Pacchetto lezioni Bulb</option><option>Lezione singola Bulb</option></select></label>
+        <label className="text-xs text-slate-500">Metodo
+          <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className={campo + " mt-1"}><option value="">—</option>{METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+        <label className="text-xs text-slate-500">Data<InputData value={dataP} onChange={(e) => setDataP(e.target.value)} className="mt-1" /></label>
+        <label className="text-xs text-slate-500">Totale versato (€)<input type="number" step="0.01" value={tot} onChange={(e) => setTot(e.target.value)} className={campo + " mt-1"} placeholder="es. 400" /></label>
+        {tipo === "Pacchetto lezioni Bulb" && <label className="text-xs text-slate-500">Lezioni del pacchetto (facoltativo)<input type="number" min="1" value={lezioni} onChange={(e) => setLezioni(e.target.value)} className={campo + " mt-1"} placeholder="es. 10" /></label>}
+      </div>
+      <div>
+        <p className="text-xs text-slate-500 mb-1">Per chi (clienti coperte)</p>
+        <div className="flex flex-wrap gap-2">
+          {membri.map((m) => { const on = coperte.includes(m.id); return <button key={m.id} onClick={() => setCoperte(on ? coperte.filter((x) => x !== m.id) : [...coperte, m.id])} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{nomeCl(m)}</button>; })}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        {[[true, "In parti uguali"], [false, "Importi a mano"]].map(([v, l]) => <button key={String(v)} onClick={() => setUguali(v)} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: uguali === v ? "#27466D" : "#fff", color: uguali === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>)}
+      </div>
+      <div className="space-y-1.5">
+        {coperte.map((id, i) => {
+          const m = membri.find((x) => x.id === id);
+          return (
+            <div key={id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-slate-700">{nomeCl(m)}</span>
+              {uguali ? <span className="font-semibold" style={{ color: "#27466D" }}>{importi[i].toFixed(2).replace(".", ",")} €</span>
+                : <input type="number" step="0.01" value={quote[id] ?? ""} onChange={(e) => setQuote({ ...quote, [id]: e.target.value })} className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-right" placeholder="€" />}
+            </div>
+          );
+        })}
+        {totale > 0 && <p className="text-[11px]" style={{ color: quadra ? "#3F78B3" : "#64748b" }}>{quadra ? "La somma torna con il totale ✓" : `Somma quote ${somma.toFixed(2).replace(".", ",")} € · totale ${totale.toFixed(2).replace(".", ",")} €`}</p>}
+      </div>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      <button onClick={registra} disabled={salvando || !quadra || !n} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>{salvando ? "Registro…" : "Registra il pagamento"}</button>
+    </div>
+  );
+}
+
+function CambiaOrarioGruppo({ ids, evento, onFatto, onAnnulla }) {
+  const [data, setData] = useState(evento.data);
+  const [ora, setOra] = useState(evento.ora ? evento.ora.slice(0, 5) : SLOT_ORARI[6]);
+  const [luogo, setLuogo] = useState(evento.luogo || LUOGHI[0]);
+  const [salvando, setSalvando] = useState(false);
+  const conferma = async () => {
+    setSalvando(true);
+    for (const id of ids) {
+      await supabase.from("calendar_events").update({ data, ora, luogo, stato: "confermato" }).eq("id", id);
+      await sincronizzaLezionePacchetto(id);
+    }
+    const { data: evs } = await supabase.from("calendar_events").select("*").in("id", ids);
+    for (const ev of evs || []) { try { await avvisaLezioneCliente(ev, "nuova"); } catch (e) { /* ignora */ } }
+    setSalvando(false); onFatto();
+  };
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Cambia orario e conferma per tutto il gruppo</p>
+      <div className="grid grid-cols-2 gap-3">
+        <InputData value={data} onChange={(e) => setData(e.target.value)} />
+        <OraCoach value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <SelezionaLuogo value={luogo} onChange={setLuogo} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div className="flex gap-2">
+        <button onClick={conferma} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Conferma per tutte"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
+
 function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [membri, setMembri] = useState(null);
   const [candidate, setCandidate] = useState([]);
@@ -12885,6 +13082,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [ora, setOra] = useState(gruppo.ora || "");
   const [menu, setMenu] = useState(false);
   const [sessioneTel, setSessioneTel] = useState(false);
+  const [pannello, setPannello] = useState(null); // null | "presenze" | "pagamento"
   const [copia, setCopia] = useState({ da: "", a: [] });
   const [msg, setMsg] = useState("");
   const [notaG, setNotaG] = useState(gruppo.nota || "");
@@ -13003,10 +13201,14 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               )}
               <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
               <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
+              <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>Presenze</button>
+              <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>Pagamento condiviso</button>
               <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Importa programma da CSV (mobilità e stretching)</button>
               <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
               {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
             </div>
+            {pannello === "presenze" && <PresenzeGruppo gruppo={gruppo} membri={membri} />}
+            {pannello === "pagamento" && <PagamentoCondivisoGruppo membri={membri} onFatto={() => {}} />}
             {csvAperto && (
               <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
                 <p className="text-xs text-slate-600">Carichi lo stesso file CSV del programma e viene importato per tutte le clienti scelte, ognuna col suo programma (poi ritocchi le variazioni). Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note (facoltative: scheda, tipo, esecuzione).</p>
