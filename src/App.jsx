@@ -1856,6 +1856,134 @@ function ScarichiCliente({ clientId }) {
   return <ScarichiCoach clientId={clientId} scarichi={lista} onChange={() => setN((x) => x + 1)} />;
 }
 
+/* ------------------------------------------------------------------ */
+/* ADERENZA — allenamenti fatti e saltati, settimana per settimana     */
+/* ------------------------------------------------------------------ */
+function AderenzaAllenamenti({ clientId }) {
+  const [dati, setDati] = useState(null);
+  const [tutte, setTutte] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data: giorni } = await supabase.from("training_days").select("id, nome, created_at, scheda_archiviata").eq("client_id", clientId);
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, ripetizioni, completata, training_exercises(training_day_id)").eq("client_id", clientId).order("data").order("id"));
+        if (!vivo) return;
+        const lun = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
+        const oggi = formatDataLocale(new Date());
+        const giornoInfo = {}; (giorni || []).forEach((g) => { giornoInfo[g.id] = g; });
+        // sessioni svolte: coppie (data, giorno di allenamento) con almeno una serie segnata
+        const sess = new Set();
+        const primaData = {}; const ultimaData = {};
+        righe.forEach((r) => {
+          const gid = r.training_exercises?.training_day_id;
+          if (!gid || !giornoInfo[gid] || !r.data) return;
+          if (!(r.kg != null || r.completata || r.ripetizioni)) return;
+          sess.add(`${r.data}|${gid}`);
+          const lab = giornoInfo[gid].scheda_archiviata || "";
+          if (!primaData[lab] || r.data < primaData[lab]) primaData[lab] = r.data;
+          if (!ultimaData[lab] || r.data > ultimaData[lab]) ultimaData[lab] = r.data;
+        });
+        // programmi (attuale + archiviati): giorni a settimana e periodo
+        const prog = {};
+        (giorni || []).filter((g) => g.nome !== "Circuito").forEach((g) => {
+          const lab = g.scheda_archiviata || "";
+          const p = (prog[lab] = prog[lab] || { lab, giorni: 0, inizio: null });
+          p.giorni += 1;
+          const c = g.created_at ? g.created_at.slice(0, 10) : null;
+          if (c && (!p.inizio || c < p.inizio)) p.inizio = c;
+        });
+        const lista = Object.values(prog).map((p) => ({ ...p, inizio: [p.inizio, primaData[p.lab]].filter(Boolean).sort()[0] || null })).filter((p) => p.inizio).sort((a, b) => a.inizio.localeCompare(b.inizio));
+        if (!lista.length) { setDati({ vuoto: true }); return; }
+        lista.forEach((p, i) => {
+          const prossimo = lista[i + 1];
+          p.fine = prossimo ? prossimo.inizio : (p.lab === "" ? oggi : (ultimaData[p.lab] || p.inizio));
+        });
+        const weeks = [];
+        for (let w = lun(lista[0].inizio); w <= lun(oggi); w = addGiorni(w, 7)) weeks.push(w);
+        const corrente = lun(oggi);
+        const sett = weeks.map((w) => {
+          const fineSett = addGiorni(w, 6);
+          const cov = lista.filter((p) => p.inizio <= fineSett && p.fine >= w).sort((a, b) => b.inizio.localeCompare(a.inizio))[0];
+          const fatti = [...sess].filter((k) => { const d = k.split("|")[0]; return d >= w && d <= fineSett; }).length;
+          const previsti = cov ? cov.giorni : 0;
+          return { w, label: w.split("-").reverse().slice(0, 2).join("/"), previsti, fatti, corrente: w === corrente, prog: cov ? cov.lab : null };
+        }).filter((x) => x.previsti > 0 || x.fatti > 0);
+        setDati({ sett, lista });
+      } catch (e) { if (vivo) setDati({ vuoto: true }); }
+    })();
+    return () => { vivo = false; };
+  }, [clientId]);
+  if (!dati || dati.vuoto) return dati?.vuoto ? null : null;
+  const concluse = dati.sett.filter((x) => !x.corrente);
+  const prev = concluse.reduce((t, x) => t + x.previsti, 0);
+  const fatti = concluse.reduce((t, x) => t + Math.min(x.fatti, x.previsti), 0);
+  const extra = concluse.reduce((t, x) => t + Math.max(0, x.fatti - x.previsti), 0);
+  const saltati = Math.max(0, prev - fatti);
+  const perc = prev ? Math.round((fatti / prev) * 100) : null;
+  const complete = concluse.filter((x) => x.previsti > 0 && x.fatti >= x.previsti).length;
+  const zero = concluse.filter((x) => x.previsti > 0 && x.fatti === 0).length;
+  const ultime4 = concluse.slice(-4);
+  const p4 = ultime4.reduce((t, x) => t + x.previsti, 0);
+  const perc4 = p4 ? Math.round((ultime4.reduce((t, x) => t + Math.min(x.fatti, x.previsti), 0) / p4) * 100) : null;
+  const grafico = dati.sett.map((x) => ({ sett: x.label, Fatti: Math.min(x.fatti, x.previsti || x.fatti), Saltati: x.corrente ? 0 : Math.max(0, x.previsti - x.fatti) }));
+  const perProg = dati.lista.map((p) => {
+    const ss = concluse.filter((x) => x.prog === p.lab);
+    const pv = ss.reduce((t, x) => t + x.previsti, 0), fa = ss.reduce((t, x) => t + Math.min(x.fatti, x.previsti), 0);
+    return { lab: p.lab, nome: p.lab ? `Programma ${p.lab}` : "Programma attuale", sett: ss.length, pv, fa, perc: pv ? Math.round((fa / pv) * 100) : null, inizio: p.inizio };
+  }).filter((p) => p.sett > 0);
+  const mostrate = tutte ? dati.sett : dati.sett.slice(-12);
+  return (
+    <div className="space-y-2">
+      <div className="px-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Aderenza all'allenamento · dall'inizio del programma</p>
+        <p className="text-slate-400 text-xs mt-0.5">Sessioni svolte rispetto a quelle previste dal programma, settimana per settimana (la settimana in corso non conta come saltata).</p>
+      </div>
+      <Card className="p-3 space-y-3">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-slate-50 rounded-xl py-2"><p className="text-lg font-semibold text-slate-800">{perc == null ? "—" : `${perc}%`}</p><p className="text-[11px] text-slate-500">aderenza totale</p></div>
+          <div className="bg-slate-50 rounded-xl py-2"><p className="text-lg font-semibold text-slate-800">{fatti}<span className="text-slate-400 text-sm"> / {prev}</span></p><p className="text-[11px] text-slate-500">sessioni fatte</p></div>
+          <div className="bg-slate-50 rounded-xl py-2"><p className="text-lg font-semibold text-slate-800">{saltati}</p><p className="text-[11px] text-slate-500">saltate</p></div>
+        </div>
+        <p className="text-xs text-slate-600">{complete} settimane complete su {concluse.length}{zero ? ` · ${zero} senza nessun allenamento` : ""}{perc4 != null ? ` · ultime 4 settimane: ${perc4}%` : ""}{extra ? ` · ${extra} sessioni extra` : ""}</p>
+        <div style={{ width: "100%", height: 170 }}>
+          <ResponsiveContainer>
+            <BarChart data={grafico} margin={{ top: 5, right: 8, left: -22, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+              <XAxis dataKey="sett" tick={{ fontSize: 10, fill: "#64748b" }} interval="preserveStartEnd" />
+              <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#64748b" }} />
+              <Tooltip />
+              <Bar dataKey="Fatti" stackId="a" fill="#27466D" />
+              <Bar dataKey="Saltati" stackId="a" fill="#C9E0F7" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="flex gap-4 justify-center text-xs">
+          <span className="flex items-center gap-1.5 text-slate-600"><i className="w-3 h-3 rounded inline-block" style={{ background: "#27466D" }} /> Fatti</span>
+          <span className="flex items-center gap-1.5 text-slate-600"><i className="w-3 h-3 rounded inline-block" style={{ background: "#C9E0F7" }} /> Saltati</span>
+        </div>
+        {perProg.length > 1 && (
+          <div className="pt-1 border-t border-slate-100">
+            {perProg.map((p) => <p key={p.lab || "att"} className="text-xs text-slate-600 py-0.5">{p.nome}: <span className="font-medium text-slate-800">{p.fa} su {p.pv}</span> sessioni{p.perc != null ? ` (${p.perc}%)` : ""} · {p.sett} settimane</p>)}
+          </div>
+        )}
+        <div className="pt-1 border-t border-slate-100">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium pb-1">Storico settimanale</p>
+          <div className="flex flex-wrap gap-1.5">
+            {mostrate.map((x) => {
+              const piena = x.previsti > 0 && x.fatti >= x.previsti;
+              const bg = x.corrente ? "#fff" : piena ? "#27466D" : x.fatti > 0 ? "#C9E0F7" : "#F1F5F9";
+              const col = x.corrente ? "#3F78B3" : piena ? "#fff" : x.fatti > 0 ? "#27466D" : "#94a3b8";
+              return <span key={x.w} className="rounded-lg px-2 py-1 text-[11px] font-medium" style={{ background: bg, color: col, border: x.corrente ? "1.5px dashed #C9E0F7" : "none" }} title={x.corrente ? "settimana in corso" : undefined}>{x.label} · {x.fatti}/{x.previsti}</span>;
+            })}
+          </div>
+          {dati.sett.length > 12 && <button onClick={() => setTutte(!tutte)} className="text-xs underline mt-2" style={{ color: "#3F78B3" }}>{tutte ? "Mostra solo le ultime 12" : `Mostra tutte le ${dati.sett.length} settimane`}</button>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
   const [esercizi, setEsercizi] = useState(null);
   const [trend, setTrend] = useState(null);
@@ -2226,7 +2354,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
     return (
       <div className="px-5 pt-16 pb-24 space-y-6">
         <p className="text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</p>
-        {clientId && <ProgressiCarichi clientId={clientId} />}
+        {isAdmin && clientId && <AderenzaAllenamenti clientId={clientId} />}
+        {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} />}
       </div>
     );
   }
@@ -2234,6 +2363,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
+      {isAdmin && clientId && <AderenzaAllenamenti clientId={clientId} />}
       {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="trend" />}
       <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} obiettivoDal={obiettivoDal} />
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -8370,6 +8500,77 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
   );
 }
 
+
+// In fondo al calendario: clienti con pacchetto non rinnovato, check o pagamenti in ritardo da almeno N giorni
+function InRitardoCalendario({ clients, onSelect }) {
+  const [soglia, setSoglia] = useState(14);
+  const [pagDaSaldare, setPagDaSaldare] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data } = await supabase.from("payments").select("client_id, importo, importo_saldato, data_pagamento, scadenza_saldo, tipo_piano").eq("stato", "da_saldare");
+        if (vivo) setPagDaSaldare(data || []);
+      } catch (e) { /* ignora */ }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  const oggi = formatDataLocale(new Date());
+  const giorniDa = (d) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${d}T12:00:00`)) / 86400000);
+  const nomeDi = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const attivi = clients.filter((c) => !c.archiviato && c.stato_pacchetto !== "gratuito");
+  const perId = Object.fromEntries(attivi.map((c) => [c.id, c]));
+  const pacchetti = attivi
+    .filter((c) => c.tipo_servizio !== "presenza" && c.data_scadenza && giorniDa(c.data_scadenza) >= soglia)
+    .map((c) => ({ c, g: giorniDa(c.data_scadenza), testo: `pacchetto non rinnovato da ${giorniDa(c.data_scadenza)} giorni (scaduto il ${c.data_scadenza.split("-").reverse().slice(0, 2).join("/")})` }))
+    .sort((a, b) => b.g - a.g);
+  const check = attivi
+    .filter((c) => c.tipo_servizio !== "presenza" && c.prossimo_check && c.stato_check === "da_compilare" && giorniDa(c.prossimo_check) >= soglia)
+    .map((c) => ({ c, g: giorniDa(c.prossimo_check), testo: `check in ritardo di ${giorniDa(c.prossimo_check)} giorni` }))
+    .sort((a, b) => b.g - a.g);
+  const pagamenti = pagDaSaldare
+    .filter((p) => perId[p.client_id])
+    .map((p) => {
+      const riferimento = p.scadenza_saldo || p.data_pagamento;
+      const g = riferimento ? giorniDa(riferimento) : 0;
+      const resta = p.importo != null ? Math.max(0, Number(p.importo) - (Number(p.importo_saldato) || 0)) : null;
+      return { c: perId[p.client_id], g, testo: `${p.scadenza_saldo ? "saldo seconda rata" : "pagamento da saldare"}${resta ? ` (${resta.toFixed(2).replace(".", ",")}€)` : ""} · ${p.scadenza_saldo ? "scaduto" : "registrato"} da ${g} giorni` };
+    })
+    .filter((x) => x.g >= soglia)
+    .sort((a, b) => b.g - a.g);
+  const tot = pacchetti.length + check.length + pagamenti.length;
+  const Blocco = ({ titolo, righe }) => righe.length === 0 ? null : (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium pt-2 pb-1">{titolo} · {righe.length}</p>
+      {righe.map((r, i) => (
+        <button key={i} onClick={() => onSelect && onSelect(r.c.id)} className="w-full flex items-center justify-between gap-2 text-left border-t border-slate-100 py-2">
+          <span className="min-w-0"><span className="block text-sm font-medium text-slate-700 truncate">{nomeDi(r.c)}</span><span className="block text-xs text-slate-500">{r.testo}</span></span>
+          <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-sm font-semibold text-slate-700">Pagamenti e check in ritardo{tot ? ` · ${tot}` : ""}</p>
+        <div className="flex gap-1.5">
+          {[[7, "1 sett."], [14, "2 sett."], [21, "3 sett."]].map(([v, l]) => (
+            <button key={v} onClick={() => setSoglia(v)} className={`px-2.5 py-1 rounded-full text-xs font-medium ${soglia === v ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>da {l}</button>
+          ))}
+        </div>
+      </div>
+      {tot === 0 ? <p className="text-xs text-slate-400 mt-2">Nessuno in ritardo da almeno {soglia / 7} {soglia === 7 ? "settimana" : "settimane"} ✨</p> : (
+        <>
+          <Blocco titolo="Pacchetti da rinnovare" righe={pacchetti} />
+          <Blocco titolo="Pagamenti da saldare" righe={pagamenti} />
+          <Blocco titolo="Check in ritardo" righe={check} />
+        </>
+      )}
+    </Card>
+  );
+}
+
 function CalendarioAgenda({ clients, onSelect }) {
   const oggi = new Date();
   const [mese, setMese] = useState(oggi.getMonth());
@@ -8580,6 +8781,7 @@ function CalendarioAgenda({ clients, onSelect }) {
           </Card>
         ))}
       </div>
+      <InRitardoCalendario clients={clients} onSelect={onSelect} />
     </div>
   );
 }
@@ -12422,7 +12624,7 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoV
           <button onClick={() => setSezione(sezione === "consigli" ? null : "consigli")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "consigli" ? "#27466D" : "#fff", color: sezione === "consigli" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prossimo allenamento</button>
           <button onClick={() => setSezione(sezione === "valutazione" ? null : "valutazione")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "valutazione" ? "#27466D" : "#fff", color: sezione === "valutazione" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazione</button>
         </div>
-        {sezione === "progressi" && <ProgressiCarichi clientId={cl.id} isAdmin />}
+        {sezione === "progressi" && <><AderenzaAllenamenti clientId={cl.id} /><ProgressiCarichi clientId={cl.id} isAdmin /></>}
         {sezione === "consigli" && <ConsigliProgramma client={cl} />}
         {sezione === "valutazione" && <ValutazioniBulb client={cl} />}
         <div className="flex justify-between text-xs pt-1">
