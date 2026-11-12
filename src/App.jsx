@@ -12413,9 +12413,9 @@ async function importaCsvPerCliente(righe, clientId, sostituisci) {
 /* ------------------------------------------------------------------ */
 /* CIRCUITO DI GRUPPO — ogni cliente cambia esercizio a ogni giro      */
 /* ------------------------------------------------------------------ */
-function CircuitoGruppo({ gruppo, membri, onChanged }) {
+function CircuitoGruppo({ gruppo, membri, onChanged, inline = false }) {
   const salvato = gruppo.circuito || {};
-  const [aperto, setAperto] = useState(false);
+  const [aperto, setAperto] = useState(!!inline);
   const [modifica, setModifica] = useState(false);
   const [postazioni, setPostazioni] = useState(Array.isArray(salvato.postazioni) && salvato.postazioni.length ? salvato.postazioni : ["", "", "", ""]);
   const [giri, setGiri] = useState(salvato.giri || 4);
@@ -12554,8 +12554,8 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
           </select>
         </div>
         <div className="flex gap-1.5 mt-1.5">
-          <input inputMode="decimal" value={v.kg} onChange={(e) => setValori((x) => ({ ...x, [k]: { ...v, kg: e.target.value } }))} onBlur={(e) => salvaCella(ci, g, "kg", e.target.value)} placeholder="kg" className="w-1/2 min-w-0 border rounded-lg px-2 py-1.5 text-sm text-center" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
-          <input inputMode="numeric" value={v.rip} onChange={(e) => setValori((x) => ({ ...x, [k]: { ...v, rip: e.target.value } }))} onBlur={(e) => salvaCella(ci, g, "rip", e.target.value)} placeholder="rip" className="w-1/2 min-w-0 border rounded-lg px-2 py-1.5 text-sm text-center" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
+          <Stepper valore={v.kg} passo={2.5} placeholder="kg" onChange={(x) => setValori((o) => ({ ...o, [k]: { ...v, kg: x } }))} onCommit={(x) => salvaCella(ci, g, "kg", x)} />
+          <Stepper valore={v.rip} passo={1} placeholder="rip" onChange={(x) => setValori((o) => ({ ...o, [k]: { ...v, rip: x } }))} onCommit={(x) => salvaCella(ci, g, "rip", x)} />
         </div>
         <p className="text-[11px] mt-1" style={{ color: "#3F78B3" }}>{ultime[exId] ? `Ultima volta: ${ultime[exId]}` : "Prima volta"}</p>
       </div>
@@ -12570,7 +12570,7 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
         <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Circuito a rotazione · {gruppo.nome}</p>
         <div className="flex gap-3 text-xs">
           <button onClick={() => setModifica(!modifica)} className="underline" style={{ color: "#3F78B3" }}>{modifica ? "Chiudi impostazioni" : "Imposta postazioni"}</button>
-          <button onClick={() => setAperto(false)} className="text-slate-400 underline">Chiudi</button>
+          {!inline && <button onClick={() => setAperto(false)} className="text-slate-400 underline">Chiudi</button>}
         </div>
       </div>
       {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
@@ -12653,6 +12653,187 @@ function CircuitoGruppo({ gruppo, membri, onChanged }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* SESSIONE DI GRUPPO DA TELEFONO — tasti grandi, una cliente alla     */
+/* volta oppure circuito, carichi con + e − (o scritti a mano)         */
+/* ------------------------------------------------------------------ */
+const fmtNum = (n) => String(Math.round(n * 100) / 100).replace(".", ",");
+function Stepper({ valore, suggerimento, passo, placeholder, onChange, onCommit, fatto }) {
+  const base = () => { const v = num(valore); if (v != null) return v; const s = num(suggerimento); return s != null ? s : 0; };
+  const muovi = (d) => { const n = Math.max(0, Math.round((base() + d) * 100) / 100); const t = fmtNum(n); onChange(t); onCommit(t); };
+  return (
+    <div className="flex items-stretch flex-1 min-w-0 rounded-2xl overflow-hidden" style={{ border: "1.5px solid #C9E0F7" }}>
+      <button type="button" onClick={() => muovi(-passo)} className="w-11 text-xl font-semibold flex-shrink-0" style={{ background: "#F5FAFE", color: "#3F78B3" }}>−</button>
+      <input inputMode="decimal" value={valore} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onCommit(e.target.value)} placeholder={suggerimento != null && suggerimento !== "" ? String(suggerimento).replace(".", ",") : placeholder}
+        className="flex-1 min-w-0 text-center text-lg font-semibold bg-white py-2.5 focus:outline-none" style={{ color: fatto ? "#27466D" : "#27466D" }} />
+      <button type="button" onClick={() => muovi(passo)} className="w-11 text-xl font-semibold flex-shrink-0" style={{ background: "#F5FAFE", color: "#3F78B3" }}>+</button>
+    </div>
+  );
+}
+
+function VistaClienteSessione({ cl, oggi }) {
+  const [giorni, setGiorni] = useState(null);
+  const [giornoId, setGiornoId] = useState(null);
+  const [esercizi, setEsercizi] = useState([]);
+  const [oggiMap, setOggiMap] = useState({}); // `${exId}|${n}` -> { kg, rip, ok }
+  const [ultime, setUltime] = useState({}); // `${exId}|${n}` -> { kg, rip, data }
+  const [bozza, setBozza] = useState({});
+  const [aperto, setAperto] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [timer, setTimer] = useState(0);
+  const [notaAperta, setNotaAperta] = useState(false);
+
+  useEffect(() => {
+    let vivo = true; setGiorni(null); setGiornoId(null); setEsercizi([]);
+    (async () => {
+      const { data } = await supabase.from("training_days").select("id, nome, ordine, scheda_archiviata").eq("client_id", cl.id).order("ordine");
+      if (!vivo) return;
+      const att = (data || []).filter((g) => !g.scheda_archiviata);
+      setGiorni(att); setGiornoId(att[0]?.id || null);
+    })();
+    return () => { vivo = false; };
+  }, [cl.id]);
+
+  useEffect(() => {
+    if (!giornoId) return undefined;
+    let vivo = true;
+    (async () => {
+      const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, note, recupero_sec, ordine, tipo").eq("client_id", cl.id).eq("training_day_id", giornoId).order("ordine");
+      const lista = es || [];
+      let righe = [];
+      if (lista.length) { const r = await supabase.from("training_entries").select("exercise_id, data, numero_serie, kg, ripetizioni, completata").eq("client_id", cl.id).in("exercise_id", lista.map((e) => e.id)).order("data", { ascending: false }); righe = r.data || []; }
+      if (!vivo) return;
+      const om = {}, ul = {};
+      [...righe].reverse().forEach((r) => { // dal più vecchio al più recente: l'ultimo valore per serie vince
+        if (r.data === oggi) om[`${r.exercise_id}|${r.numero_serie}`] = { kg: r.kg == null ? "" : fmtNum(r.kg), rip: r.ripetizioni || "", ok: !!r.completata };
+        else if (r.kg != null || r.ripetizioni) ul[`${r.exercise_id}|${r.numero_serie}`] = { kg: r.kg, rip: r.ripetizioni, data: r.data };
+      });
+      leggiCoda().forEach((o) => { if (o.clientId === cl.id && o.data === oggi) om[`${o.exerciseId}|${o.n}`] = { kg: o.payload.kg == null ? "" : fmtNum(o.payload.kg), rip: o.payload.ripetizioni || "", ok: !!o.payload.completata }; });
+      setEsercizi(lista); setOggiMap(om); setUltime(ul); setBozza({});
+      const primo = lista.find((e) => { const n = parseInt(e.serie, 10) || 3; for (let i = 1; i <= n; i++) if (!om[`${e.id}|${i}`]?.ok) return true; return false; });
+      setAperto((primo || lista[0] || {}).id || null);
+    })();
+    return () => { vivo = false; };
+  }, [giornoId, cl.id]);
+
+  useEffect(() => { if (timer <= 0) return undefined; const t = setTimeout(() => setTimer((s) => s - 1), 1000); return () => clearTimeout(t); }, [timer]);
+
+  const valoreDi = (es, n, campo) => { const k = `${es.id}|${n}|${campo}`; if (k in bozza) return bozza[k]; return oggiMap[`${es.id}|${n}`]?.[campo] ?? ""; };
+  const sugg = (es, n, campo) => { const u = ultime[`${es.id}|${n}`]; if (!u) { const alt = Object.keys(ultime).filter((k) => k.startsWith(`${es.id}|`)).sort().pop(); const x = alt ? ultime[alt] : null; return x ? (campo === "kg" ? (x.kg == null ? "" : fmtNum(x.kg)) : (x.rip || "")) : ""; } return campo === "kg" ? (u.kg == null ? "" : fmtNum(u.kg)) : (u.rip || ""); };
+
+  const scrivi = async (es, n, kgT, ripT, ok) => {
+    const kg = num(kgT);
+    const payload = { kg, ripetizioni: ripT === "" || ripT == null ? null : String(ripT), completata: !!ok };
+    const op = { clientId: cl.id, exerciseId: es.id, data: oggi, n, payload };
+    setOggiMap((m) => ({ ...m, [`${es.id}|${n}`]: { kg: kg == null ? "" : fmtNum(kg), rip: payload.ripetizioni || "", ok: !!ok } }));
+    const giaInCoda = leggiCoda().some((x) => x.k === chiaveOp(op));
+    if (giaInCoda) { accodaOp(op); inviaCoda(); return; }
+    try { await scriviSerieRemoto(op); if (kg != null && ok) inviaPushCarichi(); } catch (e) { accodaOp(op); }
+  };
+  const commit = (es, n, campo, v) => {
+    const kgT = campo === "kg" ? v : valoreDi(es, n, "kg"); const ripT = campo === "rip" ? v : valoreDi(es, n, "rip");
+    setBozza((b) => { const c = { ...b }; delete c[`${es.id}|${n}|${campo}`]; return c; });
+    if ((kgT === "" || kgT == null) && (ripT === "" || ripT == null) && !oggiMap[`${es.id}|${n}`]) return;
+    scrivi(es, n, kgT, ripT, oggiMap[`${es.id}|${n}`]?.ok);
+  };
+  const spunta = (es, n) => {
+    const cur = oggiMap[`${es.id}|${n}`];
+    const kgT = valoreDi(es, n, "kg") !== "" ? valoreDi(es, n, "kg") : sugg(es, n, "kg");
+    const ripT = valoreDi(es, n, "rip") !== "" ? valoreDi(es, n, "rip") : sugg(es, n, "rip");
+    const nuovo = !cur?.ok;
+    scrivi(es, n, nuovo ? kgT : valoreDi(es, n, "kg"), nuovo ? ripT : valoreDi(es, n, "rip"), nuovo);
+    if (nuovo) {
+      setTimer(es.recupero_sec > 0 ? es.recupero_sec : 60);
+      const tot = parseInt(es.serie, 10) || 3;
+      const fatte = Array.from({ length: tot }, (_, i) => i + 1).filter((i) => i === n || oggiMap[`${es.id}|${i}`]?.ok).length;
+      if (fatte >= tot) { const i = esercizi.findIndex((e) => e.id === es.id); const prox = esercizi[i + 1]; if (prox) setTimeout(() => setAperto(prox.id), 250); }
+    }
+  };
+
+  if (!giorni) return <p className="text-sm text-slate-400 px-1 py-6 text-center">Carico…</p>;
+  if (!giorni.length) return <p className="text-sm text-slate-500 px-1 py-6 text-center">{`${cl.nome || "Questa cliente"} non ha ancora un programma: importalo con il CSV o copialo da un'altra cliente 🫶🏻`}</p>;
+  return (
+    <div className="space-y-3 pb-24">
+      {(cl.note_particolari || (cl.problematiche_salute || []).filter(Boolean).length > 0) && (
+        <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "#FFFBEF", border: "1px solid #F0E2B0", color: "#6B5416" }}>
+          📝 {[cl.note_particolari, ...(cl.problematiche_salute || []).filter(Boolean)].filter(Boolean).join(" · ")}
+        </div>
+      )}
+      {giorni.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto">
+          {giorni.map((g) => <button key={g.id} onClick={() => setGiornoId(g.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: giornoId === g.id ? "#27466D" : "#fff", color: giornoId === g.id ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{g.nome}</button>)}
+        </div>
+      )}
+      {esercizi.map((es) => {
+        const tot = parseInt(es.serie, 10) || 3;
+        const fatte = Array.from({ length: tot }, (_, i) => i + 1).filter((i) => oggiMap[`${es.id}|${i}`]?.ok).length;
+        const completo = fatte >= tot; const apertoQui = aperto === es.id;
+        return (
+          <div key={es.id} className="bg-white rounded-2xl" style={{ border: `1.5px solid ${apertoQui ? "#4F8FD0" : "#C9E0F7"}`, opacity: completo && !apertoQui ? 0.7 : 1 }}>
+            <button onClick={() => setAperto(apertoQui ? null : es.id)} className="w-full text-left px-3 py-3 flex items-center gap-2">
+              <span className="flex-1 min-w-0"><span className="block text-base font-bold truncate" style={{ color: "#27466D" }}>{es.nome}</span><span className="block text-xs" style={{ color: "#3F78B3" }}>{tot} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{es.note ? ` · ${es.note}` : ""}</span></span>
+              <span className="text-xs font-bold rounded-full px-2.5 py-1" style={{ background: completo ? "#4F8FD0" : "#E1EEFB", color: completo ? "#fff" : "#27466D" }}>{completo ? "✓" : `${fatte}/${tot}`}</span>
+            </button>
+            {apertoQui && (
+              <div className="px-3 pb-3 space-y-2">
+                {Array.from({ length: tot }, (_, i) => i + 1).map((n) => {
+                  const ok = !!oggiMap[`${es.id}|${n}`]?.ok;
+                  return (
+                    <div key={n} className="flex items-center gap-2">
+                      <span className="w-6 text-xs font-bold text-center" style={{ color: "#7a8da3" }}>{n}</span>
+                      <Stepper valore={valoreDi(es, n, "kg")} suggerimento={sugg(es, n, "kg")} passo={2.5} placeholder="kg" fatto={ok} onChange={(v) => setBozza((b) => ({ ...b, [`${es.id}|${n}|kg`]: v }))} onCommit={(v) => commit(es, n, "kg", v)} />
+                      <Stepper valore={valoreDi(es, n, "rip")} suggerimento={sugg(es, n, "rip")} passo={1} placeholder="rip" fatto={ok} onChange={(v) => setBozza((b) => ({ ...b, [`${es.id}|${n}|rip`]: v }))} onCommit={(v) => commit(es, n, "rip", v)} />
+                      <button onClick={() => spunta(es, n)} aria-label={ok ? "Serie fatta" : "Segna come fatta"} className="rounded-full flex items-center justify-center flex-shrink-0" style={{ width: 46, height: 46, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff", color: ok ? "#fff" : "#C9E0F7", fontSize: 20 }}>✓</button>
+                    </div>
+                  );
+                })}
+                {(() => { const u = Object.keys(ultime).filter((k) => k.startsWith(`${es.id}|`)); if (!u.length) return <p className="text-[11px]" style={{ color: "#7a8da3" }}>Prima volta: nessun valore precedente</p>; const d = u.map((k) => ultime[k].data).sort().pop(); return <p className="text-[11px]" style={{ color: "#7a8da3" }}>I numeri grigi sono l'ultima volta ({d.split("-").reverse().slice(0, 2).join("/")}): tocca ✓ per confermarli.</p>; })()}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button onClick={() => setNotaAperta(!notaAperta)} className="w-full py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>{notaAperta ? "Chiudi la nota finale" : "Nota finale dell'allenamento"}</button>
+      {notaAperta && <NotaFinaleAllenamento clientId={cl.id} data={oggi} />}
+      <div className="fixed bottom-0 left-0 right-0 px-3 py-2.5 flex gap-2" style={{ background: "#fff", borderTop: "1px solid #C9E0F7", zIndex: 70 }}>
+        <button onClick={() => setTimer(timer > 0 ? 0 : 60)} className="flex-1 py-3 rounded-2xl text-sm font-bold" style={{ background: timer > 0 ? "#27466D" : "#E1EEFB", color: timer > 0 ? "#fff" : "#27466D" }}>{timer > 0 ? `⏱ Recupero ${timer}s ■` : "⏱ Recupero 60s"}</button>
+      </div>
+      {msg && <p className="text-xs">{msg}</p>}
+    </div>
+  );
+}
+
+function SessioneTelefono({ gruppo, membri, onClose, onChanged }) {
+  const [vista, setVista] = useState("clienti");
+  const [sel, setSel] = useState(membri[0]?.id || null);
+  const oggi = formatDataLocale(new Date());
+  const nomeBreve = (c, i) => (c.nome && c.nome.trim() ? c.nome.trim().split(" ")[0] : `Cliente ${i + 1}`);
+  const cl = membri.find((m) => m.id === sel) || membri[0];
+  return (
+    <div className="fixed inset-0 overflow-y-auto" style={{ background: "#FFFCF2", zIndex: 60 }}>
+      <div className="sticky top-0 z-10" style={{ background: "#27466D" }}>
+        <div className="px-3 pt-3 pb-1 flex items-center justify-between">
+          <div><p className="text-white font-semibold text-sm">Sessione · {gruppo.nome}</p><p className="text-[11px]" style={{ color: "#C9E0F7" }}>{oggi.split("-").reverse().join("/")}</p></div>
+          <button onClick={() => { onChanged && onChanged(); onClose(); }} className="text-white text-sm font-semibold px-3 py-1.5 rounded-xl" style={{ background: "rgba(255,255,255,.15)" }}>Chiudi</button>
+        </div>
+        <div className="px-3 pb-2 flex gap-2">
+          {[["clienti", "Per cliente"], ["circuito", "Circuito"]].map(([k, l]) => <button key={k} onClick={() => setVista(k)} className="flex-1 py-2 rounded-xl text-xs font-bold" style={{ background: vista === k ? "#fff" : "rgba(255,255,255,.12)", color: vista === k ? "#27466D" : "#C9E0F7" }}>{l}</button>)}
+        </div>
+        {vista === "clienti" && (
+          <div className="px-3 pb-2.5 flex gap-1.5 overflow-x-auto">
+            {membri.map((m, i) => <button key={m.id} onClick={() => setSel(m.id)} className="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap" style={{ background: sel === m.id ? "#fff" : "rgba(255,255,255,.12)", color: sel === m.id ? "#27466D" : "#C9E0F7" }}>{nomeBreve(m, i)}</button>)}
+          </div>
+        )}
+      </div>
+      <div className="p-3 max-w-xl mx-auto">
+        {membri.length === 0 ? <p className="text-sm text-slate-500 text-center py-10">Aggiungi prima le clienti al gruppo 🫶🏻</p>
+          : vista === "clienti" ? (cl && <VistaClienteSessione key={cl.id} cl={cl} oggi={oggi} />)
+          : <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged || (() => {})} inline />}
+      </div>
+    </div>
+  );
+}
+
 function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoValutazione = false }) {
   const [nome, setNome] = useState(cl.nome || "");
   const [cognome, setCognome] = useState(cl.cognome || "");
@@ -12703,6 +12884,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [giorno, setGiorno] = useState(gruppo.giorno || "");
   const [ora, setOra] = useState(gruppo.ora || "");
   const [menu, setMenu] = useState(false);
+  const [sessioneTel, setSessioneTel] = useState(false);
   const [copia, setCopia] = useState({ da: "", a: [] });
   const [msg, setMsg] = useState("");
   const [notaG, setNotaG] = useState(gruppo.nota || "");
@@ -12809,6 +12991,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
       <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
         {!membri ? <Spinner /> : (
           <>
+            <button onClick={() => setSessioneTel(true)} className="w-full py-3.5 rounded-2xl text-base font-bold text-white" style={{ background: "#27466D" }}>▶ Avvia la sessione (modalità telefono)</button>
             <div className="flex flex-wrap gap-2 items-center">
               <button onClick={() => setMenu(!menu)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Copia programma tra le clienti</button>
               <button onClick={nuovoProfilo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo profilo vuoto</button>
@@ -12878,6 +13061,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               </div>
             )}
             {membri.length === 0 && <p className="text-sm text-slate-500 text-center py-8">Nessuna cliente nel gruppo: aggiungi un profilo vuoto o una cliente già esistente 🫶🏻</p>}
+            {sessioneTel && <SessioneTelefono gruppo={gruppo} membri={membri} onClose={() => setSessioneTel(false)} onChanged={onChanged} />}
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-start">
               {membri.map((m) => <CardMembroGruppo key={m.id} cl={m} gruppoNome={gruppo.nome} onToglila={() => togli(m.id)} onApri={(id) => { onChanged(); onClose(); onSelect(id); }} onCambiato={() => {}} modoValutazione={modoVal} />)}
             </div>
