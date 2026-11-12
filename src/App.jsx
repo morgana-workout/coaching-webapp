@@ -1734,7 +1734,65 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
   );
 }
 
-function TrendCarichi({ trend, isAdmin }) {
+async function salvaMotivoRiduzione(clientId, r, codici) {
+  const { data: righe } = await supabase.from("training_entries").select("id, numero_serie").eq("client_id", clientId).eq("exercise_id", r.exId).eq("data", r.data).order("numero_serie");
+  if (!righe || !righe.length) return false;
+  const prima = righe.find((x) => x.numero_serie === 1) || righe[0];
+  await supabase.from("training_entries").update({ motivo_calo: codici.join(",") || null }).eq("id", prima.id);
+  const altre = righe.filter((x) => x.id !== prima.id);
+  if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
+  return true;
+}
+
+// Elenco apribile dei carichi scesi: la coach vede il dettaglio e può indicare lei il motivo
+function RiduzioniCarico({ lista, clientId, onRicarica }) {
+  const [aperto, setAperto] = useState(false);
+  const [solo, setSolo] = useState("senza"); // "senza" | "tutte"
+  const [occupato, setOccupato] = useState(null);
+  const fmt = (n) => String(n).replace(".", ",");
+  const dd = (d) => d.split("-").reverse().slice(0, 2).join("/");
+  const visibili = (solo === "senza" ? lista.filter((r) => !r.motivi.length && !r.inScarico) : lista);
+  const scegli = async (r, codice) => {
+    const k = `${r.exId}|${r.data}`;
+    setOccupato(k);
+    const nuovi = r.motivi.includes(codice) ? r.motivi.filter((x) => x !== codice) : [...r.motivi, codice];
+    try { await salvaMotivoRiduzione(clientId, r, nuovi); onRicarica(); } catch (e) { /* ignora */ }
+    setOccupato(null);
+  };
+  return (
+    <div className="pt-1">
+      <button onClick={() => setAperto(!aperto)} className="text-xs font-semibold underline" style={{ color: "#3F78B3" }}>{aperto ? "Chiudi l'elenco dei carichi scesi" : `Apri i ${lista.length} carichi scesi e indica il motivo`}</button>
+      {aperto && (
+        <div className="mt-2 space-y-2">
+          <div className="flex gap-1.5">
+            {[["senza", `Senza motivo (${lista.filter((r) => !r.motivi.length && !r.inScarico).length})`], ["tutte", `Tutte (${lista.length})`]].map(([k, l]) => (
+              <button key={k} onClick={() => setSolo(k)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: solo === k ? "#27466D" : "#fff", color: solo === k ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
+            ))}
+          </div>
+          {visibili.length === 0 && <p className="text-xs text-slate-500">Tutte le riduzioni hanno già un motivo ✨</p>}
+          {visibili.map((r) => (
+            <div key={`${r.exId}|${r.data}`} className="rounded-xl p-2.5" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7", opacity: occupato === `${r.exId}|${r.data}` ? 0.5 : 1 }}>
+              <p className="text-sm font-semibold" style={{ color: "#27466D" }}>{r.nome} <span className="text-[11px] font-medium" style={{ color: "#7a8da3" }}>· {r.gr === "upper" ? "Upper" : "Lower"}</span></p>
+              <p className="text-xs text-slate-600">{fmt(r.prev)} kg ({dd(r.prevData)}) → <span className="font-semibold">{fmt(r.cur)} kg</span> ({dd(r.data)}) · {fmt(Math.round((r.cur - r.prev) * 10) / 10)} kg</p>
+              {r.inScarico ? (
+                <p className="text-[11px] mt-1" style={{ color: "#3F78B3" }}>Scarico programmato: calo voluto ✨</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {MOTIVI_CALO.filter((m) => m[0] !== "scarico").map(([k, l]) => {
+                    const on = r.motivi.includes(k);
+                    return <button key={k} onClick={() => scegli(r, k)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrendCarichi({ trend, isAdmin, clientId, onRicarica }) {
   const { punti, motiviTot, caliTot, senzaTot } = trend;
   const haScarico = (trend.bande || []).length > 0;
   const ultimo = (k) => { for (let i = punti.length - 1; i >= 0; i--) if (punti[i][k] != null) return punti[i][k]; return null; };
@@ -1796,6 +1854,7 @@ function TrendCarichi({ trend, isAdmin }) {
             {isAdmin
               ? (senzaTot === 0 ? <p className="text-slate-500">Tutte le riduzioni hanno una causa dichiarata: l'andamento va letto come variazione contestuale, non come regressione.</p> : <p className="text-slate-500">{senzaTot} riduzioni senza causa indicata: da chiarire con la cliente prima di interpretarle.</p>)
               : <p className="text-slate-500">Indicare il motivo aiuta Morgana a leggere meglio i tuoi progressi ✨</p>}
+            {isAdmin && clientId && trend.riduzioni && trend.riduzioni.length > 0 && <RiduzioniCarico lista={trend.riduzioni} clientId={clientId} onRicarica={onRicarica || (() => {})} />}
           </div>
         )}
       </Card>
@@ -1996,7 +2055,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
     let vivo = true;
     (async () => {
       try {
-        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, ripetizioni, motivo_calo, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, ripetizioni, motivo_calo, exercise_id, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
         let scar = [];
         try { const { data: sc } = await supabase.from("scarichi").select("id, dal, al, nota").eq("client_id", clientId).order("dal"); scar = sc || []; } catch (e) { /* ignora */ }
         if (vivo) setScarichi(scar);
@@ -2006,7 +2065,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
           const kg = Number(r.kg);
           const nome = r.training_exercises?.nome;
           if (!nome || !r.data || !(kg > 0)) return;
-          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {}, ton: {}, rep: {} });
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {}, ton: {}, rep: {}, exId: r.exercise_id });
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
           const rip = parseFloat(String(r.ripetizioni ?? "").replace(",", "."));
           if (rip > 0) { g.ton[r.data] = (g.ton[r.data] || 0) + kg * rip; g.rep[r.data] = true; }
@@ -2016,6 +2075,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
         // Trend dei carichi upper / lower: variazione settimanale mediana dei carichi, concatenata a partire da 100
         const lun = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
         const perSett = { upper: {}, lower: {} };
+        const ridLista = [];
         Object.values(mappa).forEach((g) => {
           const gr = gruppoCarico(g.nome); if (!gr) return;
           const dd = Object.keys(g.date).sort();
@@ -2026,7 +2086,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
             const prev = g.date[dd[i - 1]], cur = g.date[dd[i]]; const w = lun(dd[i]);
             const o = (perSett[gr][w] = perSett[gr][w] || { rel: [], pesi: [], cali: 0, senza: 0, motivi: {} });
             o.rel.push(misura(dd[i]) / misura(dd[i - 1]) - 1); o.pesi.push(misura(dd[i - 1]));
-            if (cur < prev) { o.cali += 1; const m = g.mot[dd[i]]; if (m && m.size) m.forEach((x) => { o.motivi[x] = (o.motivi[x] || 0) + 1; }); else o.senza += 1; }
+            if (cur < prev) { const mm = g.mot[dd[i]]; ridLista.push({ nome: g.nome, exId: g.exId, data: dd[i], prevData: dd[i - 1], prev, cur, gr, motivi: mm ? [...mm].filter((x) => x !== "scarico") : [], inScarico: !!(mm && mm.has("scarico")) }); o.cali += 1; const m = g.mot[dd[i]]; if (m && m.size) m.forEach((x) => { o.motivi[x] = (o.motivi[x] || 0) + 1; }); else o.senza += 1; }
           }
         });
         const settTrend = [...new Set([...Object.keys(perSett.upper), ...Object.keys(perSett.lower)])].sort();
@@ -2044,7 +2104,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
         const motiviTot = {}; let caliTot = 0, senzaTot = 0;
         ["upper", "lower"].forEach((gr) => Object.values(perSett[gr]).forEach((o) => { caliTot += o.cali; senzaTot += o.senza; Object.entries(o.motivi).forEach(([k, n]) => { motiviTot[k] = (motiviTot[k] || 0) + n; }); }));
         const bande = scar.map((x) => { const ws = punti.filter((q) => q.w >= lun(x.dal) && q.w <= lun(x.al)); return ws.length ? { x1: ws[0].sett, x2: ws[ws.length - 1].sett } : null; }).filter(Boolean);
-        if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot, bande } : null);
+        if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot, bande, riduzioni: ridLista.sort((x, y) => y.data.localeCompare(x.data)) } : null);
         const lista = Object.values(mappa).map((g) => {
           const date = Object.keys(g.date).sort();
           const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
@@ -2079,7 +2139,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
   return (
     <div className="space-y-2">
       {parte !== "resto" && isAdmin && <ScarichiCoach clientId={clientId} scarichi={scarichi} onChange={() => setRicarica((n) => n + 1)} />}
-      {parte !== "resto" && trend && <TrendCarichi trend={trend} isAdmin={isAdmin} />}
+      {parte !== "resto" && trend && <TrendCarichi trend={trend} isAdmin={isAdmin} clientId={clientId} onRicarica={() => setRicarica((n) => n + 1)} />}
       {parte !== "trend" && (<>
       {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
         <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
@@ -9633,7 +9693,7 @@ function StoricoNotifiche({ clients }) {
 
   if (caricando) return <Spinner />;
   return (
-    <Sezione id="storico_notifiche" titolo="Storico notifiche inviate alle clienti" conteggio={righe.length}>
+    <Sezione id="storico_notifiche" titolo="Storico notifiche inviate alle clienti">
       <div className="flex gap-1.5 mb-2">
         {[["tutte", "Tutte"], ["non_viste", "Non viste"], ["viste", "Viste"]].map(([k, l]) => (
           <button key={k} onClick={() => { setFiltro(k); setQuante(20); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>{l}</button>
@@ -9737,7 +9797,7 @@ function StoricoAzioniClienti({ clients }) {
   const nome = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
   if (righe === null) return null;
   return (
-    <Sezione id="storico_azioni" titolo="Storico azioni delle clienti" conteggio={righe.length}>
+    <Sezione id="storico_azioni" titolo="Storico azioni delle clienti">
       <div className="space-y-2">
         {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna azione registrata: qui vedrai quando le clienti registrano un allenamento o aggiornano il diario alimentare ✨</Card>}
         {righe.slice(0, quante).map((r) => (
@@ -9786,7 +9846,7 @@ function ClientiDaRiattivare({ clients, onSelect }) {
   };
   const telefono = (t) => { let x = String(t || "").replace(/[^\d+]/g, ""); if (x.startsWith("+")) x = x.slice(1); else if (x.startsWith("00")) x = x.slice(2); else if (x.length === 10 && x.startsWith("3")) x = "39" + x; return x; };
   return (
-    <Sezione id="da_riattivare" titolo="💤 Clienti da riattivare" conteggio={lista.length}>
+    <Sezione id="da_riattivare" titolo="💤 Clienti da riattivare">
       {true && (
         <div className="space-y-2">
           {lista.map(({ c, giorni }) => {
