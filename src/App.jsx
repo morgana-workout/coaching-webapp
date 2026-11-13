@@ -9910,9 +9910,15 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
 /* ------------------------------------------------------------------ */
 /* Richiesta nuovo pacchetto lezioni (cliente) e conferma (coach)     */
 /* ------------------------------------------------------------------ */
+const OFFERTE_GRUPPO = [
+  { n: 4, titolo: "Mensile · 1 volta a settimana", sotto: "4 lezioni" },
+  { n: 8, titolo: "Mensile · 2 volte a settimana", sotto: "8 lezioni" },
+  { n: 12, titolo: "Trimestrale · 1 volta a settimana", sotto: "12 lezioni" },
+  { n: 24, titolo: "Trimestrale · 2 volte a settimana", sotto: "24 lezioni · best choice ✨" },
+];
 function RichiediPacchetto({ client, totaleAttuale }) {
   const [aperto, setAperto] = useState(false);
-  const [n, setN] = useState(Number(totaleAttuale) > 1 ? Number(totaleAttuale) : 10);
+  const [n, setN] = useState(client.gruppo_id ? (OFFERTE_GRUPPO.some((o) => o.n === Number(totaleAttuale)) ? Number(totaleAttuale) : 4) : (Number(totaleAttuale) > 1 ? Number(totaleAttuale) : 10));
   const [nota, setNota] = useState("");
   const [inviata, setInviata] = useState(null);
   const [invio, setInvio] = useState(false);
@@ -9921,7 +9927,9 @@ function RichiediPacchetto({ client, totaleAttuale }) {
   }, [client.id]);
   const invia = async () => {
     setInvio(true);
-    const { data } = await supabase.from("richieste_pacchetto").insert({ client_id: client.id, gruppo_id: client.gruppo_id || null, numero_lezioni: n, nota: nota.trim() || null }).select("id, numero_lezioni, created_at").single();
+    const off = client.gruppo_id ? OFFERTE_GRUPPO.find((o) => o.n === n) : null;
+    const notaFinale = [off ? `Offerta: ${off.titolo}` : "", nota.trim()].filter(Boolean).join(" — ") || null;
+    const { data } = await supabase.from("richieste_pacchetto").insert({ client_id: client.id, gruppo_id: client.gruppo_id || null, numero_lezioni: n, nota: notaFinale }).select("id, numero_lezioni, created_at").single();
     if (data) {
       setInviata(data); setAperto(false);
       supabase.auth.getSession().then(({ data: { session } }) => {
@@ -9936,12 +9944,23 @@ function RichiediPacchetto({ client, totaleAttuale }) {
     <div className="mt-3 space-y-3 rounded-xl p-3" style={{ background: "#F5FAFE", border: "1.5px solid #C9E0F7" }}>
       <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Nuovo pacchetto lezioni</p>
       {client.gruppo_id && <p className="text-[11px]" style={{ color: "#3F78B3" }}>La richiesta vale per tutte le ragazze del tuo gruppo 🫶🏻</p>}
+      {client.gruppo_id ? (
+        <div className="space-y-2">
+          {OFFERTE_GRUPPO.map((o) => (
+            <button key={o.n} onClick={() => setN(o.n)} className="w-full text-left rounded-xl px-3 py-2.5" style={{ background: n === o.n ? "#27466D" : "#fff", color: n === o.n ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>
+              <p className="text-sm font-semibold">{o.titolo}</p>
+              <p className="text-[11px]" style={{ opacity: 0.8 }}>{o.sotto}</p>
+            </button>
+          ))}
+        </div>
+      ) : (<>
       <div className="flex items-center justify-center gap-4">
         <button onClick={() => setN(Math.max(1, n - 1))} className="w-9 h-9 rounded-full text-lg font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D", background: "#fff" }}>−</button>
         <span className="text-2xl font-semibold w-16 text-center" style={{ color: "#27466D" }}>{n}</span>
         <button onClick={() => setN(Math.min(100, n + 1))} className="w-9 h-9 rounded-full text-lg font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D", background: "#fff" }}>+</button>
       </div>
       <p className="text-center text-[11px] text-slate-500">lezioni</p>
+      </>)}
       <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
       <div className="flex gap-2">
         <button onClick={invia} disabled={invio} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{invio ? "Invio…" : "Invia richiesta"}</button>
