@@ -871,6 +871,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                 <p className="text-3xl font-semibold text-slate-800 mt-2">
                   {fatte}{totale ? ` / ${totale}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
                 </p>
+                {!(totale > 0) && <p className="text-slate-500 text-sm mt-1">Non hai ancora un pacchetto attivo: puoi richiederlo qui sotto 🫶🏻</p>}
+                <RichiediPacchetto client={client} totaleAttuale={totale} />
                 {totale > 0 && (
                   <>
                     <div className="h-2 bg-slate-100 rounded-full mt-3 overflow-hidden">
@@ -886,7 +888,6 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                         <span>Modifica ›</span>
                       </button>
                     )}
-                    <RichiediPacchetto client={client} totaleAttuale={totale} />
                     {rimaste <= 2 && <p className="text-slate-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
                   </>
                 )}
@@ -6457,7 +6458,7 @@ function LezioniPacchetto({ client, onCompletato }) {
 
   if (caricando) return <Spinner />;
 
-  const opzioniPacchetto = ["1", "4", "8", "10", "24", "48"];
+  const opzioniPacchetto = client.gruppo_id ? ["4", "8", "12", "24"] : ["1", "4", "8", "10", "24", "48"];
 
   if (!pacchettoAttivo) {
     return (
