@@ -886,6 +886,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                         <span>Modifica ›</span>
                       </button>
                     )}
+                    <RichiediPacchetto client={client} totaleAttuale={totale} />
                     {rimaste <= 2 && <p className="text-slate-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
                   </>
                 )}
@@ -9906,6 +9907,95 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
 }
 
 
+/* ------------------------------------------------------------------ */
+/* Richiesta nuovo pacchetto lezioni (cliente) e conferma (coach)     */
+/* ------------------------------------------------------------------ */
+function RichiediPacchetto({ client, totaleAttuale }) {
+  const [aperto, setAperto] = useState(false);
+  const [n, setN] = useState(Number(totaleAttuale) > 1 ? Number(totaleAttuale) : 10);
+  const [nota, setNota] = useState("");
+  const [inviata, setInviata] = useState(null);
+  const [invio, setInvio] = useState(false);
+  useEffect(() => {
+    supabase.from("richieste_pacchetto").select("id, numero_lezioni, created_at").eq("client_id", client.id).eq("stato", "richiesta").order("created_at", { ascending: false }).limit(1).maybeSingle().then(({ data }) => setInviata(data || null));
+  }, [client.id]);
+  const invia = async () => {
+    setInvio(true);
+    const { data } = await supabase.from("richieste_pacchetto").insert({ client_id: client.id, gruppo_id: client.gruppo_id || null, numero_lezioni: n, nota: nota.trim() || null }).select("id, numero_lezioni, created_at").single();
+    if (data) {
+      setInviata(data); setAperto(false);
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) supabase.functions.invoke("push-richiesta-pacchetto", { body: { richiesta_id: data.id }, headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => {});
+      }).catch(() => {});
+    }
+    setInvio(false);
+  };
+  if (inviata) return <p className="mt-3 text-xs rounded-lg px-3 py-2" style={{ background: "#E1EEFB", color: "#27466D" }}>Richiesta inviata ✨ Pacchetto da {inviata.numero_lezioni} lezioni{client.gruppo_id ? " per tutto il gruppo" : ""}: Morgana ti risponde presto 🫶🏻</p>;
+  if (!aperto) return <button onClick={() => setAperto(true)} className="w-full mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Richiedi un nuovo pacchetto</button>;
+  return (
+    <div className="mt-3 space-y-3 rounded-xl p-3" style={{ background: "#F5FAFE", border: "1.5px solid #C9E0F7" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Nuovo pacchetto lezioni</p>
+      {client.gruppo_id && <p className="text-[11px]" style={{ color: "#3F78B3" }}>La richiesta vale per tutte le ragazze del tuo gruppo 🫶🏻</p>}
+      <div className="flex items-center justify-center gap-4">
+        <button onClick={() => setN(Math.max(1, n - 1))} className="w-9 h-9 rounded-full text-lg font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D", background: "#fff" }}>−</button>
+        <span className="text-2xl font-semibold w-16 text-center" style={{ color: "#27466D" }}>{n}</span>
+        <button onClick={() => setN(Math.min(100, n + 1))} className="w-9 h-9 rounded-full text-lg font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D", background: "#fff" }}>+</button>
+      </div>
+      <p className="text-center text-[11px] text-slate-500">lezioni</p>
+      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+      <div className="flex gap-2">
+        <button onClick={invia} disabled={invio} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{invio ? "Invio…" : "Invia richiesta"}</button>
+        <button onClick={() => setAperto(false)} className="px-4 rounded-xl text-sm text-slate-500" style={{ border: "1.5px solid #C9E0F7", background: "#fff" }}>Annulla</button>
+      </div>
+    </div>
+  );
+}
+
+function RichiestePacchettoCoach({ onChanged }) {
+  const [righe, setRighe] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [occupato, setOccupato] = useState(null);
+  const carica = async () => {
+    const { data } = await supabase.from("richieste_pacchetto").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("created_at");
+    setRighe(data || []);
+  };
+  useEffect(() => { carica(); }, []);
+  const conferma = async (r) => {
+    setOccupato(r.id); setMsg("");
+    let membri = [r.client_id];
+    if (r.gruppo_id) { const { data } = await supabase.from("clients").select("id").eq("gruppo_id", r.gruppo_id); membri = (data || []).map((c) => c.id); if (!membri.includes(r.client_id)) membri.push(r.client_id); }
+    let creati = 0, saltati = [];
+    for (const id of membri) {
+      const { data: att } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", id).eq("stato", "attivo").limit(1).maybeSingle();
+      if (att) { const { data: c } = await supabase.from("clients").select("nome").eq("id", id).maybeSingle(); saltati.push(c?.nome || "cliente"); continue; }
+      const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: r.numero_lezioni, stato: "attivo" }).select().single();
+      if (nuovo) { await supabase.from("clients").update({ pacchetto_lezioni: String(r.numero_lezioni), stato_pacchetto: "attivo" }).eq("id", id); creati += 1; }
+    }
+    await supabase.from("richieste_pacchetto").update({ stato: "confermata" }).eq("id", r.id);
+    setMsg(`Pacchetto da ${r.numero_lezioni} lezioni creato per ${creati} ${creati === 1 ? "cliente" : "clienti"}${saltati.length ? `. Già attivo per: ${saltati.join(", ")}` : ""}. Ricordati il pagamento ✨`);
+    setOccupato(null); carica(); onChanged && onChanged();
+  };
+  const rifiuta = async (r) => { await supabase.from("richieste_pacchetto").update({ stato: "rifiutata" }).eq("id", r.id); carica(); };
+  if (righe.length === 0 && !msg) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Richieste nuovo pacchetto</p>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      {righe.map((r) => (
+        <Card key={r.id} className="p-3 space-y-2">
+          <p className="font-medium text-slate-700 text-sm">{r.gruppo_id ? "👥 Gruppo · " : ""}{r.clients?.nome} {r.clients?.cognome} · pacchetto da {r.numero_lezioni} lezioni</p>
+          {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
+          <p className="text-[11px] text-slate-400">Confermando, il pacchetto parte {r.gruppo_id ? "per tutte le clienti del gruppo" : "per la cliente"}. Il pagamento lo segni tu.</p>
+          <div className="flex gap-2">
+            <button onClick={() => conferma(r)} disabled={occupato === r.id} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{r.gruppo_id ? "Conferma per tutte" : "Conferma"}</button>
+            <button onClick={() => rifiuta(r)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -10018,6 +10108,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
           </div>
         </Sezione>
       )}
+
+ <RichiestePacchettoCoach onChanged={onChanged} />
 
       <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length} aperta={richieste.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
