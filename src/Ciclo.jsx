@@ -6,8 +6,8 @@ import { supabase } from "./supabaseClient";
 /* La cliente segna l'inizio del ciclo; l'app calcola la fase e        */
 /* mostra consigli generali (modificabili da Morgana).                 */
 /* ------------------------------------------------------------------ */
-function Card({ children, className = "" }) {
-  return <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`}>{children}</div>;
+function Card({ children, className = "", style }) {
+  return <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`} style={style}>{children}</div>;
 }
 function Spinner() {
   return <div className="flex justify-center pt-12"><div className="w-8 h-8 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /></div>;
@@ -26,12 +26,13 @@ function fmtIt(s) { return s ? s.split("-").reverse().join("/") : ""; }
 function fmtCorta(s) { return parseDate(s).toLocaleDateString("it-IT", { day: "numeric", month: "long" }); }
 
 const FASI = ["mestruale", "follicolare", "ovulatoria", "luteale", "premestruale"];
+// Palette unica per cella del calendario, pallino della legenda e riquadri: azzurro, navy, crema, bianco
 const STILE = {
-  mestruale: { bg: "bg-slate-200", testo: "text-slate-800", punto: "bg-slate-600", barra: "bg-slate-100 border-slate-200" },
-  follicolare: { bg: "bg-sky-100", testo: "text-sky-700", punto: "bg-sky-400", barra: "bg-sky-50 border-sky-100" },
-  ovulatoria: { bg: "bg-slate-100", testo: "text-slate-700", punto: "bg-slate-400", barra: "bg-slate-100 border-slate-100" },
-  luteale: { bg: "bg-indigo-100", testo: "text-indigo-700", punto: "bg-indigo-400", barra: "bg-indigo-50 border-indigo-100" },
-  premestruale: { bg: "bg-slate-200", testo: "text-slate-700", punto: "bg-slate-500", barra: "bg-slate-50 border-slate-200" },
+  mestruale: { fondo: "#27466D", colore: "#FFFFFF", bordo: "1.5px solid #27466D", cardBg: "#F5FAFE", cardBordo: "#C9E0F7" },
+  follicolare: { fondo: "#C9E0F7", colore: "#27466D", bordo: "1.5px solid #C9E0F7", cardBg: "#F5FAFE", cardBordo: "#C9E0F7" },
+  ovulatoria: { fondo: "#F7E9BE", colore: "#6B5416", bordo: "1.5px solid #F7E9BE", cardBg: "#FFFBEF", cardBordo: "#F0E2B0" },
+  luteale: { fondo: "#8DB8E8", colore: "#1F3A5C", bordo: "1.5px solid #8DB8E8", cardBg: "#F0F6FD", cardBordo: "#A9C9EE" },
+  premestruale: { fondo: "#FFFFFF", colore: "#27466D", bordo: "1.5px dashed #4F8FD0", cardBg: "#FFFFFF", cardBordo: "#C9E0F7" },
 };
 
 // Durata abituale: quella impostata da Morgana, altrimenti la media degli ultimi cicli registrati, altrimenti 28 giorni
@@ -119,7 +120,7 @@ function EditorConsigli({ consigli, onSalvato, onChiudi }) {
         const b = bozza[c.fase];
         const st = STILE[c.fase] || STILE.premestruale;
         return (
-          <div key={c.fase} className={`border rounded-xl ${st.barra}`}>
+          <div key={c.fase} className="border rounded-xl" style={{ background: st.cardBg, borderColor: st.cardBordo }}>
             <button onClick={() => setAperta(aperta === c.fase ? null : c.fase)} className="w-full flex items-center justify-between px-3 py-2.5 text-left">
               <span className="text-sm font-medium text-slate-800">{b.emoji} {b.titolo}</span>
               <span className="text-slate-400 text-xs">{aperta === c.fase ? "Chiudi" : "Modifica"}</span>
@@ -170,7 +171,7 @@ function CalendarioMese({ mese, setMese, inizi, L, flusso, oggi, onGiorno }) {
           const èOggi = data === oggi;
           const èInizio = inizi.includes(data);
           return (
-            <button key={i} type="button" onClick={() => onGiorno && onGiorno(data)} className={`h-9 rounded-lg flex items-center justify-center text-xs ${st ? st.bg + " " + st.testo : "text-slate-500"} ${f?.previsto ? "opacity-60" : ""} ${èOggi ? "ring-2 ring-slate-800" : ""} ${èInizio ? "font-bold underline" : ""}`}>
+            <button key={i} type="button" onClick={() => onGiorno && onGiorno(data)} className={`h-9 rounded-lg flex items-center justify-center text-xs ${st ? "" : "text-slate-500"} ${f?.previsto ? "opacity-60" : ""} ${èInizio ? "font-bold underline" : ""}`} style={{ ...(st ? { background: st.fondo, color: st.colore, border: st.bordo } : {}), ...(èOggi ? { boxShadow: "0 0 0 2px #fff, 0 0 0 4px #27466D" } : {}) }}>
               {parseDate(data).getDate()}
             </button>
           );
@@ -179,11 +180,11 @@ function CalendarioMese({ mese, setMese, inizi, L, flusso, oggi, onGiorno }) {
       <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1">
         {FASI.map((k) => (
           <span key={k} className="flex items-center gap-1 text-xs text-slate-500">
-            <span className={`w-2.5 h-2.5 rounded-full ${STILE[k].punto}`} />{k}
+            <span className="w-3 h-3 rounded-full inline-block" style={{ background: STILE[k].fondo, border: STILE[k].bordo }} />{k}
           </span>
         ))}
       </div>
-      <p className="text-slate-400 text-xs">Tocca un giorno per segnare (o togliere) l'inizio delle mestruazioni. I giorni più sbiaditi sono una previsione, basata sui cicli precedenti.</p>
+      <p className="text-slate-400 text-xs">Il giorno di oggi ha il bordo scuro. Tocca un giorno per segnare (o togliere) l'inizio delle mestruazioni. I giorni più sbiaditi sono una previsione, basata sui cicli precedenti.</p>
     </Card>
   );
 }
@@ -287,13 +288,13 @@ export default function CicloCliente({ client, isAdmin = false }) {
       )}
 
       {oggiInfo && consiglio ? (
-        <Card className={`p-4 space-y-3 border ${st.barra}`}>
+        <Card className="p-4 space-y-3 border" style={{ background: st.cardBg, borderColor: st.cardBordo }}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-slate-400 text-xs">Giorno {oggiInfo.giorno} del ciclo</p>
               <p className="text-xl font-semibold text-slate-800">{consiglio.emoji} {consiglio.titolo}</p>
             </div>
-            <span className={`text-xs font-medium rounded-full px-2.5 py-1 ${st.bg} ${st.testo}`}>{oggiInfo.fase}</span>
+            <span className="text-xs font-medium rounded-full px-2.5 py-1" style={{ background: st.fondo, color: st.colore, border: st.bordo }}>{oggiInfo.fase}</span>
           </div>
           {oggiInfo.ritardo > 0 ? (
             <p className="text-slate-500 text-xs">Il ciclo sembra in ritardo di {oggiInfo.ritardo} {oggiInfo.ritardo === 1 ? "giorno" : "giorni"}. Appena arriva, segnalo qui sotto.</p>
