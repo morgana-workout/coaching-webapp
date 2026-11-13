@@ -12158,6 +12158,11 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
 function CercaClienti({ clienti, onSelect }) {
   const [q, setQ] = useState("");
   const t = q.trim().toLowerCase();
+  const [gruppi, setGruppi] = useState([]);
+  const [gruppoAperto, setGruppoAperto] = useState(null);
+  useEffect(() => { (async () => { try { const { data } = await supabase.from("gruppi_bulb").select("*").order("created_at"); setGruppi(data || []); } catch (e) { /* ignora */ } })(); }, []);
+  const nomiGruppo = (g) => clienti.filter((c) => c.gruppo_id === g.id).map((c) => c.nome);
+  const gruppiTrovati = t ? gruppi.filter((g) => "gruppo".startsWith(t) || t.startsWith("gruppo") && (`${g.nome} ${nomiGruppo(g).join(" ")}`.toLowerCase().includes(t) || "gruppo".includes(t)) || `${g.nome} ${nomiGruppo(g).join(" ")}`.toLowerCase().includes(t)) : [];
   const risultati = t ? clienti.filter((c) => `${c.nome} ${c.cognome || ""}`.toLowerCase().includes(t)).slice(0, 8) : [];
   const [aperta, setAperta] = useState(false);
   const leggiRecenti = () => { try { return JSON.parse(localStorage.getItem("ultime_cercate") || "[]"); } catch (e) { return []; } };
@@ -12187,9 +12192,16 @@ function CercaClienti({ clienti, onSelect }) {
           ))}
         </div>
       )}
+      {gruppoAperto && <SessioneGruppo gruppo={gruppoAperto} onClose={() => setGruppoAperto(null)} onChanged={() => {}} onSelect={onSelect} />}
       {t && (
         <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
-          {risultati.length === 0 && <p className="px-4 py-3 text-sm text-slate-400">Nessuna cliente trovata</p>}
+          {gruppiTrovati.map((g) => (
+            <button key={g.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { setGruppoAperto(g); setQ(""); setAperta(false); }} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0" style={{ background: "#F5FAFE" }}>
+              <span className="text-sm font-medium" style={{ color: "#27466D" }}>👥 {g.nome}</span>
+              <span className="text-[11px] text-slate-500 truncate ml-2">{nomiGruppo(g).join(", ")}</span>
+            </button>
+          ))}
+          {risultati.length === 0 && gruppiTrovati.length === 0 && <p className="px-4 py-3 text-sm text-slate-400">Nessuna cliente trovata</p>}
           {risultati.map((c) => (
             <button key={c.id} onMouseDown={(e) => e.preventDefault()} onClick={() => scegli(c)} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0">
               <span className="text-sm text-slate-800">{c.nome} {c.cognome}</span>
