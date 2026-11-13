@@ -872,7 +872,9 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                   {fatte}{totale ? ` / ${totale}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
                 </p>
                 {!(totale > 0) && <p className="text-slate-500 text-sm mt-1">Non hai ancora un pacchetto attivo: puoi richiederlo qui sotto 🫶🏻</p>}
-                <RichiediPacchetto client={client} totaleAttuale={totale} />
+                {totale > 0 && rimaste > 1
+                  ? <p className="text-slate-400 text-[11px] mt-2">Potrai richiedere il prossimo pacchetto quando ti resta 1 sola lezione 🫶🏻</p>
+                  : <RichiediPacchetto client={client} totaleAttuale={totale} />}
                 {totale > 0 && (
                   <>
                     <div className="h-2 bg-slate-100 rounded-full mt-3 overflow-hidden">
@@ -3500,7 +3502,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
       </button>
       {aperto && (
         <div className="mt-2 space-y-3 max-h-[60vh] overflow-y-auto pb-1">
-          <p className="text-[11px] text-slate-400">Da fare prima di ogni allenamento. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
+          <p className="text-[11px] text-slate-400">Da fare prima di ogni allenamento: 30/60 secondi per ogni esercizio.</p>
           {["mobilita"].map((t) => {
             const gruppo = righe.filter((x) => x.tipo === t);
             if (gruppo.length === 0) return null;
@@ -4184,7 +4186,9 @@ function NotaFinaleAllenamento({ clientId, data }) {
   );
 }
 
-function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" }) {
+function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico", isAdmin = false }) {
+  const [inGruppo, setInGruppo] = useState(false); // clienti dei gruppi Bulb: per ora nessun allenamento, mobilità o attivazione
+  useEffect(() => { supabase.from("clients").select("gruppo_id").eq("id", clientId).maybeSingle().then(({ data }) => setInGruppo(!isAdmin && !!data?.gruppo_id)).catch(() => {}); }, [clientId]);
   const [giorni, setGiorni] = useState([]);
   const [giornoId, setGiornoId] = useState(null);
   const [data, setData] = useState(formatDataLocale(new Date()));
@@ -4329,6 +4333,14 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
     }
     caricaGiorno();
   };
+  if (inGruppo) return (
+    <div className="px-5 pt-6 pb-40 space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold" style={{ color: "#27466D" }}>Diario allenamento</h1>
+      </div>
+      <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
+    </div>
+  );
   if (caricando) return <Spinner />;
   const giorno = giorni.find((g) => g.id === giornoId);
   const oggi = formatDataLocale(new Date());
@@ -4373,12 +4385,13 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico" 
                 <button onClick={() => setAperti((a) => ({ ...a, prep: !aperta }))} className="w-full flex items-start justify-between gap-2 text-left">
                   <div>
                     <h3 className="font-bold text-base" style={{ color: "#27466D" }}>Mobilità pre allenamento{prepCompleta ? " ✓" : ""}</h3>
-                    <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Solo da spuntare · {fatte}/{prep.length} fatti</p>
+                    <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>{fatte}/{prep.length} fatti · solo da spuntare</p>
                   </div>
                   <ChevronRight size={18} stroke="#4F8FD0" className={`flex-shrink-0 mt-1 transition-transform ${aperta ? "rotate-90" : ""}`} />
                 </button>
                 {aperta && (
                   <div className="mt-2 space-y-1">
+                    <p className="text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "#E1EEFB", color: "#27466D" }}>⏱ Fai 30/60 secondi per ogni esercizio</p>
                     {prep.map((p) => {
                       const ok = prepFatta(p); const info = trovaEsercizioVideo(p.nome, libreria);
                       return (
@@ -4532,7 +4545,7 @@ function DiarioClienteHost({ clientId, isAdmin = false }) {
       <DiarioAllenamento clientId={clientId} isAdmin={isAdmin} />
     </div>
   );
-  return <DiarioClienteNuovo clientId={clientId} onStorico={() => setStorico(true)} etichettaStorico={isAdmin ? "Modifica programma e storico" : "Storico"} />;
+  return <DiarioClienteNuovo clientId={clientId} onStorico={() => setStorico(true)} etichettaStorico={isAdmin ? "Modifica programma e storico" : "Storico"} isAdmin={isAdmin} />;
 }
 
 function NotificheCliente({ client }) {
@@ -6458,7 +6471,7 @@ function LezioniPacchetto({ client, onCompletato }) {
 
   if (caricando) return <Spinner />;
 
-  const opzioniPacchetto = client.gruppo_id ? ["4", "8", "12", "24"] : ["1", "4", "8", "10", "24", "48"];
+  const opzioniPacchetto = ["1", "4", "8", "12", "24"];
 
   if (!pacchettoAttivo) {
     return (
@@ -9926,7 +9939,7 @@ const OFFERTE_GRUPPO = [
 ];
 function RichiediPacchetto({ client, totaleAttuale }) {
   const [aperto, setAperto] = useState(false);
-  const [n, setN] = useState(client.gruppo_id ? (OFFERTE_GRUPPO.some((o) => o.n === Number(totaleAttuale)) ? Number(totaleAttuale) : 4) : (Number(totaleAttuale) > 1 ? Number(totaleAttuale) : 10));
+  const [n, setN] = useState(OFFERTE_GRUPPO.some((o) => o.n === Number(totaleAttuale)) ? Number(totaleAttuale) : 4);
   const [nota, setNota] = useState("");
   const [inviata, setInviata] = useState(null);
   const [invio, setInvio] = useState(false);
@@ -9935,7 +9948,7 @@ function RichiediPacchetto({ client, totaleAttuale }) {
   }, [client.id]);
   const invia = async () => {
     setInvio(true);
-    const off = client.gruppo_id ? OFFERTE_GRUPPO.find((o) => o.n === n) : null;
+    const off = OFFERTE_GRUPPO.find((o) => o.n === n);
     const notaFinale = [off ? `Offerta: ${off.titolo}` : "", nota.trim()].filter(Boolean).join(" — ") || null;
     const { data } = await supabase.from("richieste_pacchetto").insert({ client_id: client.id, gruppo_id: client.gruppo_id || null, numero_lezioni: n, nota: notaFinale }).select("id, numero_lezioni, created_at").single();
     if (data) {
@@ -9952,7 +9965,7 @@ function RichiediPacchetto({ client, totaleAttuale }) {
     <div className="mt-3 space-y-3 rounded-xl p-3" style={{ background: "#F5FAFE", border: "1.5px solid #C9E0F7" }}>
       <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Nuovo pacchetto lezioni</p>
       {client.gruppo_id && <p className="text-[11px]" style={{ color: "#3F78B3" }}>La richiesta vale per tutte le ragazze del tuo gruppo 🫶🏻</p>}
-      {client.gruppo_id ? (
+      {true ? (
         <div className="space-y-2">
           {OFFERTE_GRUPPO.map((o) => (
             <button key={o.n} onClick={() => setN(o.n)} className="w-full text-left rounded-xl px-3 py-2.5" style={{ background: n === o.n ? "#27466D" : "#fff", color: n === o.n ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>
@@ -9993,8 +10006,10 @@ function RichiestePacchettoCoach({ onChanged }) {
     if (r.gruppo_id) { const { data } = await supabase.from("clients").select("id").eq("gruppo_id", r.gruppo_id); membri = (data || []).map((c) => c.id); if (!membri.includes(r.client_id)) membri.push(r.client_id); }
     let creati = 0, saltati = [];
     for (const id of membri) {
-      const { data: att } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", id).eq("stato", "attivo").limit(1).maybeSingle();
-      if (att) { const { data: c } = await supabase.from("clients").select("nome").eq("id", id).maybeSingle(); saltati.push(c?.nome || "cliente"); continue; }
+      const { data: att } = await supabase.from("pacchetti_lezioni").select("id, numero_lezioni").eq("client_id", id).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+      let attivoPieno = false;
+      if (att) { const { count } = await supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("pacchetto_id", att.id).eq("fatta", true); attivoPieno = (att.numero_lezioni - (count || 0)) > 1; }
+      if (attivoPieno) { const { data: c } = await supabase.from("clients").select("nome").eq("id", id).maybeSingle(); saltati.push(c?.nome || "cliente"); continue; }
       const quota = r.gruppo_id && PREZZI_GRUPPO[r.numero_lezioni] ? PREZZI_GRUPPO[r.numero_lezioni] / 4 : null;
       const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: r.numero_lezioni, stato: "attivo", saldato: false, importo_quota: quota }).select().single();
       if (nuovo) { await supabase.from("clients").update({ pacchetto_lezioni: String(r.numero_lezioni), stato_pacchetto: "attivo" }).eq("id", id); creati += 1; }
@@ -12839,6 +12854,12 @@ function VistaClienteSessione({ cl, oggi }) {
   const [msg, setMsg] = useState("");
   const [timer, setTimer] = useState(0);
   const [notaAperta, setNotaAperta] = useState(false);
+  const [prep, setPrep] = useState([]); // mobilità e attivazione: solo da spuntare, niente serie/ripetizioni/kg
+  const [prepFatte, setPrepFatte] = useState({});
+  const [prepAperta, setPrepAperta] = useState(false);
+  const [libreriaV, setLibreriaV] = useState([]);
+  const [infoEsV, setInfoEsV] = useState(null);
+  useEffect(() => { supabase.from("esercizi_video").select("*").order("ordine").then(({ data }) => setLibreriaV(data || [])).catch(() => {}); }, []);
 
   useEffect(() => {
     let vivo = true; setGiorni(null); setGiornoId(null); setEsercizi([]);
@@ -12856,7 +12877,15 @@ function VistaClienteSessione({ cl, oggi }) {
     let vivo = true;
     (async () => {
       const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, note, recupero_sec, ordine, tipo").eq("client_id", cl.id).eq("training_day_id", giornoId).order("ordine");
-      const lista = es || [];
+      const tuttiEs = es || [];
+      const { data: mob } = await supabase.from("training_exercises").select("id, nome, note, ordine, tipo").eq("client_id", cl.id).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
+      const lista = tuttiEs.filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
+      const prepL = [...(mob || []), ...tuttiEs.filter((e) => e.tipo === "mobilita" || e.tipo === "attivazione")];
+      if (vivo) {
+        const { data: pe } = prepL.length ? await supabase.from("training_entries").select("exercise_id, completata").eq("client_id", cl.id).eq("data", oggi).in("exercise_id", prepL.map((e) => e.id)) : { data: [] };
+        const pf = {}; (pe || []).forEach((r) => { if (r.completata === true) pf[r.exercise_id] = true; });
+        setPrep(prepL); setPrepFatte(pf);
+      }
       let righe = [];
       if (lista.length) { const r = await supabase.from("training_entries").select("exercise_id, data, numero_serie, kg, ripetizioni, completata").eq("client_id", cl.id).in("exercise_id", lista.map((e) => e.id)).order("data", { ascending: false }); righe = r.data || []; }
       if (!vivo) return;
@@ -12921,14 +12950,46 @@ function VistaClienteSessione({ cl, oggi }) {
           {giorni.map((g) => <button key={g.id} onClick={() => setGiornoId(g.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: giornoId === g.id ? "#27466D" : "#fff", color: giornoId === g.id ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{g.nome}</button>)}
         </div>
       )}
+      {prep.length > 0 && (
+        <div className="bg-white rounded-2xl" style={{ border: "1.5px solid #C9E0F7" }}>
+          <button onClick={() => setPrepAperta(!prepAperta)} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
+            <span className="flex-1 text-sm font-bold" style={{ color: "#27466D" }}>Mobilità</span>
+            <span className="text-xs font-bold rounded-full px-2.5 py-1" style={{ background: "#E1EEFB", color: "#27466D" }}>{prep.filter((p) => prepFatte[p.id]).length}/{prep.length}</span>
+            <ChevronRight size={16} stroke="#4F8FD0" className={`transition-transform ${prepAperta ? "rotate-90" : ""}`} />
+          </button>
+          {prepAperta && (
+            <div className="px-3 pb-2.5">
+              <p className="text-[11px] font-semibold rounded-lg px-2.5 py-1.5 mb-1" style={{ background: "#E1EEFB", color: "#27466D" }}>⏱ 30/60 secondi per esercizio</p>
+              {prep.map((p) => {
+                const ok = !!prepFatte[p.id]; const info = trovaEsercizioVideo(p.nome, libreriaV);
+                return (
+                  <div key={p.id} className="flex items-center gap-2 py-1" style={{ borderTop: "1px solid #EEF3F8" }}>
+                    <span className="flex-1 min-w-0 text-sm font-semibold truncate" style={{ color: "#27466D" }}>{p.nome}</span>
+                    {info && <button onClick={() => setInfoEsV(info)} className="text-[11px] font-semibold flex-shrink-0" style={{ color: "#3F78B3" }}>▷ Video</button>}
+                    <button onClick={async () => {
+                      setPrepFatte((m) => ({ ...m, [p.id]: !ok }));
+                      const { data: e } = await supabase.from("training_entries").select("id").eq("client_id", cl.id).eq("exercise_id", p.id).eq("data", oggi).limit(1).maybeSingle();
+                      if (e) await supabase.from("training_entries").update({ completata: !ok }).eq("id", e.id);
+                      else await supabase.from("training_entries").insert({ client_id: cl.id, exercise_id: p.id, data: oggi, numero_serie: 1, completata: true });
+                    }} aria-label={ok ? "Fatto" : "Segna come fatto"} className="rounded-full flex items-center justify-center flex-shrink-0" style={{ width: 36, height: 36, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
+                      <Check size={16} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      {infoEsV && <EsercizioInfoModal es={infoEsV} onClose={() => setInfoEsV(null)} />}
       {esercizi.map((es) => {
         const tot = parseInt(es.serie, 10) || 3;
         const fatte = Array.from({ length: tot }, (_, i) => i + 1).filter((i) => oggiMap[`${es.id}|${i}`]?.ok).length;
         const completo = fatte >= tot; const apertoQui = aperto === es.id;
         return (
           <div key={es.id} className="bg-white rounded-2xl" style={{ border: `1.5px solid ${apertoQui ? "#4F8FD0" : "#C9E0F7"}`, opacity: completo && !apertoQui ? 0.7 : 1 }}>
-            <button onClick={() => setAperto(apertoQui ? null : es.id)} className="w-full text-left px-3 py-3 flex items-center gap-2">
-              <span className="flex-1 min-w-0"><span className="block text-base font-bold truncate" style={{ color: "#27466D" }}>{es.nome}</span><span className="block text-xs" style={{ color: "#3F78B3" }}>{tot} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{es.note ? ` · ${es.note}` : ""}</span></span>
+            <button onClick={() => setAperto(apertoQui ? null : es.id)} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
+              <span className="flex-1 min-w-0"><span className="block text-[15px] font-bold truncate" style={{ color: "#27466D" }}>{es.nome}</span><span className="block text-xs" style={{ color: "#3F78B3" }}>{tot} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{es.note ? ` · ${es.note}` : ""}</span></span>
               <span className="text-xs font-bold rounded-full px-2.5 py-1" style={{ background: completo ? "#4F8FD0" : "#E1EEFB", color: completo ? "#fff" : "#27466D" }}>{completo ? "✓" : `${fatte}/${tot}`}</span>
             </button>
             {apertoQui && (
