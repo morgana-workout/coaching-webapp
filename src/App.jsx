@@ -12960,9 +12960,9 @@ function VistaClienteSessione({ cl, oggi }) {
   );
 }
 
-function SessioneTelefono({ gruppo, membri, onClose, onChanged }) {
+function SessioneTelefono({ gruppo, membri, onClose, onChanged, inizialeId }) {
   const [vista, setVista] = useState("clienti");
-  const [sel, setSel] = useState(membri[0]?.id || null);
+  const [sel, setSel] = useState(inizialeId || membri[0]?.id || null);
   const oggi = formatDataLocale(new Date());
   const nomeBreve = (c, i) => (c.nome && c.nome.trim() ? c.nome.trim().split(" ")[0] : `Cliente ${i + 1}`);
   const cl = membri.find((m) => m.id === sel) || membri[0];
@@ -13270,6 +13270,18 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [ora, setOra] = useState(gruppo.ora || "");
   const [menu, setMenu] = useState(false);
   const [sessioneTel, setSessioneTel] = useState(false);
+  const [telIniziale, setTelIniziale] = useState(null);
+  const [completa, setCompleta] = useState(false); // false = vista semplice per la sessione dal telefono
+  const [serieOggi, setSerieOggi] = useState({});
+  useEffect(() => { (async () => {
+    const oggiS = formatDataLocale(new Date());
+    const { data: cl } = await supabase.from("clients").select("id").eq("gruppo_id", gruppo.id);
+    const ids = (cl || []).map((c) => c.id);
+    if (!ids.length) return;
+    const { data } = await supabase.from("training_entries").select("client_id, completata, kg").in("client_id", ids).eq("data", oggiS);
+    const m = {}; (data || []).forEach((r) => { if (r.completata !== false && r.kg != null) m[r.client_id] = (m[r.client_id] || 0) + 1; });
+    setSerieOggi(m);
+  })(); }, [gruppo.id, sessioneTel]);
   const [pannello, setPannello] = useState(null); // null | "presenze" | "pagamento"
   const [chiavePag, setChiavePag] = useState(0);
   const [copia, setCopia] = useState({ da: "", a: [] });
@@ -13378,8 +13390,39 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
       <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
         {!membri ? <Spinner /> : (
           <>
-            <button onClick={() => setSessioneTel(true)} className="w-full py-3.5 rounded-2xl text-base font-bold text-white" style={{ background: "#27466D" }}>▶ Avvia la sessione (modalità telefono)</button>
-            <div className="flex flex-wrap gap-2 items-center">
+            <button onClick={() => { setTelIniziale(null); setSessioneTel(true); }} className="w-full py-4 rounded-2xl text-base font-bold text-white" style={{ background: "#27466D" }}>▶ Avvia la sessione di oggi</button>
+            {!completa && (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold tracking-wide text-slate-500 mb-2">LE CLIENTI</p>
+                  <div className="space-y-2">
+                    {membri.map((m) => (
+                      <button key={m.id} onClick={() => { setTelIniziale(m.id); setSessioneTel(true); }} className="w-full flex items-center gap-3 text-left bg-white rounded-2xl px-3 py-3" style={{ border: "1.5px solid #C9E0F7" }}>
+                        <span className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "#E1EEFB", color: "#27466D" }}>{(m.nome || "?").trim().charAt(0).toUpperCase()}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold" style={{ color: "#27466D" }}>{`${m.nome || ""} ${m.cognome || ""}`.trim()}</span>
+                          <span className="block text-xs text-slate-500 truncate">{m.note_particolari || "—"}</span>
+                        </span>
+                        {serieOggi[m.id] > 0 && <span className="text-[11px] font-semibold px-2 py-1 rounded-full flex-shrink-0" style={{ background: "#E1EEFB", color: "#27466D" }}>{serieOggi[m.id]} serie oggi</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[11px] font-semibold tracking-wide text-slate-500">STRUMENTI</p>
+              </>
+            )}
+            <div className={completa ? "hidden" : "flex flex-wrap gap-2 items-center"}>
+              <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prenota lezione</button>
+              <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
+              <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Presenze</button>
+              <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Pagamento</button>
+              <button onClick={() => { setCompleta(true); setModoVal(true); }} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazioni</button>
+              <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Importa CSV</button>
+              <button onClick={() => setCompleta(true)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Gestione completa</button>
+            </div>
+            {!completa && msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+            {completa && <button onClick={() => { setCompleta(false); setModoVal(false); }} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>← Torna alla vista semplice</button>}
+            <div className={completa ? "flex flex-wrap gap-2 items-center" : "hidden"}>
               <button onClick={() => setMenu(!menu)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Copia programma tra le clienti</button>
               <button onClick={nuovoProfilo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo profilo vuoto</button>
               {candidate.length > 0 && (
@@ -13430,7 +13473,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
                 <button onClick={prenotaOra} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Prenota per {membri.length} clienti</button>
               </div>
             )}
-            <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+            <div className={completa ? "bg-white rounded-2xl border border-slate-200 p-3 space-y-2" : "hidden"}>
               <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Informazioni comuni del gruppo</p>
               <textarea value={notaG} onChange={(e) => setNotaG(e.target.value)} onBlur={() => notaG !== (gruppo.nota || "") && salvaG({ nota: notaG.trim() || null })} rows={2} placeholder="Cose valide per tutte: obiettivo del gruppo, attrezzi da preparare, focus della sessione…" className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2" />
               <p className="text-xs text-slate-500">{prossime.length ? "Prossime lezioni: " + prossime.map((x) => `${x.data.split("-").reverse().join("/")} ${x.ora ? x.ora.slice(0, 5) : ""}`).join(" · ") : "Nessuna lezione di gruppo in programma."}</p>
@@ -13454,10 +13497,10 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               </div>
             )}
             {membri.length === 0 && <p className="text-sm text-slate-500 text-center py-8">Nessuna cliente nel gruppo: aggiungi un profilo vuoto o una cliente già esistente 🫶🏻</p>}
-            {sessioneTel && <SessioneTelefono gruppo={gruppo} membri={membri} onClose={() => setSessioneTel(false)} onChanged={onChanged} />}
-            <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-start">
+            {sessioneTel && <SessioneTelefono gruppo={gruppo} membri={membri} inizialeId={telIniziale} onClose={() => setSessioneTel(false)} onChanged={onChanged} />}
+            {completa && <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-start">
               {membri.map((m) => <CardMembroGruppo key={m.id} cl={m} gruppoNome={gruppo.nome} onToglila={() => togli(m.id)} onApri={(id) => { onChanged(); onClose(); onSelect(id); }} onCambiato={() => {}} modoValutazione={modoVal} />)}
-            </div>
+            </div>}
           </>
         )}
       </div>
