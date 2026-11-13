@@ -4631,7 +4631,7 @@ function LeMieLezioni({ client }) {
       const conferma = confirm("Mancano meno di 24 ore alla lezione: verrà comunque conteggiata come persa. Vuoi annullare comunque?");
       if (!conferma) return;
     }
-    await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa" }).eq("id", e.id);
+    await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa", ...(inTempo && client.gruppo_id ? { recupero_entro: fineMeseSuccessivo(e.data), recuperata: false } : {}) }).eq("id", e.id);
     if (inTempo) await scollegaLezionePacchetto(e.id);
     carica();
   };
@@ -4650,7 +4650,7 @@ function LeMieLezioni({ client }) {
       {sheet && <ModificaLezioneSheet client={client} evento={sheet} onChiudi={() => setSheet(null)} onFatto={carica} />}
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Le mie lezioni</h1>
-        <p className="text-slate-500 text-sm mt-1">Puoi annullare gratuitamente fino a 24 ore prima.</p>
+        <p className="text-slate-500 text-sm mt-1">Puoi annullare gratuitamente fino a 24 ore prima.{client.gruppo_id ? " Se annulli in tempo, puoi recuperare la lezione entro la fine del mese successivo 🫶🏻" : ""}</p>
       </div>
 
       <div>
@@ -5754,6 +5754,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
         note: inRate ? ["Dilazionato in 2 rate", nota].filter(Boolean).join(" · ") : (nota || null),
         ...(inRate ? { importo_saldato: versato, scadenza_saldo: scadSaldoEff } : {}),
       }).select().single();
+      if (tipo === "Pacchetto lezioni Bulb" && stato === "saldato" && !inRate) await supabase.from("pacchetti_lezioni").update({ saldato: true }).eq("client_id", client.id).eq("saldato", false);
       if (inRate && pagNuovo) {
         const resta = totale != null ? Math.max(0, totale - versato) : null;
         await supabase.from("calendar_events").insert({
@@ -6516,6 +6517,12 @@ async function collegaLezionePacchetto(clientId, evento) {
   if (gia) {
     await supabase.from("lezioni_svolte").update({ data: evento.data, ora: evento.ora || null }).eq("id", gia.id);
     return;
+  }
+  // lezione prenotata nel mese successivo a una annullata in tempo: conta come recupero
+  if (evento.stato === "confermato" && evento.data) {
+    const { data: pend } = await supabase.from("calendar_events").select("id, data, recupero_entro").eq("client_id", clientId).eq("tipo", "lezione").eq("stato", "annullata").eq("recuperata", false).not("recupero_entro", "is", null).order("data").limit(10);
+    const ok = (pend || []).find((p) => evento.data >= inizioMeseSuccessivo(p.data) && evento.data <= p.recupero_entro);
+    if (ok) await supabase.from("calendar_events").update({ recuperata: true }).eq("id", ok.id);
   }
   const { data: pacc } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", clientId).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
   if (!pacc) return;
@@ -9987,11 +9994,12 @@ function RichiestePacchettoCoach({ onChanged }) {
     for (const id of membri) {
       const { data: att } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", id).eq("stato", "attivo").limit(1).maybeSingle();
       if (att) { const { data: c } = await supabase.from("clients").select("nome").eq("id", id).maybeSingle(); saltati.push(c?.nome || "cliente"); continue; }
-      const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: r.numero_lezioni, stato: "attivo" }).select().single();
+      const quota = r.gruppo_id && PREZZI_GRUPPO[r.numero_lezioni] ? PREZZI_GRUPPO[r.numero_lezioni] / 4 : null;
+      const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: r.numero_lezioni, stato: "attivo", saldato: false, importo_quota: quota }).select().single();
       if (nuovo) { await supabase.from("clients").update({ pacchetto_lezioni: String(r.numero_lezioni), stato_pacchetto: "attivo" }).eq("id", id); creati += 1; }
     }
     await supabase.from("richieste_pacchetto").update({ stato: "confermata" }).eq("id", r.id);
-    setMsg(`Pacchetto da ${r.numero_lezioni} lezioni creato per ${creati} ${creati === 1 ? "cliente" : "clienti"}${saltati.length ? `. Già attivo per: ${saltati.join(", ")}` : ""}. Ricordati il pagamento ✨`);
+    setMsg(`Pacchetto da ${r.numero_lezioni} lezioni creato per ${creati} ${creati === 1 ? "cliente" : "clienti"}${saltati.length ? `. Già attivo per: ${saltati.join(", ")}` : ""}. Risultano "da saldare" finché non segni il pagamento ✨`);
     setOccupato(null); carica(); onChanged && onChanged();
   };
   const rifiuta = async (r) => { await supabase.from("richieste_pacchetto").update({ stato: "rifiutata" }).eq("id", r.id); carica(); };
@@ -10004,7 +10012,7 @@ function RichiestePacchettoCoach({ onChanged }) {
         <Card key={r.id} className="p-3 space-y-2">
           <p className="font-medium text-slate-700 text-sm">{r.gruppo_id ? "👥 Gruppo · " : ""}{r.clients?.nome} {r.clients?.cognome} · pacchetto da {r.numero_lezioni} lezioni</p>
           {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
-          <p className="text-[11px] text-slate-400">Confermando, il pacchetto parte {r.gruppo_id ? "per tutte le clienti del gruppo" : "per la cliente"}. Il pagamento lo segni tu.</p>
+          <p className="text-[11px] text-slate-400">Confermando, il pacchetto parte {r.gruppo_id ? "per tutte le clienti del gruppo" : "per la cliente"}. Resta "da saldare" finché non segni il pagamento{r.gruppo_id && PREZZI_GRUPPO[r.numero_lezioni] ? ` (${fmtEuro(PREZZI_GRUPPO[r.numero_lezioni])} totali, ${fmtEuro(PREZZI_GRUPPO[r.numero_lezioni] / 4)} a persona)` : ""}.</p>
           <div className="flex gap-2">
             <button onClick={() => conferma(r)} disabled={occupato === r.id} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{r.gruppo_id ? "Conferma per tutte" : "Conferma"}</button>
             <button onClick={() => rifiuta(r)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
@@ -13028,6 +13036,58 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoV
 /* ------------------------------------------------------------------ */
 /* GRUPPO — presenze alle lezioni e pagamento condiviso               */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Recuperi lezioni e saldo pacchetti                                  */
+/* ------------------------------------------------------------------ */
+const PREZZI_GRUPPO = { 4: 200, 8: 320, 12: 480, 24: 912 }; // totale per il gruppo da 4
+const fmtEuro = (n) => `${Number(n).toFixed(2).replace(".", ",").replace(",00", "")}€`;
+// ultimo giorno del mese successivo a quello della data indicata
+const fineMeseSuccessivo = (ymd) => { const [a, m] = ymd.split("-").map(Number); const d = new Date(Date.UTC(a, m + 1, 0)); return d.toISOString().slice(0, 10); };
+const inizioMeseSuccessivo = (ymd) => { const [a, m] = ymd.split("-").map(Number); return new Date(Date.UTC(a, m, 1)).toISOString().slice(0, 10); };
+
+// una lezione annullata in tempo e' recuperabile solo nel mese successivo: se non viene recuperata, diventa persa
+async function scadenzaRecuperi(clientIds) {
+  if (!clientIds?.length) return;
+  const oggi = formatDataLocale(new Date());
+  const { data: scad } = await supabase.from("calendar_events").select("*").in("client_id", clientIds).eq("tipo", "lezione").eq("stato", "annullata").eq("recuperata", false).not("recupero_entro", "is", null).lt("recupero_entro", oggi);
+  for (const ev of scad || []) {
+    await supabase.from("calendar_events").update({ stato: "persa", recuperata: true }).eq("id", ev.id);
+    await collegaLezionePacchetto(ev.client_id, { ...ev, stato: "persa" }); // occupa una lezione del pacchetto
+  }
+}
+
+function RecuperiGruppo({ membri }) {
+  const [lista, setLista] = useState(null);
+  useEffect(() => { (async () => {
+    await scadenzaRecuperi(membri.map((m) => m.id));
+    const { data } = await supabase.from("calendar_events").select("id, client_id, data, recupero_entro").in("client_id", membri.map((m) => m.id)).eq("tipo", "lezione").eq("stato", "annullata").eq("recuperata", false).not("recupero_entro", "is", null).order("recupero_entro");
+    setLista(data || []);
+  })(); }, [membri.map((m) => m.id).join(",")]);
+  if (!lista || lista.length === 0) return null;
+  const fmt = (d) => d.split("-").reverse().slice(0, 2).join("/");
+  return (
+    <div className="rounded-xl p-3 space-y-1.5" style={{ background: "#E1EEFB" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Recuperi da fare</p>
+      {lista.map((e) => { const m = membri.find((x) => x.id === e.client_id); return <p key={e.id} className="text-xs text-slate-600">{m?.nome || "Cliente"}: lezione del {fmt(e.data)} annullata in tempo, da recuperare entro il {fmt(e.recupero_entro)}</p>; })}
+    </div>
+  );
+}
+
+function StatoPagamentiGruppo({ membri, chiave }) {
+  const [daSaldare, setDaSaldare] = useState([]);
+  useEffect(() => { (async () => {
+    const { data } = await supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, importo_quota").in("client_id", membri.map((m) => m.id)).eq("saldato", false).eq("stato", "attivo");
+    setDaSaldare(data || []);
+  })(); }, [membri.map((m) => m.id).join(","), chiave]);
+  if (daSaldare.length === 0) return <p className="text-[11px]" style={{ color: "#3F78B3" }}>Pacchetti: tutti saldati ✓</p>;
+  return (
+    <div className="rounded-xl p-3 space-y-1" style={{ background: "#FFFBEF", border: "1.5px solid #F7E9BE" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Da saldare</p>
+      {daSaldare.map((p) => { const m = membri.find((x) => x.id === p.client_id); return <p key={p.id} className="text-xs text-slate-600">{m?.nome || "Cliente"}: pacchetto da {p.numero_lezioni} lezioni{p.importo_quota ? ` · ${fmtEuro(p.importo_quota)}` : ""}</p>; })}
+    </div>
+  );
+}
+
 function PresenzeGruppo({ gruppo, membri }) {
   const [eventi, setEventi] = useState(null);
   const [dataSel, setDataSel] = useState(null);
@@ -13089,6 +13149,7 @@ function PagamentoCondivisoGruppo({ membri, onFatto }) {
   const [quote, setQuote] = useState({});
   const [lezioni, setLezioni] = useState("");
   const [salvando, setSalvando] = useState(false);
+  const scegliOfferta = (n) => { if (!n) return; setTipo("Pacchetto lezioni Bulb"); setTot(String(PREZZI_GRUPPO[n])); setLezioni(String(n)); };
   const [msg, setMsg] = useState("");
   const totale = Number(String(tot).replace(",", ".")) || 0;
   const n = coperte.length;
@@ -13111,9 +13172,10 @@ function PagamentoCondivisoGruppo({ membri, onFatto }) {
         if (error) throw error;
         creati += 1;
         const nl = parseInt(lezioni, 10);
+        if (tipo === "Pacchetto lezioni Bulb") await supabase.from("pacchetti_lezioni").update({ saldato: true }).eq("client_id", id).eq("saldato", false);
         if (nl > 0 && tipo === "Pacchetto lezioni Bulb") {
           const { data: att } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", id).eq("stato", "attivo").limit(1).maybeSingle();
-          if (!att) { await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: nl, stato: "attivo" }); pacchetti += 1; }
+          if (!att) { await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: nl, stato: "attivo", saldato: true }); pacchetti += 1; }
         }
       }
       setMsg(`Registrato ✨ ${creati} ${creati === 1 ? "pagamento" : "pagamenti"}${pacchetti ? ` e ${pacchetti} ${pacchetti === 1 ? "pacchetto creato" : "pacchetti creati"}` : ""}.`);
@@ -13127,6 +13189,8 @@ function PagamentoCondivisoGruppo({ membri, onFatto }) {
     <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
       <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Pagamento condiviso</p>
       <p className="text-xs text-slate-500">Una persona paga, tu scegli per chi e come dividere. Ogni cliente riceve la sua quota nel proprio storico, il totale resta giusto.</p>
+      <label className="text-xs text-slate-500 block">Offerta Small Group (compila totale e lezioni)
+        <select defaultValue="" onChange={(e) => scegliOfferta(Number(e.target.value))} className={campo + " mt-1"}><option value="">— scegli —</option>{Object.entries(PREZZI_GRUPPO).map(([n, p]) => <option key={n} value={n}>{n} lezioni · {p}€ totali</option>)}</select></label>
       <div className="grid grid-cols-2 gap-3">
         <label className="text-xs text-slate-500">Chi paga
           <select value={chi} onChange={(e) => setChi(e.target.value)} className={campo + " mt-1"}>{membri.map((m) => <option key={m.id} value={m.id}>{nomeCl(m)}</option>)}</select></label>
@@ -13206,6 +13270,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [menu, setMenu] = useState(false);
   const [sessioneTel, setSessioneTel] = useState(false);
   const [pannello, setPannello] = useState(null); // null | "presenze" | "pagamento"
+  const [chiavePag, setChiavePag] = useState(0);
   const [copia, setCopia] = useState({ da: "", a: [] });
   const [msg, setMsg] = useState("");
   const [notaG, setNotaG] = useState(gruppo.nota || "");
@@ -13330,8 +13395,10 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
               {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
             </div>
+            <StatoPagamentiGruppo membri={membri} chiave={chiavePag} />
+            <RecuperiGruppo membri={membri} />
             {pannello === "presenze" && <PresenzeGruppo gruppo={gruppo} membri={membri} />}
-            {pannello === "pagamento" && <PagamentoCondivisoGruppo membri={membri} onFatto={() => {}} />}
+            {pannello === "pagamento" && <PagamentoCondivisoGruppo membri={membri} onFatto={() => setChiavePag((k) => k + 1)} />}
             {csvAperto && (
               <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
                 <p className="text-xs text-slate-600">Carichi lo stesso file CSV del programma e viene importato per tutte le clienti scelte, ognuna col suo programma (poi ritocchi le variazioni). Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note (facoltative: scheda, tipo, esecuzione).</p>
