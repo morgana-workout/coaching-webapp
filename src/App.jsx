@@ -390,6 +390,73 @@ const LIVELLI_ATTIVITA = [
   { value: "attivo", label: "Attivo", descrizione: "oltre 10.000 passi/giorno" },
 ];
 
+const VOCI_CONSENSI = [
+  ["analisi_esterna", "Analisi con strumenti esterni", "I tuoi dati possono essere elaborati con strumenti di analisi esterni per preparare il tuo programma. Non vengono mai condivisi con altre persone."],
+  ["ciclo", "Dati del ciclo", "Morgana può tenere conto del tuo ciclo nelle analisi e nell'organizzazione del programma."],
+  ["social", "Condividere foto e risultati", "Le foto dei check fanno parte del percorso e le vede solo Morgana. Qui scegli se può anche condividere le tue foto e i tuoi risultati nei suoi contenuti (sempre con il tuo ok caso per caso). Se dici no, non succede mai."],
+];
+
+// Cliente: interruttori sì/no per i consensi privacy (si salvano subito; nessuna scelta = non ancora scelto)
+function ConsensiCliente({ client, forzaApri = false }) {
+  const [riga, setRiga] = useState(undefined);
+  const [aperto, setAperto] = useState(false);
+  const [errore, setErrore] = useState("");
+  useEffect(() => {
+    supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle().then(({ data }) => setRiga(data || null), () => setRiga(null));
+  }, [client.id]);
+  if (riga === undefined) return null;
+  const mancano = VOCI_CONSENSI.some(([k]) => riga?.[k] == null);
+  const imposta = async (k, v) => {
+    setErrore("");
+    const nuova = { ...(riga || {}), client_id: client.id, [k]: v, aggiornato_il: new Date().toISOString() };
+    setRiga(nuova);
+    const { error } = await supabase.from("consensi_cliente").upsert({ client_id: client.id, foto_coach: nuova.foto_coach ?? null, analisi_esterna: nuova.analisi_esterna ?? null, social: nuova.social ?? null, ciclo: nuova.ciclo ?? null, aggiornato_il: nuova.aggiornato_il });
+    if (error) setErrore("Non sono riuscita a salvare, riprova tra un attimo 🫶🏻");
+  };
+  const mostra = aperto || forzaApri;
+  if (!mostra && !mancano) return (
+    <button onClick={() => setAperto(true)} className="w-full text-center text-xs py-1" style={{ color: "#7a8da3" }}>🔒 Privacy e consensi</button>
+  );
+  if (!mostra) return (
+    <Card className="p-4 space-y-2" >
+      <p className="text-sm font-medium text-slate-700">🔒 Scegli cosa condividere</p>
+      <p className="text-xs text-slate-500">I tuoi dati sono tuoi: decidi tu cosa può vedere e usare Morgana. Ci metti un minuto e puoi cambiare idea quando vuoi 🫶🏻</p>
+      <button onClick={() => setAperto(true)} className="px-4 py-2 rounded-xl text-sm font-medium text-white" style={{ background: "#27466D" }}>Scegli ora</button>
+    </Card>
+  );
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700">🔒 Privacy e consensi</p>{!forzaApri && <button onClick={() => setAperto(false)} className="text-xs text-slate-400">Chiudi</button>}</div>
+      {VOCI_CONSENSI.map(([k, titolo, testo]) => (
+        <div key={k} className="space-y-1.5 border-b border-slate-100 last:border-0 pb-2.5 last:pb-0">
+          <p className="text-sm font-medium text-slate-700">{titolo}</p>
+          <p className="text-xs text-slate-500">{testo}</p>
+          <div className="flex gap-2">
+            {[[true, "Sì"], [false, "No"]].map(([v, l]) => (
+              <button key={l} onClick={() => imposta(k, v)} className="px-5 py-1.5 rounded-full text-xs font-semibold" style={riga?.[k] === v ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{l}</button>
+            ))}
+            {riga?.[k] == null && <span className="text-[11px] text-slate-400 self-center">non ancora scelto</span>}
+          </div>
+        </div>
+      ))}
+      {errore && <p className="text-xs text-slate-600">{errore}</p>}
+    </Card>
+  );
+}
+
+// Coach: riepilogo dei consensi della cliente
+function ConsensiCoach({ clientId }) {
+  const [riga, setRiga] = useState(undefined);
+  useEffect(() => { supabase.from("consensi_cliente").select("*").eq("client_id", clientId).maybeSingle().then(({ data }) => setRiga(data || null), () => setRiga(null)); }, [clientId]);
+  if (riga === undefined) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 items-center">
+      <span className="text-[11px] text-slate-400">🔒 Consensi:</span>
+      {VOCI_CONSENSI.map(([k, titolo]) => { const v = riga?.[k]; return <span key={k} className="text-[11px] rounded-full px-2 py-0.5 font-medium" style={v === true ? { background: "#C9E0F7", color: "#27466D" } : v === false ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : { background: "#F5FAFE", color: "#7a8da3" }}>{titolo}: {v === true ? "sì" : v === false ? "no" : "da chiedere"}</span>; })}
+    </div>
+  );
+}
+
 function ProfiloCliente({ client, onAggiornato }) {
   const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari || client.citta || client.peso_kg || client.tipo_lavoro);
   const [modifica, setModifica] = useState(!profiloGiaCompilato);
@@ -490,6 +557,18 @@ function ProfiloCliente({ client, onAggiornato }) {
 }
 
 /* Scheda "La tua lezione": la cliente può chiedere un'altra data. Morgana approva, modifica o rifiuta. */
+// File .ics: la lezione si aggiunge al calendario del telefono (ora locale, promemoria 1 ora prima)
+function scaricaLezioneIcs(ev) {
+  const d = (ev.data || "").replace(/-/g, "");
+  const hh = (ev.ora || "09:00").slice(0, 5).split(":");
+  const inizio = `${d}T${hh[0]}${hh[1]}00`;
+  const fineD = new Date(`${ev.data}T${hh[0]}:${hh[1]}:00`); fineD.setHours(fineD.getHours() + 1);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const fine = `${fineD.getFullYear()}${p2(fineD.getMonth() + 1)}${p2(fineD.getDate())}T${p2(fineD.getHours())}${p2(fineD.getMinutes())}00`;
+  const righe = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Coaching Morgana//IT", "BEGIN:VEVENT", `UID:lezione-${ev.id || d}@coaching-morgana`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`, `DTSTART:${inizio}`, `DTEND:${fine}`, "SUMMARY:Lezione con Morgana", ...(ev.luogo ? [`LOCATION:${String(ev.luogo).replace(/[,;\n]/g, " ")}`] : []), "BEGIN:VALARM", "TRIGGER:-PT60M", "ACTION:DISPLAY", "DESCRIPTION:Lezione con Morgana tra un'ora", "END:VALARM", "END:VEVENT", "END:VCALENDAR"];
+  scaricaFile(`lezione-${ev.data}.ics`, righe.join("\r\n"), "text/calendar");
+}
+
 function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
   const [richiesta, setRichiesta] = useState(undefined); // richiesta di spostamento in attesa (o null)
   const [proposta, setProposta] = useState(null);
@@ -582,6 +661,7 @@ function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
         ) : !apri ? (
           <div className="space-y-2">
             <button onClick={() => setApri(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-3">Richiedi un'altra data</button>
+            <button onClick={() => scaricaLezioneIcs(evento)} className="w-full border border-slate-200 text-sky-700 text-sm font-medium rounded-xl py-2.5">📅 Aggiungi al calendario del telefono</button>
             <button onClick={annullaLezione} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">Annulla la lezione</button>
             <p className="text-slate-400 text-[11px] text-center">{oreAlla >= 24 ? "Puoi annullarla senza penale (più di 24 ore prima)." : "Mancano meno di 24 ore: se la annulli viene conteggiata come lezione persa."}</p>
             {oreAlla < 24 && oreAlla > 0 && <p className="text-slate-400 text-xs text-center">Mancano meno di 24 ore: Morgana valuterà se è possibile spostarla.</p>}
@@ -992,6 +1072,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       </div>
 
       {profiloAperto && <ProfiloCliente client={client} onAggiornato={onAggiornato} />}
+      <ConsensiCliente client={client} forzaApri={profiloAperto} />
 
       <div ref={richiestaRef}>
         {prenotaAperto && !inviata && (
@@ -2119,6 +2200,19 @@ function AderenzaAllenamenti({ clientId }) {
   );
 }
 
+// Per ogni sessione di un esercizio: serie (kg×rip), volume-carico e massimale stimato (formula di Epley, solo serie fino a 12 rip)
+function costruisciSessioni(g) {
+  const date = Object.keys(g.sets).sort();
+  const out = date.map((d) => {
+    const sets = g.sets[d];
+    const vol = sets.reduce((a, x) => a + (x.rip > 0 ? x.kg * x.rip : 0), 0);
+    const stime = sets.filter((x) => x.rip > 0 && x.rip <= 12).map((x) => (x.rip === 1 ? x.kg : x.kg * (1 + x.rip / 30)));
+    return { data: d, sets, vol: vol > 0 ? Math.round(vol) : null, e1rm: stime.length ? Math.round(Math.max(...stime) * 10) / 10 : null };
+  });
+  out.forEach((x, i) => { const pv = i > 0 ? out[i - 1].vol : null; x.dVol = pv && x.vol ? Math.round((x.vol / pv - 1) * 100) : null; });
+  return out;
+}
+
 function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
   const [esercizi, setEsercizi] = useState(null);
   const [trend, setTrend] = useState(null);
@@ -2141,7 +2235,8 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
           const kg = Number(r.kg);
           const nome = r.training_exercises?.nome;
           if (!nome || !r.data || !(kg > 0)) return;
-          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {}, ton: {}, rep: {}, exId: r.exercise_id });
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {}, ton: {}, rep: {}, sets: {}, exId: r.exercise_id });
+          (g.sets[r.data] = g.sets[r.data] || []).push({ kg, rip: parseFloat(String(r.ripetizioni ?? "").replace(",", ".")) });
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
           const rip = parseFloat(String(r.ripetizioni ?? "").replace(",", "."));
           if (rip > 0) { g.ton[r.data] = (g.ton[r.data] || 0) + kg * rip; g.rep[r.data] = true; }
@@ -2190,7 +2285,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
           const record = date.length >= 2 && ultimo > maxPrec;
           const scorsa = date.length >= 2 ? g.date[date[date.length - 2]] : null;
           const diffScorsa = scorsa == null ? null : Math.round((ultimo - scorsa) * 10) / 10;
-          const motUlt = g.mot[date[date.length - 1]] ? [...g.mot[date[date.length - 1]]] : []; return { scorsa, diffScorsa, motUlt, nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
+          const motUlt = g.mot[date[date.length - 1]] ? [...g.mot[date[date.length - 1]]] : []; return { sess: costruisciSessioni(g), scorsa, diffScorsa, motUlt, nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
         }).sort((a, b) => a.nome.localeCompare(b.nome));
         // Costanza: settimane consecutive (lunedì-domenica) con almeno un allenamento registrato
         const lunedi = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
@@ -2250,7 +2345,24 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
             </div>
             <p className="text-slate-500 text-xs mt-1">{fmt(e.primo)} kg → {fmt(e.ultimo)} kg · massimo {fmt(e.max)} kg · {e.sessioni} {e.sessioni === 1 ? "sessione" : "sessioni"}</p>
             {e.diffScorsa != null && <p className={`text-xs mt-0.5 ${e.diffScorsa > 0 ? "text-sky-600" : e.diffScorsa < 0 ? "text-slate-600" : "text-slate-400"}`}>Rispetto alla volta scorsa: {e.diffScorsa > 0 ? "+" : ""}{fmt(e.diffScorsa)} kg</p>}
+            {e.sess?.length > 1 && e.sess[e.sess.length - 1].dVol != null && (
+              <p className={`text-xs mt-0.5 ${e.sess[e.sess.length - 1].dVol > 0 ? "text-sky-600" : e.sess[e.sess.length - 1].dVol < 0 ? "text-slate-600" : "text-slate-400"}`}>Volume (kg × rip): {e.sess[e.sess.length - 1].dVol > 0 ? "▲ +" : e.sess[e.sess.length - 1].dVol < 0 ? "▼ " : ""}{e.sess[e.sess.length - 1].dVol}% rispetto alla volta scorsa</p>
+            )}
           </button>
+          {aperto === e.nome && e.sess?.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {e.sess.some((x) => x.e1rm) && <p className="text-xs text-slate-500">Massimale stimato (Epley): <span className="font-semibold text-slate-700">{fmt(Math.max(...e.sess.map((x) => x.e1rm || 0)))} kg</span> · ultima volta {fmt(e.sess[e.sess.length - 1].e1rm ?? "–")} kg</p>}
+              <div className="rounded-lg border border-slate-100 divide-y divide-slate-100">
+                {[...e.sess].reverse().slice(0, 8).map((x) => (
+                  <div key={x.data} className="px-2.5 py-1.5 flex items-start justify-between gap-2">
+                    <p className="text-[11px] text-slate-400 w-10 flex-shrink-0">{x.data.split("-").reverse().slice(0, 2).join("/")}</p>
+                    <p className="text-xs text-slate-600 flex-1">{x.sets.map((q) => `${fmt(q.kg)}${q.rip > 0 ? `×${fmt(q.rip)}` : ""}`).join(" · ")}</p>
+                    {x.dVol != null && <span className={`text-[10px] font-semibold flex-shrink-0 ${x.dVol > 0 ? "text-sky-600" : x.dVol < 0 ? "text-slate-500" : "text-slate-400"}`}>{x.dVol > 0 ? "▲" : x.dVol < 0 ? "▼" : "="} {Math.abs(x.dVol)}%</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {aperto === e.nome && e.serie.length > 1 && (
             <div style={{ width: "100%", height: 150 }} className="mt-2">
               <ResponsiveContainer>
@@ -2479,6 +2591,73 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   );
 }
 
+// Card dei progressi da condividere (solo numeri, senza foto): la cliente sceglie cosa mostrare
+function CardProgressi({ dati, opzioni }) {
+  const disponibili = opzioni.filter((o) => dati.filter((d) => d[o.key] != null && d[o.key] !== "").length >= 2);
+  const [scelte, setScelte] = useState(() => disponibili.some((o) => o.key === "peso_kg") ? ["peso_kg"] : disponibili.slice(0, 1).map((o) => o.key));
+  const [aperto, setAperto] = useState(false);
+  const [lavoro, setLavoro] = useState(false);
+  if (disponibili.length === 0) return null;
+  const vals = (k) => dati.filter((d) => d[k] != null && d[k] !== "").map((d) => ({ v: Number(d[k]), data: d.data_check }));
+  const f1 = (n) => String(Math.round(n * 10) / 10).replace(".", ",");
+  const crea = async (condividi) => {
+    setLavoro(true);
+    const W = 1080, H = 1350;
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#27466D"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#E1EEFB"; g.beginPath(); g.arc(W - 120, 140, 260, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#C9E0F7"; g.beginPath(); g.arc(80, H - 60, 220, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#FFFBEF"; g.beginPath(); g.roundRect(70, 230, W - 140, H - 400, 48); g.fill();
+    g.textAlign = "left"; g.fillStyle = "#27466D"; g.font = "700 64px system-ui, sans-serif";
+    g.fillText("il mio percorso", 90, 150);
+    const prima = dati.find((d) => d.data_check)?.data_check, ultima = [...dati].reverse().find((d) => d.data_check)?.data_check;
+    const sett = prima && ultima ? Math.max(1, Math.round((new Date(ultima) - new Date(prima)) / 604800000)) : null;
+    g.fillStyle = "#3F78B3"; g.font = "500 36px system-ui, sans-serif";
+    if (sett) g.fillText(sett >= 9 ? `${Math.round(sett / 4.35)} mesi di percorso` : `${sett} settimane di percorso`, 90, 205);
+    const lista = opzioni.filter((o) => scelte.includes(o.key));
+    const passo = Math.min(260, (H - 400 - 60) / Math.max(1, lista.length));
+    lista.forEach((o, i) => {
+      const v = vals(o.key); const a = v[0].v, b = v[v.length - 1].v; const d = b - a;
+      const y = 230 + 50 + i * passo;
+      g.fillStyle = "#7a8da3"; g.font = "600 34px system-ui, sans-serif"; g.fillText(o.label.toUpperCase(), 120, y + 40);
+      g.fillStyle = "#27466D"; g.font = "800 110px system-ui, sans-serif"; g.fillText(`${d > 0 ? "+" : d < 0 ? "−" : ""}${f1(Math.abs(d))}`, 120, y + 150);
+      const w = g.measureText(`${d > 0 ? "+" : d < 0 ? "−" : ""}${f1(Math.abs(d))}`).width;
+      g.fillStyle = "#4F8FD0"; g.font = "600 44px system-ui, sans-serif"; g.fillText(o.key === "peso_kg" ? "kg" : "cm", 120 + w + 16, y + 150);
+      g.fillStyle = "#7a8da3"; g.font = "500 34px system-ui, sans-serif"; g.fillText(`da ${f1(a)} a ${f1(b)}`, 120, y + 200);
+    });
+    g.fillStyle = "#FFFBEF"; g.font = "600 40px system-ui, sans-serif"; g.textAlign = "center";
+    g.fillText("Coaching by Morgana ✨", W / 2, H - 100);
+    const blob = await new Promise((ok) => cv.toBlob(ok, "image/png"));
+    const file = new File([blob], "i-miei-progressi.png", { type: "image/png" });
+    try {
+      if (condividi && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] });
+      else { const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = "i-miei-progressi.png"; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(u), 2000); }
+    } catch (e) { /* condivisione annullata */ }
+    setLavoro(false);
+  };
+  return (
+    <Card className="p-4 space-y-2">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+        <div><p className="text-sm font-medium text-slate-700">Crea la tua card dei progressi ✨</p><p className="text-xs text-slate-400">Un'immagine da condividere, senza foto: scegli tu cosa mostrare.</p></div>
+        <span className="text-slate-400 text-xs">{aperto ? "Chiudi" : "Apri"}</span>
+      </button>
+      {aperto && (
+        <div className="space-y-2 pt-1">
+          <div className="flex flex-wrap gap-1.5">
+            {disponibili.map((o) => { const on = scelte.includes(o.key); return <button key={o.key} onClick={() => setScelte(on ? scelte.filter((x) => x !== o.key) : [...scelte, o.key].slice(-4))} className="text-xs rounded-full px-3 py-1.5 font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{o.label}</button>; })}
+          </div>
+          <p className="text-[11px] text-slate-400">Puoi scegliere fino a 4 voci. Tutto resta sul tuo telefono finché non decidi tu di condividerla.</p>
+          <div className="flex gap-2">
+            <button disabled={lavoro || scelte.length === 0} onClick={() => crea(true)} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white disabled:opacity-40" style={{ background: "#27466D" }}>{lavoro ? "Creo..." : "Condividi"}</button>
+            <button disabled={lavoro || scelte.length === 0} onClick={() => crea(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium disabled:opacity-40" style={{ background: "#E1EEFB", color: "#27466D" }}>Salva immagine</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi", clientId, isAdmin = false }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
@@ -2521,6 +2700,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
           </LineChart>
         </ResponsiveContainer>
       </Card>
+
+      {!isAdmin && <CardProgressi dati={dati} opzioni={opzioni} />}
 
       {!isAdmin && <CommentiCheckCliente checkins={checkins} />}
 
@@ -6349,6 +6530,37 @@ function EliminaClienteBottone({ client, onEliminato }) {
   );
 }
 
+// Una lezione di una cliente di gruppo segnata dall'elenco lezioni vale per tutto il gruppo Bulb:
+// nuova -> creata per le altre; cambio data/ora/sede -> cambia per le altre; data tolta -> tolta alle altre.
+async function rispecchiaLezioneGruppo(client, { azione, evOld, dataV, oraV, luogo, nuovoEvento }) {
+  const g = client.gruppo_id;
+  if (!g) return;
+  try {
+    if (azione === "nuovo" && nuovoEvento) {
+      await supabase.from("calendar_events").update({ gruppo_id: g }).eq("id", nuovoEvento.id);
+      const { data: membri } = await supabase.from("clients").select("id").eq("gruppo_id", g).neq("id", client.id);
+      for (const m of membri || []) {
+        const { data: gia } = await supabase.from("calendar_events").select("id").eq("client_id", m.id).eq("tipo", "lezione").eq("data", nuovoEvento.data).eq("stato", "confermato").limit(1).maybeSingle();
+        if (gia) continue;
+        const { data: creato } = await supabase.from("calendar_events").insert({ client_id: m.id, tipo: "lezione", data: nuovoEvento.data, ora: nuovoEvento.ora || null, luogo: nuovoEvento.luogo || null, stato: "confermato", gruppo_id: g }).select().single();
+        if (creato) { try { await collegaLezionePacchetto(m.id, creato); } catch (e) { /* una cliente senza pacchetto non blocca le altre */ } }
+      }
+      return;
+    }
+    if (!evOld) return;
+    const { data: sorelle } = await supabase.from("calendar_events").select("id").eq("gruppo_id", g).eq("tipo", "lezione").eq("stato", "confermato").eq("data", evOld.data).eq("ora", evOld.ora).neq("client_id", client.id);
+    for (const x of sorelle || []) {
+      if (azione === "aggiorna") {
+        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null, luogo: luogo || null }).eq("id", x.id);
+        await supabase.from("lezioni_svolte").update({ data: dataV, ora: oraV || null }).eq("calendar_event_id", x.id);
+      } else if (azione === "elimina") {
+        await supabase.from("lezioni_svolte").update({ data: null, ora: null, calendar_event_id: null }).eq("calendar_event_id", x.id).eq("fatta", false);
+        await supabase.from("calendar_events").delete().eq("id", x.id);
+      }
+    }
+  } catch (e) { /* il salvataggio della cliente principale resta valido */ }
+}
+
 function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
   const [data, setData] = useState(lezione.data || "");
   const [ora, setOra] = useState((lezione.ora || "").slice(0, 5));
@@ -6377,7 +6589,9 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
     let calendarEventId = rigaAttuale?.calendar_event_id || null;
     if (dataV) {
       if (calendarEventId) {
-        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null, luogo: luogo || null }).eq("id", calendarEventId);
+        const { data: evOld } = await supabase.from("calendar_events").select("data, ora").eq("id", calendarEventId).maybeSingle();
+        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null, luogo: luogo || null, ...(client.gruppo_id ? { gruppo_id: client.gruppo_id } : {}) }).eq("id", calendarEventId);
+        await rispecchiaLezioneGruppo(client, { azione: "aggiorna", evOld, dataV, oraV, luogo });
       } else {
         const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
           client_id: client.id, tipo: "lezione", data: dataV, ora: oraV || null, luogo: luogo || null, stato: "confermato",
@@ -6385,12 +6599,15 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
         if (nuovoEvento) {
           calendarEventId = nuovoEvento.id;
           await supabase.from("lezioni_svolte").update({ calendar_event_id: calendarEventId }).eq("id", lezione.id);
+          await rispecchiaLezioneGruppo(client, { azione: "nuovo", nuovoEvento });
         }
       }
     } else if (calendarEventId) {
       // Data cancellata: l'appuntamento sparisce anche dal calendario, come se lo eliminassi
+      const { data: evOld } = await supabase.from("calendar_events").select("data, ora").eq("id", calendarEventId).maybeSingle();
       await supabase.from("lezioni_svolte").update({ calendar_event_id: null }).eq("id", lezione.id);
       await supabase.from("calendar_events").delete().eq("id", calendarEventId);
+      await rispecchiaLezioneGruppo(client, { azione: "elimina", evOld });
       calendarEventId = null;
     }
 
@@ -7759,6 +7976,10 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 
 // Esporta in un unico file di testo tutto ciò che serve a un'analisi esterna (chat AI): profilo, check, dieta, diario kcal, log, note, ciclo…
 async function esportaPerAnalisiEsterna(client, setInCorso) {
+  let cons = null;
+  try { const { data } = await supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle(); cons = data; } catch (e) { /* senza tabella: nessun blocco */ }
+  if (cons?.analisi_esterna === false) { alert(`${client.nome || "La cliente"} ha scelto di NON far elaborare i suoi dati con strumenti esterni. Non esporto nulla 🫶🏻`); return; }
+  if (cons?.analisi_esterna == null && !confirm(`${client.nome || "La cliente"} non ha ancora dato il consenso all'analisi con strumenti esterni. Vuoi esportare lo stesso?`)) return;
   setInCorso(true);
   try {
     const cid = client.id;
@@ -7841,7 +8062,7 @@ async function esportaPerAnalisiEsterna(client, setInCorso) {
     if (scarichi.length) { r.push("## Settimane di scarico programmato"); scarichi.forEach((s) => r.push(`- dal ${s.dal} al ${s.al}${s.nota ? " — " + s.nota : ""}`)); r.push(""); }
     if (nlog.length) { r.push("## Note finali degli allenamenti"); nlog.forEach((x) => r.push(`- ${x.data}: ${String(x.nota || "").replace(/\s+/g, " ")}`)); r.push(""); }
     if (feedback.length) { r.push("## Feedback soggettivo"); feedback.forEach((f) => r.push(`- ${f.data}: ${(f.tags || []).join(", ")}${f.nota_libera ? " — " + f.nota_libera : ""}`)); r.push(""); }
-    if (cicli.length) { r.push("## Ciclo mestruale (inizio di ogni ciclo, giorni di flusso)"); cicli.forEach((c) => r.push(`- ${c.data_inizio} (flusso ${n(c.giorni_flusso)} giorni)`)); r.push(""); }
+    if (cicli.length && cons?.ciclo !== false) { r.push("## Ciclo mestruale (inizio di ogni ciclo, giorni di flusso)"); cicli.forEach((c) => r.push(`- ${c.data_inizio} (flusso ${n(c.giorni_flusso)} giorni)`)); r.push(""); }
     if (notes.length) { r.push("## Note della coach"); notes.forEach((x) => r.push(`- [${x.data}] (${x.tipo || "nota"}) ${String(x.testo || "").replace(/\s+/g, " ")}`)); r.push(""); }
     if (appunti.length && appunti[0].testo) { r.push("## Appunti condivisi coach/cliente"); r.push(String(appunti[0].testo)); r.push(""); }
     if (valBulb.length) { r.push("## Valutazioni funzionali (Bulb)"); valBulb.forEach((v) => r.push(`- ${v.data} ${v.titolo || ""}: anamnesi ${JSON.stringify(v.anamnesi || {})} · restrizioni ${JSON.stringify(v.restrizioni || [])} · da lavorare ${JSON.stringify(v.lavorare || [])}${v.note ? " · " + v.note : ""}`)); r.push(""); }
@@ -8042,6 +8263,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={() => salvaCliente({ archiviato: false })} disabled={salvando} className="flex-shrink-0 text-sky-600 font-medium">Riattiva</button>
         </div>
       )}
+      <ConsensiCoach clientId={client.id} />
       <AnteprimaCliente client={client} />
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
@@ -10264,6 +10486,73 @@ function CaricheInCaloCoach({ onChanged }) {
   );
 }
 
+// Trend clienti: confronto degli ultimi 28 giorni con i 28 precedenti (carico massimo per esercizio) e costanza settimanale
+function TrendClientiCoach({ clients, onSelect }) {
+  const [righe, setRighe] = useState(null);
+  const [filtro, setFiltro] = useState("tutti");
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const oggi = formatDataLocale(new Date());
+        const da = addGiorni(oggi, -56);
+        const dati = await leggiTutto(() => supabase.from("training_entries").select("client_id, data, kg, exercise_id").gte("data", da).order("data").order("id"));
+        const per = {};
+        dati.forEach((r) => { const kg = Number(r.kg); if (!r.client_id || !r.data) return; (per[r.client_id] = per[r.client_id] || []).push({ d: r.data, kg, ex: r.exercise_id }); });
+        const lim = addGiorni(oggi, -28);
+        const lista = clients.filter((c) => !c.gruppo_id).map((c) => {
+          const e = per[c.id] || [];
+          const rec = {}, prev = {};
+          e.forEach((x) => { if (!(x.kg > 0) || !x.ex) return; const t = x.d > lim ? rec : prev; t[x.ex] = Math.max(t[x.ex] || 0, x.kg); });
+          const comuni = Object.keys(rec).filter((k) => prev[k]);
+          const pct = comuni.length >= 2 ? comuni.reduce((a, k) => a + (rec[k] / prev[k] - 1), 0) / comuni.length * 100 : null;
+          // allenamenti (giorni distinti) per settimana, ultime 8 settimane
+          const sett = Array(8).fill(0);
+          const visti = new Set();
+          e.forEach((x) => { if (visti.has(x.d)) return; visti.add(x.d); const i = 7 - Math.floor((new Date(`${oggi}T12:00:00`) - new Date(`${x.d}T12:00:00`)) / 86400000 / 7); if (i >= 0 && i < 8) sett[i] += 1; });
+          const ultimo = e.length ? e[e.length - 1].d : null;
+          const stato = pct == null ? "senza" : pct > 2 ? "crescita" : pct < -2 ? "calo" : "stabile";
+          return { c, pct, sett, ultimo, stato, n: visti.size };
+        });
+        if (vivo) setRighe(lista);
+      } catch (e) { if (vivo) setRighe([]); }
+    })();
+    return () => { vivo = false; };
+  }, [clients.length]);
+  if (!righe) return <Spinner />;
+  const visibili = righe.filter((r) => filtro === "tutti" ? true : r.stato === filtro).sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
+  const conDati = righe.filter((r) => r.pct != null);
+  const media = conDati.length ? conDati.reduce((a, r) => a + r.pct, 0) / conDati.length : null;
+  const f1 = (n) => String(Math.round(n * 10) / 10).replace(".", ",");
+  const FILTRI = [["tutti", "Tutte"], ["crescita", "In crescita"], ["stabile", "Stabili"], ["calo", "In calo"], ["senza", "Senza dati"]];
+  const maxS = Math.max(1, ...righe.flatMap((r) => r.sett));
+  return (
+    <div className="space-y-2">
+      <p className="text-slate-500 text-xs">Carico massimo per esercizio, ultimi 28 giorni rispetto ai 28 precedenti (servono almeno 2 esercizi in comune). Le barrette sono gli allenamenti registrati nelle ultime 8 settimane.{media != null ? ` Media generale: ${media > 0 ? "+" : ""}${f1(media)}%.` : ""}</p>
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {FILTRI.map(([k, l]) => <button key={k} onClick={() => setFiltro(k)} className="text-[11px] rounded-full px-3 py-1 flex-shrink-0 font-medium" style={filtro === k ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{l}</button>)}
+      </div>
+      {visibili.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna cliente in questo gruppo.</Card>}
+      {visibili.map((r) => (
+        <Card key={r.c.id} className="p-3">
+          <button onClick={() => onSelect(r.c.id)} className="w-full flex items-center gap-3 text-left">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-slate-700 text-sm truncate">{r.c.nome} {r.c.cognome}</p>
+              <p className="text-slate-400 text-[11px]">{r.ultimo ? `ultimo allenamento ${r.ultimo.split("-").reverse().slice(0, 2).join("/")}` : "nessun allenamento negli ultimi 56 giorni"}</p>
+            </div>
+            <svg width="56" height="24" viewBox="0 0 56 24" className="flex-shrink-0">
+              {r.sett.map((v, i) => <rect key={i} x={i * 7} y={24 - Math.max(2, (v / maxS) * 22)} width="5" height={Math.max(2, (v / maxS) * 22)} rx="1.5" fill={v ? "#4F8FD0" : "#C9E0F7"} />)}
+            </svg>
+            <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 w-16 text-center" style={r.stato === "crescita" ? { background: "#C9E0F7", color: "#27466D" } : r.stato === "calo" ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : { background: "#F5FAFE", color: "#7a8da3" }}>
+              {r.pct == null ? "—" : `${r.pct > 0 ? "+" : ""}${f1(r.pct)}%`}
+            </span>
+          </button>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -10377,6 +10666,10 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
 
  <RichiestePacchettoCoach onChanged={onChanged} />
       <CaricheInCaloCoach onChanged={onChanged} />
+
+      <Sezione id="trend_clienti" titolo="Trend clienti" aperta={false}>
+        <TrendClientiCoach clients={clients} onSelect={onSelect} />
+      </Sezione>
 
       <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length + autoLezioni.length} aperta={richieste.length + autoLezioni.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
