@@ -3834,6 +3834,19 @@ function DiarioAllenamento({ clientId, isAdmin }) {
     })();
   }, [clientId, isAdmin]);
 
+  const eliminaProgramma = async (lista, testo) => {
+    if (!lista.length) return;
+    if (!confirm(testo)) return;
+    const ids = lista.map((g) => g.id);
+    const { data: es } = await supabase.from("training_exercises").select("id").in("training_day_id", ids);
+    const idsEs = (es || []).map((e) => e.id);
+    if (idsEs.length) await supabase.from("training_entries").delete().in("exercise_id", idsEs);
+    await supabase.from("training_exercises").delete().in("training_day_id", ids);
+    await supabase.from("training_days").delete().in("id", ids);
+    setGiornoAttivo(null); setGiornoArchAttivo(null); setSchedaAperta(null);
+    await carica();
+  };
+
   const eliminaGiorno = async (giornoId) => {
     if (!confirm("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
     const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giornoId);
@@ -4039,6 +4052,10 @@ function DiarioAllenamento({ clientId, isAdmin }) {
         </div>
       )}
 
+      {isAdmin && giorni.length > 0 && (
+        <button onClick={() => eliminaProgramma(giorni, `Eliminare TUTTO il programma attuale (${giorni.length} giorno/i, con esercizi e carichi registrati)? Non si può annullare.`)} className="text-xs text-slate-400 underline">🗑 Elimina tutto il programma attuale</button>
+      )}
+
       {giorni.length === 0 && (
         <Card className="p-6 text-center text-slate-400 text-sm">{isAdmin ? 'Nessun giorno di allenamento creato ancora. Tocca "+" per iniziare, oppure importa un file CSV.' : "Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨"}</Card>
       )}
@@ -4065,6 +4082,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                 </button>
                 {schedaAperta === et && (
                   <div className="mt-3 space-y-3">
+                    {isAdmin && <button onClick={() => eliminaProgramma(gruppi[et], `Eliminare per sempre la scheda archiviata ${et} (${gruppi[et].length} giorno/i, con esercizi e carichi)? Non si può annullare.`)} className="text-xs text-slate-400 underline">🗑 Elimina questa scheda archiviata</button>}
                     <div className="flex gap-2 overflow-x-auto pb-1">
                       {gruppi[et].map((g) => (
                         <button key={g.id} onClick={() => setGiornoArchAttivo(g.id)}
@@ -13935,6 +13953,21 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const togli = async (id) => { if (!confirm("Tolgo questa cliente dal gruppo? Il suo profilo e i suoi allenamenti restano.")) return; await supabase.from("clients").update({ gruppo_id: null }).eq("id", id); await carica(); };
   const nomeCompleto = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Senza nome";
 
+  const svuotaAllenamentiGruppo = async () => {
+    const ids = (membri || []).map((m) => m.id);
+    if (!ids.length) return;
+    if (!confirm(`Elimino TUTTI i programmi (attuali e archiviati) con esercizi e carichi registrati di: ${(membri || []).map((m) => m.nome).join(", ")}? Non si può annullare.`)) return;
+    setMsg("Elimino…");
+    try {
+      await supabase.from("training_entries").delete().in("client_id", ids);
+      await supabase.from("training_exercises").delete().in("client_id", ids);
+      await supabase.from("training_days").delete().in("client_id", ids);
+      setMsg("Fatto ✨ Allenamenti svuotati per tutto il gruppo.");
+      setMembri(null); await carica();
+    } catch (e) { setMsg("Non sono riuscita a eliminare tutto: riprova."); }
+    setTimeout(() => setMsg(""), 5000);
+  };
+
   const eseguiCopia = async () => {
     if (!copia.da || !copia.a.length) return;
     const dest = copia.a.filter((x) => x !== copia.da);
@@ -14014,6 +14047,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
             {completa && <button onClick={() => { setCompleta(false); setModoVal(false); }} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>← Torna alla vista semplice</button>}
             <div className={completa ? "flex flex-wrap gap-2 items-center" : "hidden"}>
               <button onClick={() => setMenu(!menu)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Copia programma tra le clienti</button>
+              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}>🗑 Svuota allenamenti di tutte</button>
               <button onClick={nuovoProfilo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo profilo vuoto</button>
               {candidate.length > 0 && (
                 <select value="" onChange={(e) => e.target.value && aggiungi(e.target.value)} className="px-3 py-2 rounded-xl text-xs border border-slate-200 bg-white text-slate-700">
