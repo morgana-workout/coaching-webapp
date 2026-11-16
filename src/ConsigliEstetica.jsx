@@ -48,9 +48,18 @@ export const MOTIVI_CALO = [
   ["stanchezza", "Stanchezza", "stanchezza"],
   ["recupero", "Poco recupero", "recupero insufficiente"],
   ["fastidio", "Fastidio o dolore", "fastidio/dolore"],
+  ["post_malattia", "Recupero post malattia", "recupero post malattia"],
+  ["post_infortunio", "Rientro post infortunio", "rientro post infortunio"],
+  ["pausa", "Rientro dopo una pausa", "rientro dopo una pausa"],
+  ["sonno", "Poco sonno", "sonno insufficiente"],
+  ["stress", "Periodo di stress", "periodo di stress"],
+  ["deficit", "Deficit calorico", "deficit calorico"],
+  ["attrezzo", "Attrezzo o palestra diversi", "attrezzo o palestra diversi"],
   ["scarico", "Scarico programmato", "scarico programmato"],
   ["altro", "Altro", "altro"],
 ];
+// motivi che indica solo la coach (la cliente non li vede tra le scelte)
+export const MOTIVI_SOLO_COACH = ["post_malattia", "post_infortunio", "pausa", "sonno", "stress", "deficit", "attrezzo"];
 export const etichettaMotivo = (k) => (MOTIVI_CALO.find((m) => m[0] === k) || [])[2] || k;
 const UPPER = ["Petto", "Spalle", "Dorso", "Bicipiti", "Tricipiti"], LOWER = ["Quadricipiti", "Glutei", "Femorali", "Polpacci"];
 // "upper" / "lower" / null (core e simili) in base al nome dell'esercizio
