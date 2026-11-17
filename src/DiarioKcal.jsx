@@ -113,7 +113,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
   return (
     <div className="space-y-4">
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {(soloPianoERicette ? [...(pianoNode ? [["piano", "Programma"]] : []), ["ricette", "Ricette"]] : [["diario", "Diario"], ...(pianoNode ? [["piano", "Piano"]] : []), ["ricette", "Ricette"], ["pasti", "Pasti standard"], ["libreria", "Alimenti"], ["storico", "Storico"], ...(isAdmin ? [["analisi", "Analisi"]] : [])]).map(([k, l]) => (
+        {(soloPianoERicette ? [...(pianoNode ? [["piano", "Programma"]] : []), ["ricette", "Ricette"]] : [["diario", "Diario"], ...(pianoNode ? [["piano", "Piano"]] : []), ["ricette", "Ricette"], ["pasti", "Pasti standard"], ...(!isAdmin ? [["spesa", "Spesa"]] : []), ["libreria", "Alimenti"], ["storico", "Storico"], ...(isAdmin ? [["analisi", "Analisi"]] : [])]).map(([k, l]) => (
           <button key={k} onClick={() => setVista(k)}
             className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap flex-shrink-0 ${vista === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>
             {l}
@@ -131,6 +131,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
       {vista === "piano" && pianoNode}
       {vista === "ricette" && <RicetteVista ricette={ricette} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} aperta={ricettaAperta} setAperta={setRicettaAperta} senzaLog={soloPianoERicette} />}
       {vista === "pasti" && <PastiVista pasti={pasti} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} />}
+      {vista === "spesa" && <ListaSpesa clientId={clientId} ricette={ricette} pasti={pasti} />}
       {vista === "storico" && <StoricoKcal voci={voci} obiettivo={obiettivo} onVaiAGiorno={(d) => { setDate(d); setVista("diario"); }} />}
       {vista === "libreria" && <LibreriaAlimenti clientId={clientId} foods={foods} onCambiato={carica} />}
       {vista === "analisi" && isAdmin && <AnalisiCoach voci={voci} obiettivo={obiettivo} />}
@@ -477,11 +478,69 @@ function LibreriaAlimenti({ clientId, foods, onCambiato }) {
   );
 }
 
+/* Scanner codice a barre: fotocamera (BarcodeDetector, oppure lettore ZXing sui telefoni che non lo hanno) + inserimento manuale */
+function ScannerBarcode({ onCodice, onChiudi }) {
+  const videoRef = React.useRef(null);
+  const [errore, setErrore] = useState("");
+  const [manuale, setManuale] = useState("");
+  useEffect(() => {
+    let attivo = true; let stream = null; let controlli = null; let timer = null;
+    (async () => {
+      try {
+        if ("BarcodeDetector" in window) {
+          const det = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          if (!attivo) { stream.getTracks().forEach((t) => t.stop()); return; }
+          videoRef.current.srcObject = stream; await videoRef.current.play();
+          timer = setInterval(async () => {
+            try { const r = await det.detect(videoRef.current); if (r.length && attivo) { attivo = false; onCodice(r[0].rawValue); } } catch (e) { /* frame non leggibile */ }
+          }, 350);
+        } else {
+          // lettore compatibile caricato solo al bisogno (nessuna installazione): libreria ZXing da CDN
+          if (!window.ZXing) await new Promise((ok, ko) => { const sc = document.createElement("script"); sc.src = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"; sc.onload = ok; sc.onerror = ko; document.head.appendChild(sc); });
+          const rd = new window.ZXing.BrowserMultiFormatReader();
+          controlli = { stop: () => rd.reset() };
+          rd.decodeFromVideoDevice(null, videoRef.current, (res) => { if (res && attivo) { attivo = false; onCodice(res.getText()); } });
+        }
+      } catch (e) { setErrore("Non riesco ad aprire la fotocamera. Controlla che l'app abbia il permesso, oppure scrivi il numero qui sotto 🫶🏻"); }
+    })();
+    return () => { attivo = false; if (timer) clearInterval(timer); try { controlli?.stop(); } catch (e) { /* ok */ } if (stream) stream.getTracks().forEach((t) => t.stop()); };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl w-full max-w-sm p-4 space-y-3">
+        <div className="flex items-center justify-between"><p className="font-semibold text-slate-800 text-sm">Inquadra il codice a barre</p><button onClick={onChiudi} className="text-slate-400"><X size={18} /></button></div>
+        <video ref={videoRef} playsInline muted className="w-full rounded-xl bg-slate-100 aspect-[4/3] object-cover" />
+        {errore && <p className="text-xs text-slate-600">{errore}</p>}
+        <div className="flex gap-2">
+          <input value={manuale} onChange={(e) => setManuale(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Oppure scrivi il numero" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+          <button onClick={() => manuale.length >= 8 && onCodice(manuale)} className="px-3 rounded-lg text-sm text-white" style={{ background: "#27466D" }}>Cerca</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale = "" }) {
   const x = alimento || { nome: nomeIniziale, marca: "", unit: "g", uname: "", per: 100, kcal: "", proteine: "", carboidrati: "", grassi: "", quantita_abituale: "" };
   const [f, setF] = useState({ ...x });
   const [salvando, setSalvando] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const [scanner, setScanner] = useState(false);
+  const [cerca, setCerca] = useState("");
+  const daCodice = async (codice) => {
+    setScanner(false); setCerca("Cerco il prodotto...");
+    try {
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${codice}.json?fields=product_name,brands,nutriments`);
+      const j = await r.json();
+      const n = j?.product?.nutriments;
+      if (j?.status !== 1 || !n) { setCerca(`Codice ${codice} non trovato: inserisci i valori a mano, ci metti un attimo 🫶🏻`); return; }
+      const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] != null ? n["energy_100g"] / 4.184 : null);
+      const r1 = (v) => (v == null || isNaN(Number(v)) ? "" : String(Math.round(Number(v) * 10) / 10));
+      setF((s) => ({ ...s, nome: j.product.product_name || s.nome, marca: (j.product.brands || "").split(",")[0].trim() || s.marca, unit: "g", per: 100, kcal: r1(kcal), proteine: r1(n.proteins_100g), carboidrati: r1(n.carbohydrates_100g), grassi: r1(n.fat_100g) }));
+      setCerca("Trovato ✨ Valori per 100 g: controllali prima di salvare.");
+    } catch (e) { setCerca("Non riesco a collegarmi ora: riprova tra poco oppure inserisci a mano."); }
+  };
 
   const salva = async (e) => {
     e.preventDefault();
@@ -520,6 +579,13 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
           <h3 className="font-semibold text-slate-800">{alimento ? "Modifica alimento" : "Nuovo alimento"}</h3>
           <button type="button" onClick={onAnnulla} className="text-slate-400"><X size={18} /></button>
         </div>
+        {!alimento?.id && (
+          <div>
+            <button type="button" onClick={() => setScanner(true)} className="w-full py-2.5 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>📷 Scansiona il codice a barre</button>
+            {cerca && <p className="text-xs text-slate-500 mt-1.5">{cerca}</p>}
+          </div>
+        )}
+        {scanner && <ScannerBarcode onCodice={daCodice} onChiudi={() => setScanner(false)} />}
         <div><label className="text-slate-400 text-xs">Nome</label><input value={f.nome} onChange={set("nome")} required placeholder="Es. Albume d'uovo" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
         <div><label className="text-slate-400 text-xs">Marca (facoltativa)</label><input value={f.marca} onChange={set("marca")} placeholder="Es. Lidl" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
         <div>
@@ -555,6 +621,92 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
 /* ------------------------------------------------------------------ */
 /* Storico — giorno / settimana / mese (visibile a cliente e coach)    */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Lista della spesa: somma gli ingredienti di ricette e pasti scelti  */
+/* ------------------------------------------------------------------ */
+function ListaSpesa({ clientId, ricette, pasti }) {
+  const chiave = "spesa_" + clientId;
+  const leggi = () => { try { return JSON.parse(localStorage.getItem(chiave) || "{}"); } catch (e) { return {}; } };
+  const [st, setSt] = useState(leggi);
+  const [nuovo, setNuovo] = useState("");
+  const [aperto, setAperto] = useState(false);
+  const salva = (n) => { setSt(n); try { localStorage.setItem(chiave, JSON.stringify(n)); } catch (e) { /* senza memoria locale */ } };
+  const q = st.q || {}; const spunte = st.s || {}; const extra = st.x || [];
+  const setQ = (id, v) => salva({ ...st, q: { ...q, [id]: Math.max(0, v) } });
+  const righe = {};
+  const aggiungi = (ing, k) => {
+    const nome = (ing.nome || ing.testo || "").trim(); if (!nome) return;
+    const unit = ing.unit || "";
+    const key = (nome + "|" + unit).toLowerCase();
+    const o = (righe[key] = righe[key] || { nome, unit, uname: ing.uname, tot: 0, testo: !ing.quantita });
+    o.tot += Number(ing.quantita || 0) * k;
+  };
+  ricette.forEach((r) => { const k = q["r" + r.id] || 0; if (k > 0) (r.ingredienti || []).forEach((i) => aggiungi(i, k / (Number(r.porzioni) || 1))); });
+  pasti.forEach((p) => { const k = q["p" + p.id] || 0; if (k > 0) (p.voci || []).forEach((i) => aggiungi(i, k)); });
+  const elenco = Object.entries(righe).sort((a, b) => a[1].nome.localeCompare(b[1].nome, "it"));
+  const qtaTxt = (o) => (o.testo || !o.tot ? "" : o.unit === "pz" ? `${num(round1(o.tot))} ${o.uname || "pz"}` : `${num(round1(o.tot))} ${o.unit}`);
+  const scelti = ricette.filter((r) => q["r" + r.id] > 0).length + pasti.filter((p) => q["p" + p.id] > 0).length;
+  const Riga = ({ id, nome, sotto }) => (
+    <div className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">
+      <div className="min-w-0"><p className="text-sm text-slate-700 truncate">{nome}</p>{sotto && <p className="text-[11px] text-slate-400">{sotto}</p>}</div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button onClick={() => setQ(id, (q[id] || 0) - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>−</button>
+        <span className="w-5 text-center text-sm font-semibold text-slate-700">{q[id] || 0}</span>
+        <button onClick={() => setQ(id, (q[id] || 0) + 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#27466D", color: "#fff" }}>+</button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="space-y-3">
+      <Card className="p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">La tua lista della spesa</p>
+        <p className="text-slate-500 text-xs">Scegli quante porzioni (ricette) o quante volte (pasti standard) vuoi preparare: sommo io gli ingredienti ✨</p>
+        {elenco.length === 0 && extra.length === 0 && <p className="text-slate-400 text-sm py-2">La lista è vuota: scegli qualcosa qui sotto.</p>}
+        {elenco.map(([k, o]) => (
+          <label key={k} className="flex items-center gap-2 py-1 border-b border-slate-100 last:border-0">
+            <input type="checkbox" checked={!!spunte[k]} onChange={() => salva({ ...st, s: { ...spunte, [k]: !spunte[k] } })} />
+            <span className={`flex-1 text-sm ${spunte[k] ? "line-through text-slate-300" : "text-slate-700"}`}>{o.nome}</span>
+            <span className={`text-sm font-medium ${spunte[k] ? "text-slate-300" : "text-slate-600"}`}>{qtaTxt(o)}</span>
+          </label>
+        ))}
+        {extra.map((x, i) => (
+          <label key={"x" + i} className="flex items-center gap-2 py-1 border-b border-slate-100 last:border-0">
+            <input type="checkbox" checked={!!spunte["x" + i]} onChange={() => salva({ ...st, s: { ...spunte, ["x" + i]: !spunte["x" + i] } })} />
+            <span className={`flex-1 text-sm ${spunte["x" + i] ? "line-through text-slate-300" : "text-slate-700"}`}>{x}</span>
+            <button onClick={(e) => { e.preventDefault(); salva({ ...st, x: extra.filter((_, k) => k !== i), s: { ...spunte, ["x" + i]: false } }); }} className="text-slate-300 text-xs">✕</button>
+          </label>
+        ))}
+        <div className="flex gap-2 pt-1">
+          <input value={nuovo} onChange={(e) => setNuovo(e.target.value)} placeholder="Aggiungi altro (es. caffè)" className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+          <button onClick={() => { if (nuovo.trim()) { salva({ ...st, x: [...extra, nuovo.trim()] }); setNuovo(""); } }} className="px-3 rounded-lg text-sm text-white" style={{ background: "#27466D" }}>+</button>
+        </div>
+        {(elenco.length > 0 || extra.length > 0) && (
+          <div className="flex gap-3 pt-1">
+            <button onClick={() => { const t = [...elenco.map(([k, o]) => `${spunte[k] ? "✓" : "•"} ${o.nome}${qtaTxt(o) ? " — " + qtaTxt(o) : ""}`), ...extra.map((x, i) => `${spunte["x" + i] ? "✓" : "•"} ${x}`)].join("\n"); if (navigator.share) navigator.share({ title: "Lista della spesa", text: t }).catch(() => {}); else { try { navigator.clipboard.writeText(t); alert("Lista copiata ✨"); } catch (e) { /* niente */ } } }} className="text-xs font-medium" style={{ color: "#3F78B3" }}>Condividi / copia</button>
+            <button onClick={() => { if (confirm("Svuotare la lista?")) salva({}); }} className="text-xs text-slate-400">Svuota</button>
+          </div>
+        )}
+      </Card>
+      <Card className="p-4">
+        <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cosa preparo ({scelti} scelte)</p>
+          <span className="text-slate-400 text-xs">{aperto ? "Chiudi" : "Apri"}</span>
+        </button>
+        {aperto && (
+          <div className="mt-2">
+            {ricette.length === 0 && pasti.length === 0 && <p className="text-slate-400 text-sm">Non ci sono ancora ricette o pasti standard.</p>}
+            {ricette.length > 0 && <p className="text-[11px] text-slate-400 mt-1">Ricette (porzioni)</p>}
+            {ricette.map((r) => <Riga key={"r" + r.id} id={"r" + r.id} nome={r.nome} sotto={r.porzioni ? `ricetta per ${r.porzioni} porz.` : null} />)}
+            {pasti.length > 0 && <p className="text-[11px] text-slate-400 mt-2">Pasti standard (volte)</p>}
+            {pasti.map((p) => <Riga key={"p" + p.id} id={"p" + p.id} nome={p.nome} />)}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function totaliPerGiorno(voci) {
   const m = {};
   voci.forEach((v) => { m[v.data] = (m[v.data] || 0) + Number(v.kcal); });

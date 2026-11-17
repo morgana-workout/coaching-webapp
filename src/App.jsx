@@ -10571,6 +10571,118 @@ function TrendClientiCoach({ clients, onSelect }) {
   );
 }
 
+// ---------- Lista d'attesa pubblica (link nelle storie: /?lista=1) ----------
+const PROMO_ATTESA = { fine: "2026-12-31", testo: "Iscriviti entro il 31 dicembre 2026: hai 1 mese in regalo in qualsiasi pacchetto ✨" };
+
+function ListaAttesaPubblica() {
+  const [f, setF] = useState({ nome: "", email: "", whatsapp: "", servizio: "non_so", obiettivo: "", consenso: false, sito: "" });
+  const [stato, setStato] = useState("form"); // form | invio | fatto | doppia
+  const [errore, setErrore] = useState("");
+  const promoAttiva = formatDataLocale(new Date()) <= PROMO_ATTESA.fine;
+  useEffect(() => { document.title = "Lista d'attesa · Coaching by Morgana"; }, []);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const invia = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    if (f.sito) { setStato("fatto"); return; } // campo trappola per i bot
+    if (!f.nome.trim() || !/^\S+@\S+\.\S+$/.test(f.email.trim())) { setErrore("Controlla nome ed email 🫶🏻"); return; }
+    if (!f.consenso) { setErrore("Per iscriverti serve il consenso al trattamento dei dati 🫶🏻"); return; }
+    setStato("invio");
+    const { error } = await supabase.from("lista_attesa").insert({
+      nome: f.nome.trim(), email: f.email.trim(), whatsapp: f.whatsapp.trim() || null, servizio: f.servizio,
+      obiettivo: f.obiettivo.trim() || null, consenso: true,
+    });
+    if (error) {
+      if (error.code === "23505") { setStato("doppia"); return; }
+      setErrore("Non sono riuscita a iscriverti, riprova tra un attimo 🫶🏻"); setStato("form"); return;
+    }
+    setStato("fatto");
+  };
+  const campo = "w-full border rounded-xl px-3 py-2.5 text-sm bg-white";
+  const stile = { borderColor: "#C9E0F7", color: "#27466D" };
+  return (
+    <div className="min-h-screen px-5 py-8 flex justify-center" style={{ background: "#F5FAFE" }}>
+      <div className="w-full max-w-md space-y-5">
+        <div className="text-center space-y-1">
+          <p className="text-xs tracking-widest uppercase" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
+          <h1 className="text-3xl font-semibold" style={{ color: "#27466D" }}>Lista d'attesa</h1>
+          <p className="text-sm" style={{ color: "#7a8da3" }}>Lasciami i tuoi dati: ti scrivo io appena si libera un posto 🫶🏻</p>
+        </div>
+        {promoAttiva && (
+          <div className="rounded-2xl px-4 py-3 text-center text-sm font-medium" style={{ background: "#FFFBEF", color: "#27466D", border: "1.5px solid #F7E9BE" }}>{PROMO_ATTESA.testo}</div>
+        )}
+        {stato === "fatto" || stato === "doppia" ? (
+          <div className="rounded-2xl p-6 text-center space-y-2 bg-white" style={{ border: "1.5px solid #C9E0F7" }}>
+            <p className="text-lg font-semibold" style={{ color: "#27466D" }}>{stato === "doppia" ? "Sei già in lista ✨" : "Sei in lista! ✨"}</p>
+            <p className="text-sm" style={{ color: "#7a8da3" }}>{stato === "doppia" ? "Questa email è già iscritta: non devi fare altro, ti scrivo io." : `Grazie ${f.nome.trim().split(" ")[0] || ""}! Ti contatto personalmente appena possibile.${promoAttiva ? " Il tuo mese in regalo è segnato 💪🏻" : ""}`}</p>
+          </div>
+        ) : (
+          <form onSubmit={invia} className="rounded-2xl p-5 space-y-3.5 bg-white" style={{ border: "1.5px solid #C9E0F7" }}>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>Nome</label><input value={f.nome} onChange={set("nome")} maxLength={80} autoComplete="given-name" className={campo} style={stile} /></div>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>Email</label><input type="email" value={f.email} onChange={set("email")} maxLength={120} autoComplete="email" className={campo} style={stile} /></div>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>WhatsApp (facoltativo)</label><input type="tel" value={f.whatsapp} onChange={set("whatsapp")} maxLength={30} autoComplete="tel" className={campo} style={stile} /></div>
+            <div>
+              <label className="text-xs" style={{ color: "#7a8da3" }}>Come vorresti allenarti?</label>
+              <select value={f.servizio} onChange={set("servizio")} className={campo} style={stile}>
+                <option value="online">Online</option><option value="presenza">In presenza (Torino)</option><option value="non_so">Non lo so ancora</option>
+              </select>
+            </div>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>Il tuo obiettivo (facoltativo)</label><textarea value={f.obiettivo} onChange={set("obiettivo")} maxLength={400} rows={3} className={campo} style={stile} /></div>
+            <input value={f.sito} onChange={set("sito")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", height: 0, width: 0, opacity: 0 }} />
+            <label className="flex items-start gap-2 text-[11px] leading-snug" style={{ color: "#7a8da3" }}>
+              <input type="checkbox" checked={f.consenso} onChange={(e) => setF((x) => ({ ...x, consenso: e.target.checked }))} className="mt-0.5" />
+              <span>Acconsento al trattamento dei miei dati per essere ricontattata da Morgana Tarquino riguardo ai percorsi di coaching. Posso chiedere in qualsiasi momento la cancellazione scrivendole.</span>
+            </label>
+            {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+            <button disabled={stato === "invio"} className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{stato === "invio" ? "Ti iscrivo..." : "Iscrivimi alla lista"}</button>
+          </form>
+        )}
+        <p className="text-center text-[11px]" style={{ color: "#7a8da3" }}>@morgana_workout</p>
+      </div>
+    </div>
+  );
+}
+
+// Coach: iscritte alla lista d'attesa
+function ListaAttesaCoach() {
+  const [righe, setRighe] = useState(null);
+  const carica = async () => { const { data } = await supabase.from("lista_attesa").select("*").order("created_at", { ascending: false }); setRighe(data || []); };
+  useEffect(() => { carica(); }, []);
+  if (!righe) return null;
+  const nuove = righe.filter((r) => !r.contattata).length;
+  const servTxt = { online: "Online", presenza: "In presenza", non_so: "Non sa ancora" };
+  const segna = async (r) => { await supabase.from("lista_attesa").update({ contattata: !r.contattata }).eq("id", r.id); carica(); };
+  const elimina = async (r) => { if (!confirm(`Elimino ${r.nome} dalla lista? Non si può annullare.`)) return; await supabase.from("lista_attesa").delete().eq("id", r.id); carica(); };
+  const csv = () => {
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const righeCsv = [["Data", "Nome", "Email", "WhatsApp", "Servizio", "Obiettivo", "Mese gratis", "Contattata"].map(q).join(";"), ...righe.map((r) => [r.created_at.slice(0, 10), r.nome, r.email, r.whatsapp, servTxt[r.servizio] || "", r.obiettivo, r.promo_mese_gratis ? "sì" : "no", r.contattata ? "sì" : "no"].map(q).join(";"))];
+    scaricaFile(`lista-attesa-${formatDataLocale(new Date())}.csv`, "\uFEFF" + righeCsv.join("\n"), "text/csv");
+  };
+  return (
+    <Sezione id="lista_attesa" titolo="Lista d'attesa" conteggio={nuove} aperta={false} destra={righe.length ? <button onClick={csv} className="text-[11px] text-sky-600 font-medium">Scarica CSV</button> : null}>
+      <div className="space-y-2">
+        <p className="text-slate-400 text-[11px]">Link da mettere nelle storie: <span className="font-medium text-slate-600">{window.location.origin}/?lista=1</span></p>
+        {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna iscritta per ora.</Card>}
+        {righe.map((r) => (
+          <Card key={r.id} className={`p-3 space-y-1 ${r.contattata ? "opacity-60" : ""}`}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium text-slate-700 text-sm">{r.nome}</p>
+              <span className="text-[11px] text-slate-400">{new Date(r.created_at).toLocaleDateString("it-IT")}</span>
+            </div>
+            <p className="text-xs text-slate-500">{servTxt[r.servizio] || ""}{r.promo_mese_gratis ? " · 🎁 mese gratis" : ""}</p>
+            <p className="text-xs"><a href={`mailto:${r.email}`} className="text-sky-600">{r.email}</a>{r.whatsapp ? <> · <a href={`https://wa.me/${String(r.whatsapp).replace(/[^\d]/g, "")}`} target="_blank" rel="noreferrer" className="text-sky-600">{r.whatsapp}</a></> : null}</p>
+            {r.obiettivo && <p className="text-xs text-slate-500 italic">«{r.obiettivo}»</p>}
+            <div className="flex gap-3 pt-1">
+              <button onClick={() => segna(r)} className="text-xs font-medium text-sky-700">{r.contattata ? "↩ Da ricontattare" : "✓ Contattata"}</button>
+              <button onClick={() => elimina(r)} className="text-xs text-slate-400">Elimina</button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </Sezione>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -10684,6 +10796,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
 
  <RichiestePacchettoCoach onChanged={onChanged} />
       <CaricheInCaloCoach onChanged={onChanged} />
+
+      <ListaAttesaCoach />
 
       <Sezione id="trend_clienti" titolo="Trend clienti" aperta={false}>
         <TrendClientiCoach clients={clients} onSelect={onSelect} />
@@ -13870,6 +13984,163 @@ function CambiaOrarioGruppo({ ids, evento, onFatto, onAnnulla }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* PROGRAMMA DI GRUPPO — sessioni create a mano, valide per tutte       */
+/* ------------------------------------------------------------------ */
+function ProgrammaGruppo({ membri }) {
+  const ids = membri.map((m) => m.id);
+  const [giorni, setGiorni] = useState(null); // [{ id, client_id, nome, ordine }]
+  const [esercizi, setEsercizi] = useState([]);
+  const [libreria, setLibreria] = useState([]);
+  const [nuovaSess, setNuovaSess] = useState("");
+  const [aperta, setAperta] = useState(null);
+  const [f, setF] = useState({ nome: "", serie: "3", rip: "10", recupero: "", note: "" });
+  const [msg, setMsg] = useState("");
+  const [lavoro, setLavoro] = useState(false);
+  const carica = async () => {
+    if (!ids.length) { setGiorni([]); return; }
+    const { data: g } = await supabase.from("training_days").select("id, client_id, nome, ordine, scheda_archiviata").in("client_id", ids).order("ordine");
+    const att = (g || []).filter((x) => !x.scheda_archiviata && x.nome !== "Circuito");
+    setGiorni(att);
+    if (att.length) { const { data: e } = await supabase.from("training_exercises").select("id, client_id, training_day_id, nome, serie, ripetizioni, recupero_sec, note, ordine").in("training_day_id", att.map((x) => x.id)).order("ordine"); setEsercizi(e || []); } else setEsercizi([]);
+  };
+  useEffect(() => { carica(); }, [ids.join(",")]);
+  useEffect(() => { supabase.from("esercizi_video").select("nome").order("nome").then(({ data }) => setLibreria([...new Set((data || []).map((x) => x.nome))]), () => {}); }, []);
+  if (!giorni) return <Spinner />;
+  const nomi = [...new Set(giorni.map((g) => g.nome))];
+  const nomeMembro = (id) => (membri.find((m) => m.id === id)?.nome || "").trim() || "cliente";
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 4500); };
+  const creaSessioni = async (lista) => {
+    setLavoro(true);
+    try {
+      for (const nome of lista) {
+        for (const m of membri) {
+          const suoi = giorni.filter((g) => g.client_id === m.id);
+          if (suoi.some((g) => g.nome === nome)) continue;
+          const { data: tutti } = await supabase.from("training_days").select("ordine").eq("client_id", m.id);
+          await supabase.from("training_days").insert({ client_id: m.id, nome, ordine: Math.max(0, ...(tutti || []).map((x) => x.ordine ?? 0)) + 1 });
+        }
+      }
+      setNuovaSess(""); await carica(); avviso(`Fatto ✨ ${lista.length === 1 ? "Sessione creata" : "Sessioni create"} per tutte le clienti`);
+    } catch (e) { avviso("Non sono riuscita a creare tutto: controlla e riprova 🫶🏻"); }
+    setLavoro(false);
+  };
+  const quanteSessioni = (n) => {
+    const base = nomi.length;
+    creaSessioni(Array.from({ length: n }, (_, i) => `Sessione ${base + i + 1}`));
+  };
+  const rinomina = async (nome) => {
+    const nuovo = (prompt("Nuovo nome della sessione:", nome) || "").trim();
+    if (!nuovo || nuovo === nome) return;
+    await supabase.from("training_days").update({ nome: nuovo }).in("id", giorni.filter((g) => g.nome === nome).map((g) => g.id));
+    setAperta(nuovo); await carica();
+  };
+  const eliminaSessione = async (nome) => {
+    const gg = giorni.filter((g) => g.nome === nome).map((g) => g.id);
+    if (!confirm(`Elimino "${nome}" per TUTTE le clienti, con esercizi e carichi registrati? Non si può annullare.`)) return;
+    const exIds = esercizi.filter((e) => gg.includes(e.training_day_id)).map((e) => e.id);
+    if (exIds.length) await supabase.from("training_entries").delete().in("exercise_id", exIds);
+    await supabase.from("training_exercises").delete().in("training_day_id", gg);
+    await supabase.from("training_days").delete().in("id", gg);
+    setAperta(null); await carica();
+  };
+  const aggiungiEsercizio = async (nome) => {
+    const nomeEs = f.nome.trim();
+    if (!nomeEs) return;
+    setLavoro(true);
+    try {
+      for (const g of giorni.filter((x) => x.nome === nome)) {
+        const n = esercizi.filter((e) => e.training_day_id === g.id).length;
+        const note = [f.recupero.trim() ? `Recupero: ${f.recupero.trim()}` : "", f.note.trim()].filter(Boolean).join(" — ");
+        await supabase.from("training_exercises").insert({ client_id: g.client_id, training_day_id: g.id, nome: nomeEs, tipo: "forza", ordine: n + 1, serie: Number(f.serie) || null, ripetizioni: f.rip.trim() || null, note: note || null });
+      }
+      setF((x) => ({ ...x, nome: "", note: "" })); await carica();
+    } catch (e) { avviso("Non sono riuscita ad aggiungerlo: riprova 🫶🏻"); }
+    setLavoro(false);
+  };
+  const eliminaEsercizio = async (nomeSess, nomeEs) => {
+    if (!confirm(`Tolgo "${nomeEs}" da "${nomeSess}" per tutte le clienti? I carichi già segnati su questo esercizio vengono eliminati.`)) return;
+    const gg = giorni.filter((g) => g.nome === nomeSess).map((g) => g.id);
+    const daTogliere = esercizi.filter((e) => gg.includes(e.training_day_id) && e.nome === nomeEs).map((e) => e.id);
+    if (daTogliere.length) { await supabase.from("training_entries").delete().in("exercise_id", daTogliere); await supabase.from("training_exercises").delete().in("id", daTogliere); }
+    await carica();
+  };
+  const salvaCampo = async (nomeSess, nomeEs, campi) => {
+    const gg = giorni.filter((g) => g.nome === nomeSess).map((g) => g.id);
+    const target = esercizi.filter((e) => gg.includes(e.training_day_id) && e.nome === nomeEs).map((e) => e.id);
+    if (target.length) await supabase.from("training_exercises").update(campi).in("id", target);
+    await carica();
+  };
+  const inp = "border border-slate-200 rounded-lg px-2.5 py-2 text-sm bg-white";
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
+      <div>
+        <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Sessioni del gruppo</p>
+        <p className="text-xs text-slate-500">Crea le sessioni che ripetete ogni settimana (es. 2 lezioni = 2 sessioni) e gli esercizi: valgono per tutte le clienti. I carichi e le note li segni poi in "Avvia la sessione", per ognuna.</p>
+      </div>
+      {nomi.length === 0 && <p className="text-xs text-slate-400">Nessuna sessione ancora. Quante lezioni a settimana fa il gruppo?</p>}
+      <div className="flex flex-wrap gap-2 items-center">
+        {[1, 2, 3].map((n) => <button key={n} disabled={lavoro} onClick={() => quanteSessioni(n)} className="px-3 py-1.5 rounded-full text-xs font-semibold disabled:opacity-50" style={{ background: "#E1EEFB", color: "#27466D" }}>+ {n} {n === 1 ? "sessione" : "sessioni"}</button>)}
+        <input value={nuovaSess} onChange={(e) => setNuovaSess(e.target.value)} placeholder="oppure un nome (es. Lezione A)" className={inp + " flex-1 min-w-[140px] text-xs"} />
+        <button disabled={lavoro || !nuovaSess.trim()} onClick={() => creaSessioni([nuovaSess.trim()])} className="px-3 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Crea</button>
+      </div>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      {nomi.map((nome) => {
+        const gg = giorni.filter((g) => g.nome === nome);
+        const mancano = membri.filter((m) => !gg.some((g) => g.client_id === m.id));
+        const base = gg[0];
+        const lista = esercizi.filter((e) => e.training_day_id === base.id).sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0));
+        const diversi = gg.some((g) => esercizi.filter((e) => e.training_day_id === g.id).length !== lista.length);
+        return (
+          <div key={nome} className="rounded-xl border border-slate-200">
+            <button onClick={() => setAperta(aperta === nome ? null : nome)} className="w-full flex items-center justify-between px-3 py-2.5 text-left">
+              <span className="text-sm font-semibold" style={{ color: "#27466D" }}>{nome} <span className="text-slate-400 font-normal text-xs">· {lista.length} esercizi</span></span>
+              <ChevronRight size={16} className={aperta === nome ? "rotate-90" : ""} />
+            </button>
+            {aperta === nome && (
+              <div className="px-3 pb-3 space-y-2.5">
+                {mancano.length > 0 && <p className="text-[11px]" style={{ color: "#7a6a3a" }}>Manca a: {mancano.map((m) => nomeMembro(m.id)).join(", ")}. Premi "+ Crea" con lo stesso nome per aggiungerla.</p>}
+                {diversi && <p className="text-[11px]" style={{ color: "#7a6a3a" }}>Le clienti non hanno tutte gli stessi esercizi (modifiche fatte singolarmente): qui vedi quelli di {nomeMembro(base.client_id)}.</p>}
+                {lista.length === 0 && <p className="text-xs text-slate-400">Ancora nessun esercizio: aggiungi il primo qui sotto.</p>}
+                {lista.map((e) => (
+                  <div key={e.id} className="flex items-center gap-2 border-b border-slate-100 pb-1.5 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-700 truncate">{e.nome}</p>
+                      <div className="flex gap-1.5 items-center mt-0.5">
+                        <input defaultValue={e.serie ?? ""} inputMode="numeric" onBlur={(ev) => Number(ev.target.value) !== (e.serie ?? 0) && salvaCampo(nome, e.nome, { serie: Number(ev.target.value) || null })} className="w-10 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-center" />
+                        <span className="text-[11px] text-slate-400">serie ×</span>
+                        <input defaultValue={e.ripetizioni ?? ""} onBlur={(ev) => ev.target.value !== (e.ripetizioni ?? "") && salvaCampo(nome, e.nome, { ripetizioni: ev.target.value.trim() || null })} className="w-16 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-center" />
+                        <span className="text-[11px] text-slate-400">rip</span>
+                      </div>
+                      {e.note && <p className="text-[11px] text-slate-400 truncate">{e.note}</p>}
+                    </div>
+                    <button onClick={() => eliminaEsercizio(nome, e.nome)} className="text-slate-300 text-sm px-1">✕</button>
+                  </div>
+                ))}
+                <div className="rounded-lg p-2.5 space-y-2" style={{ background: "#F5FAFE" }}>
+                  <input list="libreria-esercizi-gruppo" value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Esercizio (scegli dalla libreria o scrivi)" className={inp + " w-full"} />
+                  <datalist id="libreria-esercizi-gruppo">{libreria.map((n) => <option key={n} value={n} />)}</datalist>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input value={f.serie} onChange={(e) => setF({ ...f, serie: e.target.value })} inputMode="numeric" placeholder="Serie" className={inp} />
+                    <input value={f.rip} onChange={(e) => setF({ ...f, rip: e.target.value })} placeholder="Rip (8-10)" className={inp} />
+                    <input value={f.recupero} onChange={(e) => setF({ ...f, recupero: e.target.value })} placeholder="Rec (90s)" className={inp} />
+                  </div>
+                  <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Note (facoltative)" className={inp + " w-full"} />
+                  <button disabled={lavoro || !f.nome.trim()} onClick={() => aggiungiEsercizio(nome)} className="w-full py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>+ Aggiungi per tutte le clienti</button>
+                </div>
+                <div className="flex gap-4 pt-0.5">
+                  <button onClick={() => rinomina(nome)} className="text-xs text-slate-500 underline">Rinomina sessione</button>
+                  <button onClick={() => eliminaSessione(nome)} className="text-xs text-slate-400 underline">Elimina sessione</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [membri, setMembri] = useState(null);
   const [candidate, setCandidate] = useState([]);
@@ -13897,6 +14168,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [notaG, setNotaG] = useState(gruppo.nota || "");
   const [modoVal, setModoVal] = useState(false);
   const [csvAperto, setCsvAperto] = useState(false);
+  const [progAperto, setProgAperto] = useState(false);
   const [csvDest, setCsvDest] = useState(null); // null = tutte le clienti del gruppo
   const [csvSostituisci, setCsvSostituisci] = useState(false);
   const [csvInCorso, setCsvInCorso] = useState(false);
@@ -14040,7 +14312,9 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Presenze</button>
               <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Pagamento</button>
               <button onClick={() => { setCompleta(true); setModoVal(true); }} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazioni</button>
+              <button onClick={() => setProgAperto(!progAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: progAperto ? "#27466D" : "#fff", color: progAperto ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Sessioni e programma</button>
               <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Importa CSV</button>
+              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}>🗑 Svuota allenamenti di tutte</button>
               <button onClick={() => setCompleta(true)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Gestione completa</button>
             </div>
             {!completa && msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
@@ -14067,6 +14341,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
             <RecuperiGruppo membri={membri} />
             {pannello === "presenze" && <PresenzeGruppo gruppo={gruppo} membri={membri} />}
             {pannello === "pagamento" && <PagamentoCondivisoGruppo membri={membri} onFatto={() => setChiavePag((k) => k + 1)} />}
+            {progAperto && <ProgrammaGruppo key={(membri || []).map((m) => m.id).join(",")} membri={membri} />}
             {csvAperto && (
               <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
                 <p className="text-xs text-slate-600">Carichi lo stesso file CSV del programma e viene importato per tutte le clienti scelte, ognuna col suo programma (poi ritocchi le variazioni). Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note (facoltative: scheda, tipo, esecuzione).</p>
@@ -14681,6 +14956,11 @@ function ImpostaPassword({ onFatto }) {
 }
 
 export default function App() {
+  const paginaPubblica = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("lista");
+  return paginaPubblica ? <ListaAttesaPubblica /> : <AppInterna />;
+}
+
+function AppInterna() {
   const [session, setSession] = useState(undefined);
   const [ruolo, setRuolo] = useState(null); // "admin" | "client" | null
   const [devImpostarePassword, setDevImpostarePassword] = useState(false);
