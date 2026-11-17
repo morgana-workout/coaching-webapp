@@ -13504,7 +13504,148 @@ function Stepper({ valore, suggerimento, passo, placeholder, onChange, onCommit,
   );
 }
 
-function VistaClienteSessione({ cl, oggi }) {
+// Riga modificabile di un esercizio (sessione di gruppo): si salva quando esci dal campo
+function RigaEsercizioEditor({ es, primo, ultimo, libreriaV, onSalva, onElimina, onSposta }) {
+  const [nome, setNome] = useState(es.nome || "");
+  const [serie, setSerie] = useState(es.serie ?? "");
+  const [rip, setRip] = useState(es.ripetizioni || "");
+  const [nota, setNota] = useState(es.note || "");
+  const salva = (campi) => onSalva(es.id, campi);
+  const inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white";
+  return (
+    <div className="rounded-xl p-2 space-y-1.5" style={{ background: "#fff", border: "1px solid #C9E0F7" }}>
+      <div className="flex gap-1.5">
+        <input list="lib-esercizi-sessione" value={nome} onChange={(e) => setNome(e.target.value)} onBlur={() => nome.trim() && nome !== es.nome && salva({ nome: nome.trim() })} placeholder="Esercizio" className={`${inp} flex-1 min-w-0 font-medium`} />
+        <button onClick={() => onSposta(es.id, -1)} disabled={primo} className="px-2 text-slate-400 disabled:opacity-20">↑</button>
+        <button onClick={() => onSposta(es.id, 1)} disabled={ultimo} className="px-2 text-slate-400 disabled:opacity-20">↓</button>
+        <button onClick={() => onElimina(es)} className="px-2 text-slate-400">✕</button>
+      </div>
+      <div className="flex gap-1.5">
+        <input value={serie} onChange={(e) => setSerie(e.target.value.replace(/\D/g, ""))} onBlur={() => String(serie) !== String(es.serie ?? "") && salva({ serie: serie === "" ? null : Number(serie) })} inputMode="numeric" placeholder="Serie" className={`${inp} w-16`} />
+        <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={() => rip !== (es.ripetizioni || "") && salva({ ripetizioni: rip.trim() || null })} placeholder="Ripetizioni (es. 10 o 8-10)" className={`${inp} flex-1 min-w-0`} />
+      </div>
+      <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={() => nota !== (es.note || "") && salva({ note: nota.trim() || null })} placeholder="Nota (facoltativa)" className={`${inp} w-full text-xs`} />
+    </div>
+  );
+}
+
+// Crea o modifica a mano le sessioni di una cliente direttamente dalla sessione di gruppo
+function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, esercizi, libreriaV, onCambiato, chiudi }) {
+  const [nuovoGiorno, setNuovoGiorno] = useState("");
+  const [nuovoEs, setNuovoEs] = useState({ nome: "", serie: "3", rip: "10" });
+  const [nomeG, setNomeG] = useState("");
+  const [msg, setMsg] = useState("");
+  const giorno = giorni.find((g) => g.id === giornoId) || null;
+  useEffect(() => { setNomeG(giorno?.nome || ""); }, [giornoId, giorno?.nome]);
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 3500); };
+  const inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white";
+
+  const creaGiorno = async () => {
+    const nome = nuovoGiorno.trim() || `Sessione ${giorni.length + 1}`;
+    const ordine = Math.max(-1, ...giorni.map((g) => g.ordine ?? 0)) + 1;
+    const { data, error } = await supabase.from("training_days").insert({ client_id: cl.id, nome, ordine }).select("id").single();
+    if (error || !data) { avviso("Non sono riuscita a creare la sessione, riprova 🫶🏻"); return; }
+    setNuovoGiorno(""); setGiornoId(data.id); onCambiato();
+  };
+  const rinominaGiorno = async () => {
+    if (!giorno || !nomeG.trim() || nomeG.trim() === giorno.nome) return;
+    await supabase.from("training_days").update({ nome: nomeG.trim() }).eq("id", giorno.id); onCambiato();
+  };
+  const eliminaGiorno = async () => {
+    if (!giorno) return;
+    if (!confirm(`Elimino la sessione "${giorno.nome}" di ${cl.nome || "questa cliente"}, con esercizi e carichi registrati? Non si può annullare.`)) return;
+    const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giorno.id);
+    const ids = (es || []).map((e) => e.id);
+    if (ids.length) await supabase.from("training_entries").delete().in("exercise_id", ids);
+    await supabase.from("training_exercises").delete().eq("training_day_id", giorno.id);
+    await supabase.from("training_days").delete().eq("id", giorno.id);
+    setGiornoId(null); onCambiato();
+  };
+  const aggiungiEs = async () => {
+    if (!giorno || !nuovoEs.nome.trim()) return;
+    const ordine = Math.max(0, ...esercizi.map((e) => e.ordine ?? 0)) + 1;
+    const { error } = await supabase.from("training_exercises").insert({ client_id: cl.id, training_day_id: giorno.id, nome: nuovoEs.nome.trim(), tipo: "forza", serie: nuovoEs.serie ? Number(nuovoEs.serie) : null, ripetizioni: nuovoEs.rip.trim() || null, ordine });
+    if (error) { avviso("Non sono riuscita ad aggiungerlo, riprova 🫶🏻"); return; }
+    setNuovoEs({ ...nuovoEs, nome: "" }); onCambiato();
+  };
+  const salvaEs = async (id, campi) => { await supabase.from("training_exercises").update(campi).eq("id", id); onCambiato(); };
+  const eliminaEs = async (es) => {
+    if (!confirm(`Tolgo "${es.nome}" da questa sessione, con i carichi registrati? Non si può annullare.`)) return;
+    await supabase.from("training_entries").delete().eq("exercise_id", es.id);
+    await supabase.from("training_exercises").delete().eq("id", es.id);
+    onCambiato();
+  };
+  const sposta = async (id, verso) => {
+    const i = esercizi.findIndex((e) => e.id === id), j = i + verso;
+    if (i < 0 || j < 0 || j >= esercizi.length) return;
+    const a = esercizi[i], b = esercizi[j];
+    const oa = a.ordine ?? i + 1, ob = b.ordine ?? j + 1;
+    await supabase.from("training_exercises").update({ ordine: ob === oa ? ob + verso : ob }).eq("id", a.id);
+    await supabase.from("training_exercises").update({ ordine: oa }).eq("id", b.id);
+    onCambiato();
+  };
+  const copiaAlleAltre = async () => {
+    if (!giorno) return;
+    const altre = (membri || []).filter((m) => m.id !== cl.id);
+    if (!altre.length) return;
+    if (!confirm(`Copio la sessione "${giorno.nome}" (${esercizi.length} esercizi) a: ${altre.map((m) => m.nome).join(", ")}? Viene AGGIUNTA a quello che hanno già.`)) return;
+    try {
+      for (const m of altre) {
+        const { data: ex } = await supabase.from("training_days").select("ordine").eq("client_id", m.id);
+        const ordine = Math.max(-1, ...(ex || []).map((x) => x.ordine ?? 0)) + 1;
+        const { data: nuovo, error } = await supabase.from("training_days").insert({ client_id: m.id, nome: giorno.nome, ordine }).select("id").single();
+        if (error || !nuovo) throw error || new Error("giorno");
+        const righe = esercizi.map((e, k) => ({ client_id: m.id, training_day_id: nuovo.id, nome: e.nome, tipo: e.tipo || "forza", serie: e.serie, ripetizioni: e.ripetizioni, note: e.note, recupero_sec: e.recupero_sec, ordine: k + 1 }));
+        if (righe.length) { const { error: e2 } = await supabase.from("training_exercises").insert(righe); if (e2) throw e2; }
+      }
+      avviso(`Fatto ✨ Sessione copiata a ${altre.length} clienti`);
+    } catch (e) { avviso("Non sono riuscita a copiare tutto: controlla le altre clienti prima di riprovare."); }
+  };
+
+  return (
+    <div className="rounded-2xl p-3 space-y-2.5" style={{ background: "#F5FAFE", border: "1.5px solid #C9E0F7" }}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold" style={{ color: "#27466D" }}>Programma di {cl.nome || "questa cliente"}</p>
+        {chiudi && <button onClick={chiudi} className="text-xs font-semibold" style={{ color: "#3F78B3" }}>Fatto ✓</button>}
+      </div>
+      <datalist id="lib-esercizi-sessione">{(libreriaV || []).map((x) => <option key={x.id} value={x.nome} />)}</datalist>
+      {giorni.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto">
+          {giorni.map((g) => <button key={g.id} onClick={() => setGiornoId(g.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: giornoId === g.id ? "#27466D" : "#fff", color: giornoId === g.id ? "#fff" : "#27466D", border: "1px solid #C9E0F7" }}>{g.nome}</button>)}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <input value={nuovoGiorno} onChange={(e) => setNuovoGiorno(e.target.value)} placeholder={giorni.length ? "Nome nuova sessione" : "Nome della sessione (es. Gruppo – Lezione 1)"} className={`${inp} flex-1 min-w-0`} />
+        <button onClick={creaGiorno} className="px-3 rounded-lg text-xs font-bold text-white" style={{ background: "#27466D" }}>+ Sessione</button>
+      </div>
+      {giorno && (
+        <>
+          <div className="flex gap-1.5">
+            <input value={nomeG} onChange={(e) => setNomeG(e.target.value)} onBlur={rinominaGiorno} className={`${inp} flex-1 min-w-0 font-semibold`} />
+            <button onClick={eliminaGiorno} className="px-3 rounded-lg text-xs text-slate-500" style={{ border: "1px solid #C9E0F7", background: "#fff" }}>🗑 Elimina sessione</button>
+          </div>
+          {esercizi.length === 0 && <p className="text-xs text-slate-400 px-1">Nessun esercizio: aggiungine uno qui sotto.</p>}
+          {esercizi.map((e, i) => <RigaEsercizioEditor key={e.id} es={e} primo={i === 0} ultimo={i === esercizi.length - 1} libreriaV={libreriaV} onSalva={salvaEs} onElimina={eliminaEs} onSposta={sposta} />)}
+          <div className="rounded-xl p-2 space-y-1.5" style={{ background: "#E1EEFB" }}>
+            <input list="lib-esercizi-sessione" value={nuovoEs.nome} onChange={(e) => setNuovoEs({ ...nuovoEs, nome: e.target.value })} placeholder="Nuovo esercizio (scrivi o scegli dalla libreria)" className={`${inp} w-full`} />
+            <div className="flex gap-1.5">
+              <input value={nuovoEs.serie} onChange={(e) => setNuovoEs({ ...nuovoEs, serie: e.target.value.replace(/\D/g, "") })} inputMode="numeric" placeholder="Serie" className={`${inp} w-16`} />
+              <input value={nuovoEs.rip} onChange={(e) => setNuovoEs({ ...nuovoEs, rip: e.target.value })} placeholder="Ripetizioni" className={`${inp} flex-1 min-w-0`} />
+              <button onClick={aggiungiEs} disabled={!nuovoEs.nome.trim()} className="px-3 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: "#27466D" }}>+ Aggiungi</button>
+            </div>
+          </div>
+          {(membri || []).length > 1 && esercizi.length > 0 && <button onClick={copiaAlleAltre} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Copia questa sessione alle altre del gruppo</button>}
+        </>
+      )}
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+    </div>
+  );
+}
+
+function VistaClienteSessione({ cl, oggi, membri = [] }) {
+  const [rl, setRl] = useState(0);
+  const [modifica, setModifica] = useState(false);
+  const clPrec = React.useRef(null);
   const [giorni, setGiorni] = useState(null);
   const [giornoId, setGiornoId] = useState(null);
   const [esercizi, setEsercizi] = useState([]);
@@ -13523,15 +13664,16 @@ function VistaClienteSessione({ cl, oggi }) {
   useEffect(() => { supabase.from("esercizi_video").select("*").order("ordine").then(({ data }) => setLibreriaV(data || [])).catch(() => {}); }, []);
 
   useEffect(() => {
-    let vivo = true; setGiorni(null); setGiornoId(null); setEsercizi([]);
+    let vivo = true;
+    if (clPrec.current !== cl.id) { setGiorni(null); setGiornoId(null); setEsercizi([]); clPrec.current = cl.id; }
     (async () => {
       const { data } = await supabase.from("training_days").select("id, nome, ordine, scheda_archiviata").eq("client_id", cl.id).order("ordine");
       if (!vivo) return;
       const att = (data || []).filter((g) => !g.scheda_archiviata);
-      setGiorni(att); setGiornoId(att[0]?.id || null);
+      setGiorni(att); setGiornoId((cur) => (att.some((g) => g.id === cur) ? cur : att[0]?.id || null));
     })();
     return () => { vivo = false; };
-  }, [cl.id]);
+  }, [cl.id, rl]);
 
   useEffect(() => {
     if (!giornoId) return undefined;
@@ -13561,7 +13703,7 @@ function VistaClienteSessione({ cl, oggi }) {
       setAperto((primo || lista[0] || {}).id || null);
     })();
     return () => { vivo = false; };
-  }, [giornoId, cl.id]);
+  }, [giornoId, cl.id, rl]);
 
   useEffect(() => { if (timer <= 0) return undefined; const t = setTimeout(() => setTimer((s) => s - 1), 1000); return () => clearTimeout(t); }, [timer]);
 
@@ -13598,7 +13740,13 @@ function VistaClienteSessione({ cl, oggi }) {
   };
 
   if (!giorni) return <p className="text-sm text-slate-400 px-1 py-6 text-center">Carico…</p>;
-  if (!giorni.length) return <p className="text-sm text-slate-500 px-1 py-6 text-center">{`${cl.nome || "Questa cliente"} non ha ancora un programma: importalo con il CSV o copialo da un'altra cliente 🫶🏻`}</p>;
+  const editor = (chiudi) => <EditorProgrammaSessione cl={cl} membri={membri} giorni={giorni} giornoId={giornoId} setGiornoId={setGiornoId} esercizi={esercizi} libreriaV={libreriaV} onCambiato={() => setRl((n) => n + 1)} chiudi={chiudi} />;
+  if (!giorni.length) return (
+    <div className="space-y-3 pb-24">
+      <p className="text-sm text-slate-500 px-1 pt-3 text-center">{`${cl.nome || "Questa cliente"} non ha ancora un programma: crealo qui a mano, importalo con il CSV o copialo da un'altra cliente 🫶🏻`}</p>
+      {editor(null)}
+    </div>
+  );
   return (
     <div className="space-y-3 pb-24">
       {(cl.note_particolari || (cl.problematiche_salute || []).filter(Boolean).length > 0) && (
@@ -13643,6 +13791,8 @@ function VistaClienteSessione({ cl, oggi }) {
         </div>
       )}
       {infoEsV && <EsercizioInfoModal es={infoEsV} onClose={() => setInfoEsV(null)} />}
+      <div className="flex justify-end"><button onClick={() => setModifica((v) => !v)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: modifica ? "#27466D" : "#fff", color: modifica ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{modifica ? "Chiudi modifica" : "✏️ Modifica programma"}</button></div>
+      {modifica && editor(() => setModifica(false))}
       {esercizi.map((es) => {
         const tot = parseInt(es.serie, 10) || 3;
         const fatte = Array.from({ length: tot }, (_, i) => i + 1).filter((i) => oggiMap[`${es.id}|${i}`]?.ok).length;
@@ -13706,7 +13856,7 @@ function SessioneTelefono({ gruppo, membri, onClose, onChanged, inizialeId }) {
       </div>
       <div className="p-3 max-w-xl mx-auto">
         {membri.length === 0 ? <p className="text-sm text-slate-500 text-center py-10">Aggiungi prima le clienti al gruppo 🫶🏻</p>
-          : vista === "clienti" ? (cl && <VistaClienteSessione key={cl.id} cl={cl} oggi={oggi} />)
+          : vista === "clienti" ? (cl && <VistaClienteSessione key={cl.id} cl={cl} oggi={oggi} membri={membri} />)
           : <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged || (() => {})} inline />}
       </div>
     </div>
