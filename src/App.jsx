@@ -5853,7 +5853,7 @@ function mesiDelPagamento(p, pianoCliente) {
   }
   return 0;
 }
-function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
+function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio, mesiOmaggio = 0) {
   const validi = (pagamenti || [])
     .filter((p) => (p.stato === "saldato" || p.scadenza_saldo) && mesiDelPagamento(p, pianoCliente) > 0)
     .slice()
@@ -5867,6 +5867,7 @@ function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
     scadenza = addMesi(base, mesiDelPagamento(p, pianoCliente));
     ultimoTipo = MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] ? p.tipo_piano : pianoCliente;
   }
+  if (scadenza && mesiOmaggio > 0) scadenza = addMesi(scadenza, mesiOmaggio); // mese gratuito della promo (si aggiunge una volta sola)
   return { scadenza, ultimoTipo };
 }
 
@@ -5876,8 +5877,8 @@ function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
 // la scadenza avanzata "a vuoto".
 async function ricalcolaEAggiornaScadenza(clientId) {
   const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note, scadenza_saldo").eq("client_id", clientId);
-  const { data: cli } = await supabase.from("clients").select("piano, data_inizio").eq("id", clientId).single();
-  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio);
+  const { data: cli } = await supabase.from("clients").select("piano, data_inizio, mesi_omaggio").eq("id", clientId).single();
+  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio, Number(cli?.mesi_omaggio) || 0);
   if (!scadenza) return;
   const oggiStr = formatDataLocale(new Date());
   const giorniAScadenza = Math.round((new Date(scadenza + "T00:00:00") - new Date(oggiStr + "T00:00:00")) / 86400000);
@@ -10572,7 +10573,7 @@ function TrendClientiCoach({ clients, onSelect }) {
 }
 
 // ---------- Lista d'attesa pubblica (link nelle storie: /?lista=1) ----------
-const PROMO_ATTESA = { fine: "2026-12-31", testo: "Iscriviti entro il 31 dicembre 2026: hai 1 mese in regalo in qualsiasi pacchetto ✨" };
+const PROMO_ATTESA = { fine: "2026-12-31", testo: "Iscriviti entro il 31 dicembre 2026: il posto è riservato, non paghi nulla adesso e hai 1 mese in regalo in qualsiasi pacchetto ✨" };
 
 function ListaAttesaPubblica() {
   const [f, setF] = useState({ nome: "", email: "", whatsapp: "", servizio: "non_so", obiettivo: "", consenso: false, sito: "" });
@@ -10590,7 +10591,7 @@ function ListaAttesaPubblica() {
     setStato("invio");
     const { error } = await supabase.from("lista_attesa").insert({
       nome: f.nome.trim(), email: f.email.trim(), whatsapp: f.whatsapp.trim() || null, servizio: f.servizio,
-      obiettivo: f.obiettivo.trim() || null, consenso: true,
+      obiettivo: f.obiettivo.trim() || null, consenso: true, promo_mese_gratis: promoAttiva,
     });
     if (error) {
       if (error.code === "23505") { setStato("doppia"); return; }
@@ -10606,7 +10607,7 @@ function ListaAttesaPubblica() {
         <div className="text-center space-y-1">
           <p className="text-xs tracking-widest uppercase" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
           <h1 className="text-3xl font-semibold" style={{ color: "#27466D" }}>Lista d'attesa</h1>
-          <p className="text-sm" style={{ color: "#7a8da3" }}>Lasciami i tuoi dati: ti scrivo io appena si libera un posto 🫶🏻</p>
+          <p className="text-sm" style={{ color: "#7a8da3" }}>Prenota il tuo posto per iniziare il coaching online a gennaio: lasciami i tuoi dati e ti scrivo io 🫶🏻</p>
         </div>
         {promoAttiva && (
           <div className="rounded-2xl px-4 py-3 text-center text-sm font-medium" style={{ background: "#FFFBEF", color: "#27466D", border: "1.5px solid #F7E9BE" }}>{PROMO_ATTESA.testo}</div>
@@ -10643,46 +10644,126 @@ function ListaAttesaPubblica() {
   );
 }
 
-// Coach: iscritte alla lista d'attesa
-function ListaAttesaCoach() {
+// Coach: iscritte alla lista d'attesa (coaching online da gennaio: posto riservato senza pagamento anticipato, 1 mese gratuito se iscritte entro il 31/12)
+function ListaAttesaCoach({ onChanged }) {
   const [righe, setRighe] = useState(null);
+  const [aggiungi, setAggiungi] = useState(false);
+  const [incolla, setIncolla] = useState(false);
+  const [testo, setTesto] = useState("");
+  const [f, setF] = useState({ nome: "", email: "", whatsapp: "", pacchetto: "Mensile", data: formatDataLocale(new Date()), nota: "" });
+  const [avvia, setAvvia] = useState(null);
+  const [msg, setMsg] = useState("");
   const carica = async () => { const { data } = await supabase.from("lista_attesa").select("*").order("created_at", { ascending: false }); setRighe(data || []); };
   useEffect(() => { carica(); }, []);
   if (!righe) return null;
-  const nuove = righe.filter((r) => !r.contattata).length;
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 4000); };
+  const nuove = righe.filter((r) => !r.contattata && !r.client_id).length;
   const servTxt = { online: "Online", presenza: "In presenza", non_so: "Non sa ancora" };
+  const inp = "border border-slate-200 rounded-lg px-3 py-2 text-sm w-full";
+  const promoDi = (data) => data <= PROMO_ATTESA.fine;
   const segna = async (r) => { await supabase.from("lista_attesa").update({ contattata: !r.contattata }).eq("id", r.id); carica(); };
   const elimina = async (r) => { if (!confirm(`Elimino ${r.nome} dalla lista? Non si può annullare.`)) return; await supabase.from("lista_attesa").delete().eq("id", r.id); carica(); };
+  const messaggio = (r) => `Ciao ${r.nome.split(" ")[0]}! ✨ Il tuo posto per il coaching online di gennaio è riservato 🫶🏻 Non devi pagare nulla adesso: partiremo a gennaio, dopo il pagamento${r.promo_mese_gratis ? ", e avrai 1 mese in regalo 🎁" : ""}. Ti scrivo appena sono pronta a iniziare 💪🏻`;
+  const wa = (r) => { const n = String(r.whatsapp || "").replace(/[^\d]/g, ""); const num = n.length > 10 ? n : "39" + n; window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio(r))}`, "_blank"); };
   const csv = () => {
     const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const righeCsv = [["Data", "Nome", "Email", "WhatsApp", "Servizio", "Obiettivo", "Mese gratis", "Contattata"].map(q).join(";"), ...righe.map((r) => [r.created_at.slice(0, 10), r.nome, r.email, r.whatsapp, servTxt[r.servizio] || "", r.obiettivo, r.promo_mese_gratis ? "sì" : "no", r.contattata ? "sì" : "no"].map(q).join(";"))];
+    const righeCsv = [["Data", "Nome", "Email", "WhatsApp", "Servizio", "Pacchetto", "Obiettivo", "Mese gratis", "Contattata"].map(q).join(";"), ...righe.map((r) => [r.created_at.slice(0, 10), r.nome, r.email, r.whatsapp, servTxt[r.servizio] || "", r.pacchetto, r.obiettivo, r.promo_mese_gratis ? "sì" : "no", r.contattata ? "sì" : "no"].map(q).join(";"))];
     scaricaFile(`lista-attesa-${formatDataLocale(new Date())}.csv`, "\uFEFF" + righeCsv.join("\n"), "text/csv");
+  };
+  const salva = async () => {
+    if (!f.nome.trim()) return;
+    const { error } = await supabase.from("lista_attesa").insert({ nome: f.nome.trim(), email: f.email.trim() || null, whatsapp: f.whatsapp.trim() || null, servizio: "online", pacchetto: f.pacchetto || null, obiettivo: f.nota.trim() || null, consenso: true, promo_mese_gratis: promoDi(f.data), created_at: `${f.data}T12:00:00Z` });
+    if (error) { avviso(error.code === "23505" ? "Questa email è già in lista 🫶🏻" : "Non sono riuscita a salvare, riprova."); return; }
+    setF({ ...f, nome: "", email: "", whatsapp: "", nota: "" }); setAggiungi(false); carica();
+  };
+  const importa = async () => {
+    const oggi = formatDataLocale(new Date());
+    const nuoveR = testo.split("\n").map((riga) => riga.split(/[;\t]/).map((x) => x.trim())).filter((c) => c[0]).map((c) => {
+      const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(c[4] || "");
+      const d = m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : oggi;
+      return { nome: c[0], email: c[1] || null, whatsapp: c[2] || null, servizio: "online", pacchetto: ["Mensile", "Trimestrale", "Semestrale"].find((x) => x.toLowerCase() === (c[3] || "").toLowerCase()) || null, consenso: true, promo_mese_gratis: promoDi(d), created_at: `${d}T12:00:00Z` };
+    });
+    if (!nuoveR.length) return;
+    const { error } = await supabase.from("lista_attesa").insert(nuoveR);
+    if (error) { avviso(error.code === "23505" ? "Una delle email è già in lista: controlla e riprova." : "Import non riuscito: controlla l'elenco e riprova."); return; }
+    setTesto(""); setIncolla(false); avviso(`Aggiunte ${nuoveR.length} persone ✨`); carica();
+  };
+  const avviaCliente = async () => {
+    const r = avvia.r;
+    if (!avvia.codice.trim()) { avviso("Serve un codice per la cliente."); return; }
+    const parti = r.nome.trim().split(/\s+/);
+    const { data: cl, error } = await supabase.from("clients").insert({
+      codice: avvia.codice.trim(), nome: parti[0], cognome: parti.slice(1).join(" "), email: r.email || null, telefono: r.whatsapp || null,
+      tipo_servizio: "online", piano: avvia.piano || "", data_inizio: avvia.data_inizio || null, stato_pacchetto: "in attivazione", mesi_omaggio: r.promo_mese_gratis ? 1 : 0,
+    }).select("id").single();
+    if (error || !cl) { avviso("Non sono riuscita a creare la cliente: " + (error?.message || "riprova")); return; }
+    await supabase.from("lista_attesa").update({ client_id: cl.id, contattata: true }).eq("id", r.id);
+    setAvvia(null); avviso(`${parti[0]} è ora tra le tue clienti ✨`); carica(); onChanged && onChanged();
   };
   return (
     <Sezione id="lista_attesa" titolo="Lista d'attesa" conteggio={nuove} aperta={false} destra={righe.length ? <button onClick={csv} className="text-[11px] text-sky-600 font-medium">Scarica CSV</button> : null}>
       <div className="space-y-2">
         <p className="text-slate-400 text-[11px]">Link da mettere nelle storie: <span className="font-medium text-slate-600">{window.location.origin}/?lista=1</span></p>
+        <p className="text-slate-500 text-xs">Posto riservato senza pagamento anticipato. Chi si iscrive entro il 31/12 ha 1 mese gratuito: si aggiunge da solo alla scadenza quando registri il primo pagamento.</p>
+        <div className="flex gap-2">
+          <button onClick={() => { setAggiungi(!aggiungi); setIncolla(false); }} className="flex-1 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>+ Aggiungi</button>
+          <button onClick={() => { setIncolla(!incolla); setAggiungi(false); }} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Incolla elenco</button>
+        </div>
+        {aggiungi && (
+          <Card className="p-3 space-y-1.5">
+            <input value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Nome e cognome" className={inp} />
+            <div className="grid grid-cols-2 gap-1.5"><input value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} placeholder="WhatsApp" className={inp} /><input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="Email" className={inp} /></div>
+            <div className="grid grid-cols-2 gap-1.5"><select value={f.pacchetto} onChange={(e) => setF({ ...f, pacchetto: e.target.value })} className={inp}><option>Mensile</option><option>Trimestrale</option><option>Semestrale</option></select><input type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} className={inp} /></div>
+            <input value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} placeholder="Obiettivo o nota (facoltativo)" className={inp} />
+            <button onClick={salva} disabled={!f.nome.trim()} className="w-full py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Salva in lista</button>
+          </Card>
+        )}
+        {incolla && (
+          <Card className="p-3 space-y-1.5">
+            <p className="text-[11px] text-slate-500">Una persona per riga, separando con punto e virgola: <b>Nome Cognome; email; whatsapp; pacchetto; data iscrizione</b>. Solo il nome è obbligatorio. Data come 15/12/2026 (se manca metto oggi).</p>
+            <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={6} className={inp} placeholder={"Giulia Rossi; giulia@mail.it; 3331234567; Trimestrale; 10/12/2026"} />
+            <button onClick={importa} disabled={!testo.trim()} className="w-full py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Aggiungi alla lista</button>
+          </Card>
+        )}
+        {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
         {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna iscritta per ora.</Card>}
         {righe.map((r) => (
-          <Card key={r.id} className={`p-3 space-y-1 ${r.contattata ? "opacity-60" : ""}`}>
+          <Card key={r.id} className={`p-3 space-y-1 ${r.contattata || r.client_id ? "opacity-70" : ""}`}>
             <div className="flex items-center justify-between gap-2">
               <p className="font-medium text-slate-700 text-sm">{r.nome}</p>
               <span className="text-[11px] text-slate-400">{new Date(r.created_at).toLocaleDateString("it-IT")}</span>
             </div>
-            <p className="text-xs text-slate-500">{servTxt[r.servizio] || ""}{r.promo_mese_gratis ? " · 🎁 mese gratis" : ""}</p>
-            <p className="text-xs"><a href={`mailto:${r.email}`} className="text-sky-600">{r.email}</a>{r.whatsapp ? <> · <a href={`https://wa.me/${String(r.whatsapp).replace(/[^\d]/g, "")}`} target="_blank" rel="noreferrer" className="text-sky-600">{r.whatsapp}</a></> : null}</p>
-            {r.obiettivo && <p className="text-xs text-slate-500 italic">«{r.obiettivo}»</p>}
-            <div className="flex gap-3 pt-1">
-              <button onClick={() => segna(r)} className="text-xs font-medium text-sky-700">{r.contattata ? "↩ Da ricontattare" : "✓ Contattata"}</button>
-              <button onClick={() => elimina(r)} className="text-xs text-slate-400">Elimina</button>
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#E1EEFB", color: "#27466D" }}>{r.client_id ? "Avviata" : "Posto riservato"}</span>
+              {r.promo_mese_gratis && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>🎁 1 mese gratuito</span>}
+              <span className="text-xs text-slate-500">{[servTxt[r.servizio], r.pacchetto].filter(Boolean).join(" · ")}</span>
             </div>
+            <p className="text-xs">{r.email && <a href={`mailto:${r.email}`} className="text-sky-600">{r.email}</a>}{r.whatsapp ? <>{r.email ? " · " : ""}<span className="text-slate-500">{r.whatsapp}</span></> : null}</p>
+            {r.obiettivo && <p className="text-xs text-slate-500 italic">«{r.obiettivo}»</p>}
+            {avvia?.r.id === r.id ? (
+              <div className="rounded-xl p-2 space-y-1.5" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+                <p className="text-[11px] text-slate-500">Crea la cliente online{r.promo_mese_gratis ? ": il mese gratuito si aggiunge da solo alla scadenza dopo il primo pagamento" : ""}.</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input value={avvia.codice} onChange={(e) => setAvvia({ ...avvia, codice: e.target.value })} placeholder="Codice cliente" className={inp} />
+                  <select value={avvia.piano} onChange={(e) => setAvvia({ ...avvia, piano: e.target.value })} className={inp}><option value="">Piano…</option><option>Mensile</option><option>Trimestrale</option><option>Semestrale</option></select>
+                </div>
+                <div><label className="text-[11px] text-slate-500">Data di inizio</label><input type="date" value={avvia.data_inizio} onChange={(e) => setAvvia({ ...avvia, data_inizio: e.target.value })} className={inp} /></div>
+                <div className="flex gap-2"><button onClick={avviaCliente} className="flex-1 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: "#27466D" }}>Crea cliente</button><button onClick={() => setAvvia(null)} className="px-3 text-xs text-slate-500">Annulla</button></div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-3 pt-1 items-center">
+                {!r.client_id && r.whatsapp && <button onClick={() => wa(r)} className="text-xs font-medium text-sky-700">Messaggio WhatsApp</button>}
+                {!r.client_id && <button onClick={() => setAvvia({ r, codice: "", piano: r.pacchetto || "", data_inizio: "" })} className="text-xs font-semibold" style={{ color: "#27466D" }}>Avvia (dopo il pagamento)</button>}
+                <button onClick={() => segna(r)} className="text-xs font-medium text-sky-700">{r.contattata ? "↩ Da ricontattare" : "✓ Contattata"}</button>
+                <button onClick={() => elimina(r)} className="text-xs text-slate-400">Elimina</button>
+              </div>
+            )}
           </Card>
         ))}
       </div>
     </Sezione>
   );
 }
-
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
