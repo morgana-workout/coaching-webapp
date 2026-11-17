@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
-import { X, Plus } from "lucide-react";
+import { X, Plus, Utensils, ClipboardList, TrendingUp, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { RicetteVista, RicettaDettaglio, PastiVista, SceltaAggiunta, SalvaPastoModal, inserisciPasto } from "./MacrosExtra";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine,
@@ -53,6 +53,8 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
   const [pasti, setPasti] = useState([]);
   const [ricettaAperta, setRicettaAperta] = useState(null);
   const [date, setDate] = useState(todayStr());
+  const [macroOb, setMacroOb] = useState(null);
+  const [sez, setSez] = useState(vistaIniziale === "piano" && pianoNode ? "piano" : "oggi"); // oggi | piano | storico | altro | ricette | pasti | libreria | spesa
 
   const carica = async () => {
     if (senzaDiario && !soloPianoERicette) { setCaricando(false); return; }
@@ -86,7 +88,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
     // Obiettivo = kcal del piano nutrizionale attivo (se c'è); altrimenti nessun obiettivo
     let ob = null;
     if (cl?.nutrizione_attiva !== false) {
-      const { data: piani } = await supabase.from("nutrition_plans").select("kcal, data_inizio, data_fine, data_aggiornamento, created_at").eq("client_id", clientId);
+      const { data: piani } = await supabase.from("nutrition_plans").select("kcal, proteine_g, carboidrati_g, grassi_g, data_inizio, data_fine, data_aggiornamento, created_at").eq("client_id", clientId);
       const oggi = todayStr();
       const k = (r) => r.data_inizio || r.data_aggiornamento || "";
       const iniz = (piani || []).filter((r) => r.kcal != null && k(r) && k(r) <= oggi);
@@ -94,6 +96,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
       const pool = validi.length ? validi : iniz;
       const att = [...pool].sort((a, b) => k(b).localeCompare(k(a)) || (b.created_at || "").localeCompare(a.created_at || ""))[0];
       ob = att ? Number(att.kcal) : null;
+      setMacroOb(att && att.proteine_g != null && att.carboidrati_g != null && att.grassi_g != null ? { p: Number(att.proteine_g), c: Number(att.carboidrati_g), g: Number(att.grassi_g) } : null);
     }
     setObiettivo(ob);
     setCaricando(false);
@@ -109,6 +112,78 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
   if (caricando) return <Spinner />;
 
   if (senzaDiario && !soloPianoERicette) return <div>{pianoNode}</div>;
+
+  if (!isAdmin && !senzaDiario && !soloPianoERicette) {
+    const vociOggi = vociPerGiorno[date] || [];
+    const tot = vociOggi.reduce((a, v) => ({ kcal: a.kcal + Number(v.kcal || 0), p: a.p + Number(v.proteine || 0), c: a.c + Number(v.carboidrati || 0), g: a.g + Number(v.grassi || 0) }), { kcal: 0, p: 0, c: 0, g: 0 });
+    const lun = (() => { const d = parseDate(date); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return fmtDate(d); })();
+    const settimana = Array.from({ length: 7 }, (_, i) => addDays(lun, i));
+    const NOMI = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+    const sub = ["ricette", "pasti", "libreria", "spesa"].includes(sez);
+    const TITOLI = { ricette: "Ricette", pasti: "Pasti standard", libreria: "I miei alimenti", spesa: "Lista della spesa" };
+    const voceBarra = (k, label, Icona, attiva) => (
+      <button key={k} onClick={() => setSez(k)} className="flex-1 flex flex-col items-center gap-0.5 py-1.5" style={{ color: attiva ? "#27466D" : "#7a8da3" }}>
+        <Icona size={24} strokeWidth={attiva ? 2.2 : 1.7} />
+        <span className="text-[11px] font-semibold">{label}</span>
+      </button>
+    );
+    return (
+      <div className="space-y-3 pb-28">
+        <TestataNutrizione tot={tot} ob={obiettivo} macroOb={macroOb} data={date} />
+        {sez === "oggi" && (
+          <>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setDate(addDays(date, -7))} className="w-7 h-14 flex items-center justify-center" style={{ color: "#7a8da3" }}><ChevronLeft size={18} /></button>
+              <div className="flex-1 grid grid-cols-7 gap-1">
+                {settimana.map((d, i) => { const on = d === date; const oggiG = d === todayStr(); return (
+                  <button key={d} onClick={() => setDate(d)} className="rounded-xl py-1.5 text-center" style={on ? { background: "#27466D", color: "#fff", border: "1px solid #27466D" } : { background: "#fff", color: "#7a8da3", border: oggiG ? "1.5px solid #4F8FD0" : "1px solid #C9E0F7" }}>
+                    <span className="block text-[10px]">{NOMI[i]}</span><span className="block text-sm font-bold" style={{ color: on ? "#fff" : "#27466D" }}>{d.slice(8)}</span>
+                  </button>
+                ); })}
+              </div>
+              <button onClick={() => setDate(addDays(date, 7))} className="w-7 h-14 flex items-center justify-center" style={{ color: "#7a8da3" }}><ChevronRight size={18} /></button>
+            </div>
+            <DiarioGiorno compatto
+              clientId={clientId} isAdmin={isAdmin} date={date} setDate={setDate}
+              foods={foods} vociGiorno={vociOggi} vociIeri={vociPerGiorno[addDays(date, -1)] || []}
+              obiettivo={obiettivo} onCambiato={carica} ricette={ricette} pasti={pasti}
+            />
+          </>
+        )}
+        {sez === "piano" && pianoNode}
+        {sez === "storico" && <StoricoKcal voci={voci} obiettivo={obiettivo} onVaiAGiorno={(d) => { setDate(d); setSez("oggi"); }} />}
+        {sez === "altro" && (
+          <div className="rounded-3xl p-4 space-y-3" style={{ background: "#fff", border: "1.5px solid #C9E0F7" }}>
+            <p className="text-sm font-bold" style={{ color: "#27466D" }}>Altri strumenti</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[["ricette", "Ricette", "Idee con i macro già calcolati"], ["pasti", "Pasti standard", "I tuoi pasti ricorrenti"], ["libreria", "I miei alimenti", "Aggiungi anche col barcode 📷"], ["spesa", "Lista della spesa", "Dalle ricette che scegli"]].map(([k, t, d]) => (
+                <button key={k} onClick={() => setSez(k)} className="text-left rounded-2xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+                  <span className="block text-sm font-bold" style={{ color: "#27466D" }}>{t}</span><span className="block text-[11px] mt-0.5" style={{ color: "#7a8da3" }}>{d}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {sub && (
+          <>
+            <button onClick={() => setSez("altro")} className="flex items-center gap-1 text-sm font-semibold" style={{ color: "#3F78B3" }}><ChevronLeft size={16} /> {TITOLI[sez]}</button>
+            {sez === "ricette" && <RicetteVista ricette={ricette} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} aperta={ricettaAperta} setAperta={setRicettaAperta} senzaLog={false} />}
+            {sez === "pasti" && <PastiVista pasti={pasti} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} />}
+            {sez === "libreria" && <LibreriaAlimenti clientId={clientId} foods={foods} onCambiato={carica} />}
+            {sez === "spesa" && <ListaSpesa clientId={clientId} ricette={ricette} pasti={pasti} />}
+          </>
+        )}
+        <div className="fixed left-0 right-0 bottom-0 z-[55]" style={{ background: "#fff", borderTop: "1px solid #C9E0F7", paddingBottom: "calc(env(safe-area-inset-bottom) + 6px)" }}>
+          <div className="max-w-md mx-auto flex px-2 pt-1">
+            {voceBarra("oggi", "Oggi", Utensils, sez === "oggi")}
+            {pianoNode && voceBarra("piano", "Piano", ClipboardList, sez === "piano")}
+            {voceBarra("storico", "Storico", TrendingUp, sez === "storico")}
+            {voceBarra("altro", "Altro", MoreHorizontal, sez === "altro" || sub)}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -189,7 +264,37 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
   );
 }
 
-function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onCambiato, ricette = [], pasti = [] }) {
+/* Testata sempre visibile: kcal rimaste (anello) e barre dei macros rispetto al piano */
+function TestataNutrizione({ tot, ob, macroOb, data }) {
+  const R = 38, C = 2 * Math.PI * R;
+  const frac = ob ? Math.min(1, tot.kcal / ob) : 0;
+  const resta = ob ? Math.round(ob - tot.kcal) : null;
+  const barre = [["Proteine", tot.p, macroOb?.p, "#fff"], ["Carboidrati", tot.c, macroOb?.c, "#C9E0F7"], ["Grassi", tot.g, macroOb?.g, "#8EBDED"]];
+  const label = parseDate(data).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
+  return (
+    <div className="rounded-3xl p-4 text-white" style={{ background: "#27466D" }}>
+      <p className="text-xs capitalize" style={{ color: "#C9E0F7" }}>{data === todayStr() ? "Oggi" : label}{ob ? ` · piano ${num(ob)} kcal` : ""}</p>
+      <div className="flex items-center gap-4 mt-2">
+        <svg width="96" height="96" viewBox="0 0 96 96" className="flex-shrink-0">
+          <circle cx="48" cy="48" r={R} fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="9" />
+          {ob && <circle cx="48" cy="48" r={R} fill="none" stroke="#C9E0F7" strokeWidth="9" strokeLinecap="round" strokeDasharray={`${C * frac} ${C}`} transform="rotate(-90 48 48)" />}
+          <text x="48" y={ob ? 47 : 53} textAnchor="middle" fill="#fff" fontSize="21" fontWeight="700">{ob ? Math.abs(resta) : Math.round(tot.kcal)}</text>
+          <text x="48" y="62" textAnchor="middle" fill="#C9E0F7" fontSize="9">{ob ? (resta >= 0 ? "kcal rimaste" : "kcal oltre") : "kcal"}</text>
+        </svg>
+        <div className="flex-1 space-y-2.5">
+          {barre.map(([nome, v, obj, col]) => (
+            <div key={nome}>
+              <div className="flex justify-between text-xs font-semibold"><span>{nome}</span><span style={{ color: "#C9E0F7", fontWeight: 400 }}>{num(round1(v))}{obj ? ` / ${num(obj)}` : ""} g</span></div>
+              <div className="h-2 rounded-full mt-1 overflow-hidden" style={{ background: "rgba(255,255,255,.2)" }}><div className="h-full rounded-full" style={{ width: `${obj ? Math.min(100, (v / obj) * 100) : 0}%`, background: col }} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, vociIeri, obiettivo, onCambiato, ricette = [], pasti = [], compatto = false }) {
   const [sheet, setSheet] = useState(null); // { meal } | { meal, food, amt, entryId }
   const [scelta, setScelta] = useState(null); // { meal } scelta tra pasto standard / ricetta / alimento
   const [ricettaDa, setRicettaDa] = useState(null); // { r, meal }
@@ -220,13 +325,13 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      {!compatto && <div className="flex items-center gap-2">
         <button onClick={() => setDate(addDays(date, -1))} className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500">‹</button>
         <div className="flex-1 text-center text-sm font-medium text-slate-700 capitalize">{label}</div>
         <button onClick={() => setDate(addDays(date, 1))} className="w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-500">›</button>
-      </div>
+      </div>}
 
-      <Card className="p-4 space-y-3">
+      {!compatto && <Card className="p-4 space-y-3">
         <div className="flex items-baseline gap-2">
           <span className="text-4xl font-semibold text-slate-800">{Math.round(totaleKcal)}</span>
           <span className="text-slate-400 text-sm">kcal {date === todayStr() ? "oggi" : "in questo giorno"}</span>
@@ -246,7 +351,7 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
             </div>
           </div>
         ) : null}
-      </Card>
+      </Card>}
 
       {mostraTotali ? (
         <TotaliGiorno clientId={clientId} isAdmin={isAdmin} date={date} esistente={totaleManuale} onChiudi={() => setMostraTotali(false)} onFatto={() => { setMostraTotali(false); onCambiato(); }} />
@@ -265,11 +370,13 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
           const totMeal = list.reduce((a, v) => a + Number(v.kcal), 0);
           const ieriMeal = vociIeri.filter((v) => v.pasto === key);
           return (
-            <div key={key}>
-              <div className="flex items-center justify-between border-b-2 border-slate-800 pb-1.5 mb-2">
-                <h3 className="font-semibold text-slate-800">{nome}</h3>
-                <span className="text-slate-400 text-sm">{Math.round(totMeal)} kcal</span>
-                <button onClick={() => setScelta({ meal: key })} className="text-sky-600 text-sm font-medium flex items-center gap-1"><Plus size={14} /> Aggiungi</button>
+            <div key={key} className={compatto ? "rounded-2xl p-3" : ""} style={compatto ? { background: "#fff", border: "1px solid #C9E0F7" } : undefined}>
+              <div className={compatto ? "flex items-center justify-between pb-1 mb-1" : "flex items-center justify-between border-b-2 border-slate-800 pb-1.5 mb-2"}>
+                <h3 className="font-semibold" style={{ color: compatto ? "#27466D" : undefined }}>{nome}</h3>
+                <span className="text-slate-400 text-sm ml-auto mr-3">{Math.round(totMeal)} kcal</span>
+                {compatto
+                  ? <button onClick={() => setScelta({ meal: key })} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#E1EEFB", color: "#27466D" }}><Plus size={18} /></button>
+                  : <button onClick={() => setScelta({ meal: key })} className="text-sky-600 text-sm font-medium flex items-center gap-1"><Plus size={14} /> Aggiungi</button>}
               </div>
               {!list.length && (
                 <div className="flex items-center justify-between text-slate-400 text-sm py-2">
@@ -295,6 +402,9 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
         })}
       </div>
 
+      {compatto && !scelta && !sheet && !ricettaDa && !salvaPasto && (
+        <button onClick={() => { const h = new Date().getHours(); setScelta({ meal: h < 10 ? "colazione" : h < 15 ? "pranzo" : h < 18 ? "spuntini" : "cena" }); }} className="fixed z-[56] right-4 rounded-full px-5 py-3 text-sm font-bold text-white shadow-xl" style={{ background: "#27466D", bottom: "calc(env(safe-area-inset-bottom) + 84px)" }}>+ Aggiungi cibo</button>
+      )}
       {scelta && (
         <SceltaAggiunta meal={scelta.meal} pasti={pasti} ricette={ricette}
           onChiudi={() => setScelta(null)}
@@ -387,7 +497,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
   const creato = (nuovoAlimento) => { setNuovo(false); onSalvato(); if (nuovoAlimento) scegli(nuovoAlimento); };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) chiudi(); }}>
+    <div className="fixed inset-0 bg-black/50 z-[65] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) chiudi(); }}>
       <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">
         {nuovo ? (
           <FormAlimento clientId={clientId} alimento={null} nomeIniziale={q.trim()} onAnnulla={() => setNuovo(false)} onSalvato={creato} />

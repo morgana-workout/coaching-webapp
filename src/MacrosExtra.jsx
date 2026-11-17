@@ -52,7 +52,7 @@ function Card({ children, className = "" }) {
 }
 function Foglio({ children, onChiudi, alto = false }) {
   return (
-    <div className={`fixed inset-0 bg-black/50 ${alto ? "z-[60]" : "z-50"} flex items-end sm:items-center justify-center`} onClick={(e) => { if (e.target === e.currentTarget) onChiudi(); }}>
+    <div className={`fixed inset-0 bg-black/50 ${alto ? "z-[68]" : "z-[65]"} flex items-end sm:items-center justify-center`} onClick={(e) => { if (e.target === e.currentTarget) onChiudi(); }}>
       <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">{children}</div>
     </div>
   );
