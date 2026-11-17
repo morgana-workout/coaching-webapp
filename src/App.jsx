@@ -1719,10 +1719,21 @@ function analizzaAndamento(ordinati) {
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-const LABEL_OBIETTIVO = { definizione: "Definizione", mantenimento: "Mantenimento", massa: "Massa", reverse: "Reverse" };
-function labelObiettivo(o) { return LABEL_OBIETTIVO[o] || o; }
+// Obiettivi della cliente: Dimagrimento, Aumento massa muscolare, Ricomposizione corporea, Programmazione, Forza.
+// I vecchi valori (definizione, massa, mantenimento, reverse) restano riconosciuti e vengono tradotti nei nuovi.
+const OBIETTIVI = [
+  { v: "dimagrimento", label: "Dimagrimento" },
+  { v: "aumento_massa", label: "Aumento massa muscolare" },
+  { v: "ricomposizione", label: "Ricomposizione corporea" },
+  { v: "programmazione", label: "Programmazione" },
+  { v: "forza", label: "Forza" },
+];
+const OBIETTIVO_LEGACY = { definizione: "dimagrimento", massa: "aumento_massa", mantenimento: "ricomposizione", reverse: "ricomposizione" };
+function normalizzaObiettivo(o) { return OBIETTIVO_LEGACY[o] || o || null; }
+function labelObiettivo(o) { const n = normalizzaObiettivo(o); return OBIETTIVI.find((x) => x.v === n)?.label || o || ""; }
 
-function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabel = "nelle ultime settimane") {
+function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivoGrezzo, finestraLabel = "nelle ultime settimane") {
+  const obiettivo = normalizzaObiettivo(obiettivoGrezzo);
   const frasi = [];
   if (tPeso.oscillante) {
     frasi.push(`Il peso ha avuto alti e bassi ${finestraLabel} — è normale, dipende da ritenzione idrica, ciclo, stress o digestione — ma guardando l'insieme dei dati:`);
@@ -1730,23 +1741,6 @@ function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabe
   const pesoTxt = tPeso.direzione === "calo" ? "il peso è sceso" : tPeso.direzione === "aumento" ? "il peso è salito" : tPeso.direzione === "stabile" ? "il peso è rimasto stabile" : null;
   const vitaTxt = tVita.direzione === "calo" ? "la circonferenza vita si è ridotta" : tVita.direzione === "aumento" ? "la circonferenza vita è aumentata" : tVita.direzione === "stabile" ? "la circonferenza vita è rimasta stabile" : null;
   const muscTxt = tMuscolo.direzione === "calo" ? "le circonferenze di braccio/coscia sono leggermente calate" : tMuscolo.direzione === "aumento" ? "le circonferenze di braccio/coscia sono aumentate" : tMuscolo.direzione === "stabile" ? "le circonferenze di braccio/coscia si sono mantenute" : null;
-
-  if (obiettivo === "reverse") {
-    // In reverse diet l'obiettivo è far risalire le calorie in modo controllato dopo una definizione
-    // (o una gara): un aumento graduale di peso/vita qui non è un problema, è il segnale che il
-    // metabolismo si sta riattivando — il messaggio va quindi capovolto rispetto a una definizione.
-    if (tPeso.direzione === "aumento" && (tVita.direzione === "aumento" || tVita.direzione === "stabile")) {
-      frasi.push(`${cap(pesoTxt)}${tVita.direzione === "aumento" ? " e " + vitaTxt : ""}: in una fase di reverse è proprio l'andamento atteso. Le calorie stanno risalendo e il corpo si sta riequilibrando dopo la definizione — non è "ripreso il grasso perso", è il metabolismo che si riattiva.`);
-    } else if (tPeso.direzione === "stabile") {
-      frasi.push("Il peso è rimasto stabile in questa fase di reverse: è normale, può volerci qualche settimana in più prima che si veda la risalita. L'importante è seguire l'aumento calorico programmato con la coach.");
-    } else if (tPeso.direzione === "calo") {
-      frasi.push("Il peso è ancora in calo nonostante la fase di reverse: capita nelle prime settimane, ma se continua parlane con la coach — potrebbe servire un aggiustamento delle calorie.");
-    } else {
-      frasi.push("Servono ancora un paio di check in questa fase di reverse per vedere un trend chiaro.");
-    }
-    if (tMuscolo.direzione === "aumento") frasi.push("Le circonferenze muscolari che crescono sono un ottimo segnale in questa fase.");
-    return frasi.join(" ");
-  }
 
   if (tVita.direzione === "calo" && (tMuscolo.direzione === "stabile" || tMuscolo.direzione === "aumento")) {
     frasi.push(`${cap(vitaTxt)}${muscTxt ? " mentre " + muscTxt : ""}: è il segno di una ricomposizione corporea in corso — il grasso cala e la massa muscolare tiene o cresce, anche se ${pesoTxt || "il peso da solo non racconta tutta la storia"}. La definizione che si vede nelle foto è proprio questo: meno grasso attorno al muscolo che c'è già.`);
@@ -1764,13 +1758,18 @@ function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabe
     else frasi.push("Servono ancora un paio di check per vedere un trend chiaro.");
   }
 
-  if (obiettivo === "definizione") {
-    if (tVita.direzione === "calo") frasi.push("Il trend è coerente con l'obiettivo attuale di definizione.");
-    else if (tVita.direzione === "aumento") frasi.push("Rispetto all'obiettivo di definizione, la vita in aumento merita attenzione: parlane con la coach per eventuali aggiustamenti.");
-  } else if (obiettivo === "massa") {
-    if (tMuscolo.direzione === "aumento" || tPeso.direzione === "aumento") frasi.push("Il trend è coerente con l'obiettivo attuale di aumento massa.");
-  } else if (obiettivo === "mantenimento") {
-    if (tPeso.direzione === "stabile" && tVita.direzione === "stabile") frasi.push("In linea con l'obiettivo attuale di mantenimento.");
+  if (obiettivo === "dimagrimento") {
+    if (tVita.direzione === "calo") frasi.push("Il trend è coerente con l'obiettivo attuale di dimagrimento.");
+    else if (tVita.direzione === "aumento") frasi.push("Rispetto all'obiettivo di dimagrimento, la vita in aumento merita attenzione: parlane con la coach per eventuali aggiustamenti.");
+  } else if (obiettivo === "aumento_massa") {
+    if (tMuscolo.direzione === "aumento" || tPeso.direzione === "aumento") frasi.push("Il trend è coerente con l'obiettivo attuale di aumento della massa muscolare.");
+  } else if (obiettivo === "ricomposizione") {
+    if (tVita.direzione === "calo" && tMuscolo.direzione !== "calo") frasi.push("Il trend è coerente con l'obiettivo di ricomposizione corporea: riduzione della massa grassa con massa muscolare preservata.");
+    else if (tPeso.direzione === "stabile" && tVita.direzione === "stabile") frasi.push("Nella ricomposizione il peso può restare stabile anche con cambiamenti della composizione corporea: valuta anche circonferenze e foto.");
+  } else if (obiettivo === "forza") {
+    frasi.push("Con l'obiettivo di forza, il dato più importante è la progressione dei carichi nei fondamentali: il peso corporeo e le misure sono solo un contesto.");
+  } else if (obiettivo === "programmazione") {
+    frasi.push("In una fase di programmazione conta soprattutto la costanza nell'applicazione del programma: le misure vanno lette con calma, su più check.");
   }
 
   return frasi.join(" ");
@@ -4746,7 +4745,7 @@ function DossierCheck({ client, onClose }) {
           <div>
             <p className="font-semibold text-base leading-tight">Dossier check · {[client.nome, client.cognome].filter(Boolean).join(" ")}</p>
             <p className="text-slate-500 text-[11px]">
-              {[client.sesso === "M" ? "Uomo" : client.sesso ? "Donna" : null, eta ? `${eta} anni` : null, client.altezza_cm ? `${client.altezza_cm} cm` : null, client.obiettivo_attuale ? `Obiettivo: ${client.obiettivo_attuale}` : null].filter(Boolean).join(" · ")}
+              {[client.sesso === "M" ? "Uomo" : client.sesso ? "Donna" : null, eta ? `${eta} anni` : null, client.altezza_cm ? `${client.altezza_cm} cm` : null, client.obiettivo_attuale ? `Obiettivo: ${labelObiettivo(client.obiettivo_attuale)}` : null].filter(Boolean).join(" · ")}
             </p>
             <p className="text-slate-400 text-[11px]">{nCheck} check · {nFoto} foto · generato il {fmt(formatDataLocale(new Date()))}. Le foto sono in ordine: frontale, laterale destra, posteriore, laterale sinistra.</p>
           </div>
@@ -7213,7 +7212,7 @@ function suggerimentiFeedback(tags, obiettivoAttuale) {
   if (tags.includes("dolore")) out.push("Priorità alta: valutare in sessione, eventualmente sostituire esercizio o ridurre ROM/carico sulla zona interessata.");
   if (tags.includes("stanca") || tags.includes("troppo_lavoro")) {
     out.push("Allenamento: valutare deload leggero (-20/30% volume).");
-    out.push(obiettivoAttuale !== "definizione" ? "Alimentazione: valutare +20/30g carboidrati nei prossimi 3-4 giorni." : "Alimentazione: verificare sonno/aderenza prima di intervenire sui carboidrati.");
+    out.push(normalizzaObiettivo(obiettivoAttuale) !== "dimagrimento" ? "Alimentazione: valutare +20/30g carboidrati nei prossimi 3-4 giorni." : "Alimentazione: verificare sonno/aderenza prima di intervenire sui carboidrati.");
   }
   if (tags.includes("energica") || tags.includes("poco_lavoro")) out.push("Valutare un set extra o piccolo incremento carico/intensità.");
   if (tags.includes("vuole_aggiungere_giorno")) out.push("Valutare inserimento sessione aggiuntiva, contenuto da calibrare.");
@@ -7432,7 +7431,7 @@ function apriStampaScheda(client, scheda, trend, feedback) {
 <body>
   <div class="intestazione">
     <h1>${esc(client.nome)} ${esc(client.cognome)}</h1>
-    <p class="sottotitolo">Fase ${esc(client.fase_allenamento || "—")} · Livello ${esc(client.livello_allenamento || "—")} · Obiettivo: ${esc(client.obiettivo_attuale || "—")}</p>
+    <p class="sottotitolo">Fase ${esc(client.fase_allenamento || "—")} · Livello ${esc(client.livello_allenamento || "—")} · Obiettivo: ${esc(labelObiettivo(client.obiettivo_attuale) || "—")}</p>
   </div>
   ${righeGiorni}
   ${noteCoach}
@@ -7514,19 +7513,16 @@ function LivelloFaseObiettivo({ client, salvaCliente }) {
         </select>
         <input type="number" defaultValue={client.fase_allenamento || ""} onBlur={(e) => salvaCliente({ fase_allenamento: e.target.value ? Number(e.target.value) : null })} placeholder="Fase (numero)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
-      <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => {
+      <select defaultValue={normalizzaObiettivo(client.obiettivo_attuale) || ""} onBlur={(e) => {
         const nuovo = e.target.value || null;
-        if (nuovo === (client.obiettivo_attuale || null)) return; // niente da fare se non è cambiato
+        if (nuovo === (normalizzaObiettivo(client.obiettivo_attuale) || null)) return; // niente da fare se non è cambiato
         // Ogni cambio di obiettivo segna l'inizio di una nuova fase: l'andamento generale nella
         // scheda progressi guarda da questa data in poi, così un cut seguito da un reverse (o da
         // una massa) non si mescolano nello stesso trend.
         salvaCliente({ obiettivo_attuale: nuovo, obiettivo_dal: nuovo ? formatDataLocale(new Date()) : null });
       }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         <option value="">Obiettivo attuale...</option>
-        <option value="definizione">Definizione (cut)</option>
-        <option value="mantenimento">Mantenimento</option>
-        <option value="massa">Massa (bulk)</option>
-        <option value="reverse">Reverse (dopo definizione/gara)</option>
+        {OBIETTIVI.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
       </select>
       {client.obiettivo_dal && (
         <p className="text-[11px] text-slate-400">In questa fase dal {client.obiettivo_dal.split("-").reverse().join("/")} — l'andamento generale nella scheda progressi si basa sui check da questa data in poi.</p>
@@ -7821,7 +7817,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
       {mostraGeneratore && (
         <Card className="p-4 space-y-4">
           <p className="text-sm font-medium text-slate-700">Genera scheda automatica</p>
-          <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {client.obiettivo_attuale || "—"}</p>
+          <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {labelObiettivo(client.obiettivo_attuale) || "—"}</p>
 
           <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
             <div>
@@ -8016,7 +8012,7 @@ async function esportaPerAnalisiEsterna(client, setInCorso) {
     r.push("");
     r.push("## Profilo");
     r.push(`- Sesso: ${client.sesso || "-"} · Età: ${calcolaEta(client.data_nascita) ?? client.eta ?? "-"} · Altezza: ${n(client.altezza_cm, " cm")} · Peso iniziale: ${n(client.peso_kg, " kg")}`);
-    r.push(`- Servizio: ${client.tipo_servizio || "-"} · Obiettivo attuale: ${client.obiettivo_attuale || "-"} · Fase: ${client.fase_allenamento || "-"}`);
+    r.push(`- Servizio: ${client.tipo_servizio || "-"} · Obiettivo attuale: ${labelObiettivo(client.obiettivo_attuale) || "-"} · Fase: ${client.fase_allenamento || "-"}`);
     r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Livello attività: ${client.livello_attivita || "-"}`);
     r.push(`- Focus di crescita: ${(client.focus_crescita || []).join(", ") || "-"}`);
     r.push(`- Problematiche di salute: ${(client.problematiche_salute || []).join(", ") || "-"}${client.problematiche_salute_note ? " — " + client.problematiche_salute_note : ""}`);
@@ -8130,7 +8126,7 @@ async function esportaDatiCliente(client, setInCorso) {
   r.push(`- Sesso: ${client.sesso || "-"} · Età: ${calcolaEta(client.data_nascita) ?? client.eta ?? "-"} · Data nascita: ${client.data_nascita || "-"} · Altezza: ${client.altezza_cm || "-"} cm`);
   r.push(`- Tipo servizio: ${client.tipo_servizio || "-"} · Piano: ${client.piano || "-"}`);
   r.push(`- Livello attività: ${client.livello_attivita || "-"}`);
-  r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${client.obiettivo_attuale || "-"}`);
+  r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${labelObiettivo(client.obiettivo_attuale) || "-"}`);
   r.push(`- Focus di crescita: ${(client.focus_crescita || []).join(", ") || "-"}`);
   r.push(`- Problematiche di salute: ${(client.problematiche_salute || []).join(", ") || "-"}${client.problematiche_salute_note ? " — " + client.problematiche_salute_note : ""}`);
   r.push(`- Note particolari: ${client.note_particolari || "-"}`);
@@ -10992,7 +10988,7 @@ async function esportaExcelCompleto(clientId = null) {
 
   const fogli = [];
   fogli.push(["Clienti", [["Codice", "Nome", "Cognome", "Email", "Tipo servizio", "Piano", "Pacchetto lezioni", "Stato pacchetto", "Data inizio", "Data scadenza", "Altezza (cm)", "Peso iniziale (kg)", "Obiettivo"],
-    ...clienti.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, dt(c.data_inizio), dt(c.data_scadenza), num(c.altezza_cm), num(c.peso_kg), c.obiettivo_attuale || ""])]]);
+    ...clienti.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, dt(c.data_inizio), dt(c.data_scadenza), num(c.altezza_cm), num(c.peso_kg), labelObiettivo(c.obiettivo_attuale) || ""])]]);
 
   const checkOrd = [...checks].sort((a, b) => ordNome(a, b) || String(a.data_check).localeCompare(String(b.data_check)));
   fogli.push(["Check e misure", [["Cliente", "Data check", "Peso (kg)", "Spalle (cm)", "Petto (cm)", "Sopra ombelico (cm)", "Ombelico (cm)", "Sotto ombelico (cm)", "Glutei (cm)", "Coscia dx (cm)", "Braccio dx (cm)", "Collo (cm)", "Energia (1-5)", "Sonno (1-5)", "Aderenza cibo (1-5)", "Aderenza allenamento (1-5)", "Fase mestruale", "Stato", "Note cliente"],
@@ -11103,7 +11099,7 @@ async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}, o
     ["Nome", nomeCl], ["Codice", cl.codice], ["Email", cl.email], ["Telefono", cl.telefono], ["Sesso", cl.sesso],
     ["Data di nascita", dt(cl.data_nascita)], ["Altezza (cm)", num(cl.altezza_cm)], ["Peso iniziale (kg)", num(cl.peso_kg)], ["Città", cl.citta],
     ["Tipo servizio", cl.tipo_servizio], ["Piano", cl.piano], ["Pacchetto lezioni", cl.pacchetto_lezioni], ["Data inizio", dt(cl.data_inizio)], ["Data scadenza", dt(cl.data_scadenza)],
-    ["Livello allenamento", cl.livello_allenamento], ["Fase", cl.fase_allenamento], ["Obiettivo attuale", cl.obiettivo_attuale],
+    ["Livello allenamento", cl.livello_allenamento], ["Fase", cl.fase_allenamento], ["Obiettivo attuale", labelObiettivo(cl.obiettivo_attuale)],
     ["Focus di crescita", (cl.focus_crescita || []).join(", ")], ["Salute", [(cl.problematiche_salute || []).join(", "), cl.problematiche_salute_note].filter(Boolean).join(" — ")],
     ["Note particolari", cl.note_particolari], ["Esportato il", new Date()],
   ];
@@ -12765,7 +12761,6 @@ function CandidatureCoach({ onClientiCambiati }) {
   };
   const etichettaCondizione = (value) => (value === "altro" ? "Altro" : CONDIZIONI_SALUTE.find((c) => c.value === value)?.label || value);
   const ETICHETTE_SERVIZIO = { online: "Online", presenza: "In presenza", ibrido: "Ibrido" };
-  const ETICHETTE_OBIETTIVO = { definizione: "Definizione", mantenimento: "Ricomposizione corporea", massa: "Aumento massa" };
   const ETICHETTE_LIVELLO = { base: "Alle prime armi", intermedia: "Intermedia", avanzata: "Avanzata" };
   const ETICHETTE_ATTIVITA = { sedentario: "Sedentaria", intermedio: "Moderatamente attiva", attivo: "Molto attiva" };
 
@@ -12810,7 +12805,7 @@ function CandidatureCoach({ onClientiCambiati }) {
               {c.telefono ? " · " : ""}
               {c.telefono && <a href={`tel:${c.telefono}`} className="text-sky-600">{c.telefono}</a>}
             </p>
-            {c.obiettivo_attuale && <p>Obiettivo: {ETICHETTE_OBIETTIVO[c.obiettivo_attuale] || c.obiettivo_attuale}</p>}
+            {c.obiettivo_attuale && <p>Obiettivo: {labelObiettivo(c.obiettivo_attuale)}</p>}
             {c.livello_allenamento && <p>Livello: {ETICHETTE_LIVELLO[c.livello_allenamento] || c.livello_allenamento}</p>}
             {c.livello_attivita && <p>Attività quotidiana: {ETICHETTE_ATTIVITA[c.livello_attivita] || c.livello_attivita}</p>}
             {(c.altezza_cm || c.peso_kg) && (
@@ -12878,7 +12873,7 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
       altezza_cm: candidatura.altezza_cm || null, peso_kg: candidatura.peso_kg || null,
       citta: candidatura.citta || null, tipo_lavoro: candidatura.tipo_lavoro || null,
       livello_attivita: candidatura.livello_attivita || null, livello_allenamento: candidatura.livello_allenamento || null,
-      obiettivo_attuale: candidatura.obiettivo_attuale || null, sede_abituale: candidatura.sede_abituale || null,
+      obiettivo_attuale: normalizzaObiettivo(candidatura.obiettivo_attuale), sede_abituale: candidatura.sede_abituale || null,
       problematiche_salute: candidatura.problematiche_salute || null,
       problematiche_salute_note: candidatura.problematiche_salute_note || null,
       note_particolari: candidatura.note || null,
@@ -13961,7 +13956,7 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoV
           <input value={cognome} onChange={(e) => setCognome(e.target.value)} onBlur={() => cognome !== (cl.cognome || "") && salva({ cognome: cognome.trim() })} placeholder="Cognome" className="flex-1 min-w-0 bg-transparent font-semibold text-slate-800 text-base border-b border-dashed border-slate-300 focus:outline-none focus:border-sky-500" />
         </div>
         <div className="flex flex-wrap gap-1.5 mt-2">
-          {cl.obiettivo_attuale && chip(cl.obiettivo_attuale)}
+          {cl.obiettivo_attuale && chip(labelObiettivo(cl.obiettivo_attuale))}
           {cl.livello_allenamento && chip(cl.livello_allenamento)}
           {salute.map((x) => <span key={x}>{chip(x)}</span>)}
         </div>
