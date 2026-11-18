@@ -8323,6 +8323,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "riepilogo" && (
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
+          <BilancioSettimanaleCliente client={client} />
           <AndamentoCliente client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-2 gap-4 items-start">
             <ConsigliProgramma client={client} />
@@ -10794,6 +10795,195 @@ function ListaAttesaCoach({ onChanged, aperta = false }) {
     </Sezione>
   );
 }
+// ───────────────────────────────────────────────────────────────────────────
+// Bilancio settimanale (solo coach): le risposte che le clienti mandano su WhatsApp il lunedì
+// ───────────────────────────────────────────────────────────────────────────
+const AREE_BILANCIO = ["Allenamenti", "Alimentazione", "Passi", "Acqua", "Sonno", "Stress"];
+const MESI_BREVI = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
+function lunediDi(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+function spostaGiorni(str, n) { const [y, m, g] = str.split("-").map(Number); const x = new Date(y, m - 1, g); x.setDate(x.getDate() + n); return formatDataLocale(x); }
+// La settimana "di riferimento" è l'ultima conclusa (lunedì–domenica); con offset si scorre indietro/avanti.
+function settimanaRiferimento(offset = 0) { return spostaGiorni(formatDataLocale(lunediDi(new Date())), -7 + offset * 7); }
+function etichettaSettimana(lun) {
+  const [y, m, g] = lun.split("-").map(Number); const a = new Date(y, m - 1, g); const b = new Date(y, m - 1, g + 6);
+  return a.getMonth() === b.getMonth() ? `${a.getDate()}–${b.getDate()} ${MESI_BREVI[b.getMonth()]}` : `${a.getDate()} ${MESI_BREVI[a.getMonth()]} – ${b.getDate()} ${MESI_BREVI[b.getMonth()]}`;
+}
+const EMOJI_ESITO = { sistemato: "✅", meta: "🔸", no: "❌" };
+function testoLunedi(nome, daSistemare) {
+  const n = (nome || "").split(" ")[0];
+  if (daSistemare) return `Buongiorno ${n}! ✨ Settimana scorsa volevi sistemare «${daSistemare}». Com'è andata?\n✅ Sistemato\n🔸 A metà\n❌ Non ci sono riuscita\nDimmelo senza problemi, serve solo a capire come aiutarti 🫶🏻\n\nPoi, come sempre:\n1️⃣ Com'è andata la settimana, da 1 a 10?\n2️⃣ Cosa hai rispettato di più e di meno?\n3️⃣ Cosa vuoi sistemare questa settimana?`;
+  return `Buongiorno ${n}! ✨ Nuova settimana, nuove occasioni 💪🏻 Mi dedichi 1 minuto? Così capisco come stai andando e come aiutarti al meglio 🫶🏻\n\nCom'è andata la settimana appena finita:\n1️⃣ Da 1 a 10, com'è andata?\n2️⃣ Cosa hai rispettato di più?\n3️⃣ Cosa hai rispettato di meno?\n\nE per questa che inizia:\n4️⃣ Una cosa che vuoi sistemare o migliorare?\n5️⃣ Ci sono giorni o impegni in cui serve organizzarsi meglio? (viaggi, lavoro, cene…)\n\nBastano anche due righe, poi ti rispondo io ✨`;
+}
+function linkWhatsappTesto(telefono, testo) {
+  const n = String(telefono || "").replace(/[^\d]/g, "");
+  if (!n) return null;
+  return `https://wa.me/${n.length > 10 ? n : "39" + n}?text=${encodeURIComponent(testo)}`;
+}
+
+function BilancioSettimanaleCliente({ client }) {
+  const [offset, setOffset] = useState(0);
+  const [righe, setRighe] = useState(null);
+  const [f, setF] = useState({ voto: null, rispettato: [], rispettato_meno: [], da_sistemare: "", impegni: "", esito_precedente: null });
+  const [stato, setStato] = useState("");
+  const sett = settimanaRiferimento(offset);
+  const prec = spostaGiorni(sett, -7);
+  const carica = async () => {
+    const { data } = await supabase.from("bilanci_settimanali").select("*").eq("client_id", client.id).order("settimana", { ascending: false });
+    setRighe(data || []);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+  useEffect(() => {
+    const r = (righe || []).find((x) => x.settimana === sett);
+    setF({ voto: r?.voto ?? null, rispettato: r?.rispettato || [], rispettato_meno: r?.rispettato_meno || [], da_sistemare: r?.da_sistemare || "", impegni: r?.impegni || "", esito_precedente: r?.esito_precedente || null });
+    setStato("");
+  }, [righe, sett]);
+  if (!righe) return null;
+  const daPrec = righe.find((x) => x.settimana === prec)?.da_sistemare || "";
+  const toggle = (k, v) => setF((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const salva = async () => {
+    setStato("salvo…");
+    const { error } = await supabase.from("bilanci_settimanali").upsert({
+      client_id: client.id, settimana: sett, voto: f.voto, rispettato: f.rispettato, rispettato_meno: f.rispettato_meno,
+      da_sistemare: f.da_sistemare.trim() || null, impegni: f.impegni.trim() || null, esito_precedente: f.esito_precedente, updated_at: new Date().toISOString(),
+    }, { onConflict: "client_id,settimana" });
+    if (error) { setStato("Non sono riuscita a salvare, riprova."); return; }
+    setStato("Salvato ✨"); carica();
+  };
+  const chip = (attivo, onClick, testo) => (
+    <button key={testo} onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-medium" style={attivo ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{testo}</button>
+  );
+  const ultime = [...righe].filter((x) => x.voto != null).sort((a, b) => a.settimana.localeCompare(b.settimana)).slice(-6);
+  const storico = righe.filter((x) => x.da_sistemare).slice(0, 6).map((x) => ({ ...x, esito: righe.find((y) => y.settimana === spostaGiorni(x.settimana, 7))?.esito_precedente || null }));
+  const nomeEsito = { sistemato: "Sistemato", meta: "A metà", no: "Non riuscita" };
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Bilancio settimanale</p>
+          <p className="text-[11px]" style={{ color: "#7a8da3" }}>Settimana {etichettaSettimana(sett)}{offset === 0 ? " (appena conclusa)" : ""}</p>
+        </div>
+        <div className="flex gap-1">
+          <button onClick={() => setOffset(offset - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>‹</button>
+          <button onClick={() => setOffset(Math.min(0, offset + 1))} disabled={offset >= 0} className="w-7 h-7 rounded-full text-sm disabled:opacity-30" style={{ background: "#E1EEFB", color: "#27466D" }}>›</button>
+        </div>
+      </div>
+      {daPrec && (
+        <div className="rounded-xl p-2.5 space-y-1.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
+          <p className="text-xs" style={{ color: "#6b5d2e" }}>Settimana scorsa voleva sistemare: <b>«{daPrec}»</b></p>
+          <div className="flex flex-wrap gap-1.5">
+            {[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ No"]].map(([v, l]) => chip(f.esito_precedente === v, () => setF({ ...f, esito_precedente: f.esito_precedente === v ? null : v }), l))}
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Com'è andata (1–10)</p>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+            <button key={n} onClick={() => setF({ ...f, voto: f.voto === n ? null : n })} className="w-7 h-7 rounded-full text-xs font-semibold" style={f.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>
+          ))}
+        </div>
+      </div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Ha rispettato di più</p><div className="flex flex-wrap gap-1.5 mt-1.5">{AREE_BILANCIO.map((a) => chip(f.rispettato.includes(a), () => toggle("rispettato", a), a))}</div></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Ha rispettato di meno</p><div className="flex flex-wrap gap-1.5 mt-1.5">{AREE_BILANCIO.map((a) => chip(f.rispettato_meno.includes(a), () => toggle("rispettato_meno", a), a))}</div></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Da sistemare questa settimana</p><input value={f.da_sistemare} onChange={(e) => setF({ ...f, da_sistemare: e.target.value })} placeholder="es. Cena fuori: scegliere un piatto proteico" className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Impegni da organizzare</p><input value={f.impegni} onChange={(e) => setF({ ...f, impegni: e.target.value })} placeholder="es. Viaggio di lavoro mer-gio" className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
+      <button onClick={salva} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva bilancio</button>
+      {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
+      {ultime.length > 0 && (
+        <div className="pt-1">
+          <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Andamento</p>
+          <p className="text-[11px]" style={{ color: "#7a8da3" }}>Voto settimanale · ultime {ultime.length} settimane</p>
+          <div className="flex items-end gap-1.5 h-14 mt-2">
+            {ultime.map((x) => <div key={x.id} className="flex-1 rounded-t-md text-[9px] text-center pt-0.5" style={{ height: `${x.voto * 10}%`, background: x.settimana === sett ? "#4F8FD0" : "#C9E0F7", color: x.settimana === sett ? "#fff" : "#27466D" }}>{x.voto}</div>)}
+          </div>
+        </div>
+      )}
+      {storico.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Cosa voleva sistemare</p>
+          {storico.map((x) => (
+            <div key={x.id} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 last:border-0">
+              <span className="text-sm" style={{ color: "#27466D" }}>{x.da_sistemare}<span className="block text-[10px] text-slate-400">settimana {etichettaSettimana(spostaGiorni(x.settimana, 7))}</span></span>
+              {x.esito ? <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: x.esito === "sistemato" ? "#C9E0F7" : "#FFFBEF", color: x.esito === "sistemato" ? "#27466D" : "#7a6a3a", border: x.esito === "sistemato" ? "none" : "1px solid #F7E9BE" }}>{nomeEsito[x.esito]}</span> : <span className="text-[10px] text-slate-400">da verificare</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function BilanciLunediCoach({ clients, onSelect }) {
+  const [offset, setOffset] = useState(0);
+  const [righe, setRighe] = useState(null);
+  const sett = settimanaRiferimento(offset);
+  const prec = spostaGiorni(sett, -7);
+  useEffect(() => {
+    supabase.from("bilanci_settimanali").select("*").in("settimana", [sett, prec]).then(({ data }) => setRighe(data || []), () => setRighe([]));
+  }, [sett]);
+  if (!righe) return null;
+  const attive = (clients || []).filter((c) => !c.archiviato);
+  const risposte = new Map(righe.filter((r) => r.settimana === sett).map((r) => [r.client_id, r]));
+  const daSistemarePrec = new Map(righe.filter((r) => r.settimana === prec && r.da_sistemare).map((r) => [r.client_id, r.da_sistemare]));
+  const risposto = attive.filter((c) => risposte.has(c.id) && risposte.get(c.id).voto != null);
+  const daSentire = attive.filter((c) => !risposto.includes(c));
+  const pct = attive.length ? Math.round((risposto.length / attive.length) * 100) : 0;
+  return (
+    <Sezione id="bilanci_lunedi" titolo="Bilanci del lunedì" conteggio={daSentire.length} aperta={false}>
+      <div className="space-y-3">
+        <Card className="p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs" style={{ color: "#7a8da3" }}>Settimana {etichettaSettimana(sett)} · hanno risposto {risposto.length} su {attive.length}</p>
+            </div>
+            <div className="flex gap-1">
+              <button onClick={() => setOffset(offset - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>‹</button>
+              <button onClick={() => setOffset(Math.min(0, offset + 1))} disabled={offset >= 0} className="w-7 h-7 rounded-full text-sm disabled:opacity-30" style={{ background: "#E1EEFB", color: "#27466D" }}>›</button>
+            </div>
+          </div>
+          <div className="h-2 rounded-full mt-2" style={{ background: "#E1EEFB" }}><div className="h-2 rounded-full" style={{ width: `${pct}%`, background: "#4F8FD0" }} /></div>
+        </Card>
+        {daSentire.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide font-medium mb-1.5" style={{ color: "#7a8da3" }}>Da sentire ({daSentire.length})</p>
+            <Card className="px-3.5 py-1">
+              {daSentire.map((c) => {
+                const x = daSistemarePrec.get(c.id);
+                const link = linkWhatsappTesto(c.telefono, testoLunedi(c.nome, x));
+                return (
+                  <div key={c.id} className="flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0">
+                    <button onClick={() => onSelect && onSelect(c.id)} className="text-left min-w-0">
+                      <span className="block text-sm font-medium" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}</span>
+                      <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>{x ? `ultima volta: ${x}` : "nessun obiettivo ancora"}</span>
+                    </button>
+                    {link ? <a href={link} target="_blank" rel="noreferrer" className="text-xs font-semibold flex-shrink-0" style={{ color: "#3F78B3" }}>Messaggio ›</a> : <span className="text-[10px] text-slate-400 flex-shrink-0">senza numero</span>}
+                  </div>
+                );
+              })}
+            </Card>
+          </div>
+        )}
+        {risposto.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide font-medium mb-1.5" style={{ color: "#7a8da3" }}>Hanno risposto ({risposto.length})</p>
+            <Card className="px-3.5 py-1">
+              {risposto.map((c) => {
+                const r = risposte.get(c.id);
+                return (
+                  <button key={c.id} onClick={() => onSelect && onSelect(c.id)} className="w-full flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0 text-left">
+                    <span className="text-sm" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}{r.da_sistemare && <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>da sistemare: {r.da_sistemare}</span>}</span>
+                    <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0" style={{ background: "#C9E0F7", color: "#27466D" }}>{r.voto}/10{r.esito_precedente ? ` · ${EMOJI_ESITO[r.esito_precedente]}` : ""}</span>
+                  </button>
+                );
+              })}
+            </Card>
+          </div>
+        )}
+      </div>
+    </Sezione>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -10907,6 +11097,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
 
  <RichiestePacchettoCoach onChanged={onChanged} />
       <CaricheInCaloCoach onChanged={onChanged} />
+
+      <BilanciLunediCoach clients={clients} onSelect={onSelect} />
 
       <Sezione id="trend_clienti" titolo="Trend clienti" aperta={false}>
         <TrendClientiCoach clients={clients} onSelect={onSelect} />
