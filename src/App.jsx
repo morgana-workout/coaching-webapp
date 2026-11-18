@@ -396,37 +396,40 @@ const VOCI_CONSENSI = [
   ["social", "Condividere foto e risultati", "Le foto dei check fanno parte del percorso e le vede solo Morgana. Qui scegli se può anche condividere le tue foto e i tuoi risultati nei suoi contenuti (sempre con il tuo ok caso per caso). Se dici no, non succede mai."],
 ];
 
-// Cliente: interruttori sì/no per i consensi privacy (si salvano subito; nessuna scelta = non ancora scelto)
-function ConsensiCliente({ client, forzaApri = false }) {
+// Cliente: interruttori sì/no per i consensi privacy (si salvano subito).
+// posizione="alto": in cima alla home finché non ha risposto a tutte le voci, poi sparisce.
+// posizione="basso": solo il lucchetto in fondo alla home, per modificare le scelte in futuro.
+function ConsensiCliente({ client, posizione = "basso", forzaApri = false }) {
   const [riga, setRiga] = useState(undefined);
   const [aperto, setAperto] = useState(false);
   const [errore, setErrore] = useState("");
+  const [grazie, setGrazie] = useState(false);
+  const carica = () => supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle().then(({ data }) => setRiga(data || null), () => setRiga(null));
+  useEffect(() => { carica(); }, [client.id]);
   useEffect(() => {
-    supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle().then(({ data }) => setRiga(data || null), () => setRiga(null));
+    const h = () => carica();
+    window.addEventListener("consensi-aggiornati", h);
+    return () => window.removeEventListener("consensi-aggiornati", h);
   }, [client.id]);
   if (riga === undefined) return null;
   const mancano = VOCI_CONSENSI.some(([k]) => riga?.[k] == null);
   const imposta = async (k, v) => {
     setErrore("");
     const nuova = { ...(riga || {}), client_id: client.id, [k]: v, aggiornato_il: new Date().toISOString() };
+    const eraCompleto = !mancano;
     setRiga(nuova);
     const { error } = await supabase.from("consensi_cliente").upsert({ client_id: client.id, foto_coach: nuova.foto_coach ?? null, analisi_esterna: nuova.analisi_esterna ?? null, social: nuova.social ?? null, ciclo: nuova.ciclo ?? null, aggiornato_il: nuova.aggiornato_il });
-    if (error) setErrore("Non sono riuscita a salvare, riprova tra un attimo 🫶🏻");
+    if (error) { setErrore("Non sono riuscita a salvare, riprova tra un attimo 🫶🏻"); return; }
+    const completo = !VOCI_CONSENSI.some(([kk]) => nuova[kk] == null);
+    if (posizione === "alto" && completo && !eraCompleto) {
+      setGrazie(true);
+      setTimeout(() => { setGrazie(false); window.dispatchEvent(new Event("consensi-aggiornati")); }, 2600);
+    } else if (posizione === "basso") {
+      window.dispatchEvent(new Event("consensi-aggiornati"));
+    }
   };
-  const mostra = aperto || forzaApri;
-  if (!mostra && !mancano) return (
-    <button onClick={() => setAperto(true)} className="w-full text-center text-xs py-1" style={{ color: "#7a8da3" }}>🔒 Privacy e consensi</button>
-  );
-  if (!mostra) return (
-    <Card className="p-4 space-y-2" >
-      <p className="text-sm font-medium text-slate-700">🔒 Scegli cosa condividere</p>
-      <p className="text-xs text-slate-500">I tuoi dati sono tuoi: decidi tu cosa può vedere e usare Morgana. Ci metti un minuto e puoi cambiare idea quando vuoi 🫶🏻</p>
-      <button onClick={() => setAperto(true)} className="px-4 py-2 rounded-xl text-sm font-medium text-white" style={{ background: "#27466D" }}>Scegli ora</button>
-    </Card>
-  );
-  return (
-    <Card className="p-4 space-y-3">
-      <div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700">🔒 Privacy e consensi</p>{!forzaApri && <button onClick={() => setAperto(false)} className="text-xs text-slate-400">Chiudi</button>}</div>
+  const voci = (
+    <>
       {VOCI_CONSENSI.map(([k, titolo, testo]) => (
         <div key={k} className="space-y-1.5 border-b border-slate-100 last:border-0 pb-2.5 last:pb-0">
           <p className="text-sm font-medium text-slate-700">{titolo}</p>
@@ -440,6 +443,35 @@ function ConsensiCliente({ client, forzaApri = false }) {
         </div>
       ))}
       {errore && <p className="text-xs text-slate-600">{errore}</p>}
+    </>
+  );
+
+  if (posizione === "alto") {
+    if (grazie) return (
+      <Card className="p-4"><p className="text-sm text-slate-700">Grazie, è tutto salvato ✨ Puoi cambiare idea quando vuoi dal 🔒 in fondo a questa pagina.</p></Card>
+    );
+    if (!mancano) return null;
+    return (
+      <Card className="p-4 space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">🔒 Privacy e consensi</p>
+          <p className="text-xs text-slate-500 mt-0.5">I tuoi dati sono tuoi: decidi tu cosa può vedere e usare Morgana. Ci metti un minuto e puoi cambiare idea quando vuoi 🫶🏻</p>
+        </div>
+        {voci}
+      </Card>
+    );
+  }
+
+  // posizione "basso": solo a scelte completate (prima, il riquadro sta in alto)
+  if (mancano) return null;
+  const mostra = aperto || forzaApri;
+  if (!mostra) return (
+    <button onClick={() => setAperto(true)} className="w-full text-center text-xs py-1" style={{ color: "#7a8da3" }}>🔒 Privacy e consensi</button>
+  );
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700">🔒 Privacy e consensi</p>{!forzaApri && <button onClick={() => setAperto(false)} className="text-xs text-slate-400">Chiudi</button>}</div>
+      {voci}
     </Card>
   );
 }
@@ -899,6 +931,8 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         <p className="text-slate-500 text-xs mt-0.5">Costanza batte perfezione, sempre.</p>
       </div>
 
+      <ConsensiCliente client={client} posizione="alto" />
+
       {!isBulb && lezioneProssima && (
         <button onClick={() => (lezioneProssima.stato === "confermato" ? setSheetLezione(lezioneProssima) : onApri?.("lezioni"))} className="w-full text-left">
           <Card className="px-3.5 py-3 flex items-center gap-3 border-sky-200 bg-sky-50/50">
@@ -1072,7 +1106,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       </div>
 
       {profiloAperto && <ProfiloCliente client={client} onAggiornato={onAggiornato} />}
-      <ConsensiCliente client={client} forzaApri={profiloAperto} />
+      <ConsensiCliente client={client} posizione="basso" forzaApri={profiloAperto} />
 
       <div ref={richiestaRef}>
         {prenotaAperto && !inviata && (
