@@ -10675,7 +10675,7 @@ function ListaAttesaPubblica() {
 }
 
 // Coach: iscritte alla lista d'attesa (coaching online da gennaio: posto riservato senza pagamento anticipato, 1 mese gratuito se iscritte entro il 31/12)
-function ListaAttesaCoach({ onChanged }) {
+function ListaAttesaCoach({ onChanged, aperta = false }) {
   const [righe, setRighe] = useState(null);
   const [aggiungi, setAggiungi] = useState(false);
   const [incolla, setIncolla] = useState(false);
@@ -10731,7 +10731,7 @@ function ListaAttesaCoach({ onChanged }) {
     setAvvia(null); avviso(`${parti[0]} è ora tra le tue clienti ✨`); carica(); onChanged && onChanged();
   };
   return (
-    <Sezione id="lista_attesa" titolo="Lista d'attesa" conteggio={nuove} aperta={false} destra={righe.length ? <button onClick={csv} className="text-[11px] text-sky-600 font-medium">Scarica CSV</button> : null}>
+    <Sezione id="lista_attesa" titolo="Lista d'attesa" conteggio={nuove} aperta={aperta} ricorda={!aperta} destra={righe.length ? <button onClick={csv} className="text-[11px] text-sky-600 font-medium">Scarica CSV</button> : null}>
       <div className="space-y-2">
         <p className="text-slate-400 text-[11px]">Link da mettere nelle storie: <span className="font-medium text-slate-600">{window.location.origin}/?lista=1</span></p>
         <p className="text-slate-500 text-xs">Posto riservato senza pagamento anticipato. Chi si iscrive entro il 31/12 ha 1 mese gratuito: si aggiunge da solo alla scadenza quando registri il primo pagamento.</p>
@@ -10907,8 +10907,6 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
 
  <RichiestePacchettoCoach onChanged={onChanged} />
       <CaricheInCaloCoach onChanged={onChanged} />
-
-      <ListaAttesaCoach />
 
       <Sezione id="trend_clienti" titolo="Trend clienti" aperta={false}>
         <TrendClientiCoach clients={clients} onSelect={onSelect} />
@@ -14738,7 +14736,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     try { setSfideDaFare(await contaSfideCoach()); } catch (e) { /* non blocca mai il caricamento */ }
   };
   const caricaCandidatureNuove = async () => {
-    const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
+    const { count } = await supabase.from("lista_attesa").select("id", { count: "exact", head: true }).eq("contattata", false).is("client_id", null);
     setCandidatureNuove(count || 0);
   };
   useEffect(() => { caricaNonLetteCoach(); caricaCandidatureNuove(); }, [vista]);
@@ -14825,7 +14823,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         const voci = [
           { k: "oggi", l: "Oggi" }, { k: "lista", l: "Lista" }, { k: "calendario", l: "Calendario" },
           { k: "notifiche", l: "Notifiche", b: nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length },
-          { k: "guadagni", l: "Guadagni" }, { k: "candidature", l: "Candidature", b: candidatureNuove },
+          { k: "guadagni", l: "Guadagni" }, { k: "candidature", l: "Lista d'attesa", b: candidatureNuove },
           { k: "chat", l: "Appunti", b: chatNonLette }, { k: "statistiche", l: "Statistiche" },
           { k: "gruppi", l: "Gruppi Bulb" }, { k: "esercizi", l: "Esercizi" }, { k: "sfide", l: "Sfide", b: sfideDaFare },
         ];
@@ -14865,7 +14863,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       {vista === "statistiche" && <StatisticheCoach clients={clientiPaganti} />}
       {vista === "guadagni" && <GuadagniCoach clients={clientiPaganti} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
-      {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
+      {vista === "candidature" && <ListaAttesaCoach onChanged={() => { onChanged && onChanged(); caricaCandidatureNuove(); }} aperta />}
       {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
