@@ -8324,6 +8324,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
           <BilancioSettimanaleCliente client={client} />
+          <BilancioAvanzatoCliente client={client} />
           <AndamentoCliente client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-2 gap-4 items-start">
             <ConsigliProgramma client={client} />
@@ -10814,6 +10815,9 @@ function testoLunedi(nome, daSistemare) {
   if (daSistemare) return `Buongiorno ${n}! ✨ Settimana scorsa volevi sistemare «${daSistemare}». Com'è andata?\n✅ Sistemato\n🔸 A metà\n❌ Non ci sono riuscita\nDimmelo senza problemi, serve solo a capire come aiutarti 🫶🏻\n\nPoi, come sempre:\n1️⃣ Com'è andata la settimana, da 1 a 10?\n2️⃣ Cosa hai rispettato di più e di meno?\n3️⃣ Cosa vuoi sistemare questa settimana?`;
   return `Buongiorno ${n}! ✨ Nuova settimana, nuove occasioni 💪🏻 Mi dedichi 1 minuto? Così capisco come stai andando e come aiutarti al meglio 🫶🏻\n\nCom'è andata la settimana appena finita:\n1️⃣ Da 1 a 10, com'è andata?\n2️⃣ Cosa hai rispettato di più?\n3️⃣ Cosa hai rispettato di meno?\n\nE per questa che inizia:\n4️⃣ Una cosa che vuoi sistemare o migliorare?\n5️⃣ Ci sono giorni o impegni in cui serve organizzarsi meglio? (viaggi, lavoro, cene…)\n\nBastano anche due righe, poi ti rispondo io ✨`;
 }
+function testoLinkBilancio(nome, token) {
+  return `Ciao ${(nome || "").split(" ")[0]}! ✨ Ecco il tuo bilancio della settimana: ci metti 1 minuto e per me è prezioso 🫶🏻\n${window.location.origin}/?bilancio=${token}`;
+}
 function linkWhatsappTesto(telefono, testo) {
   const n = String(telefono || "").replace(/[^\d]/g, "");
   if (!n) return null;
@@ -10888,6 +10892,12 @@ function BilancioSettimanaleCliente({ client }) {
       <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Da sistemare questa settimana</p><input value={f.da_sistemare} onChange={(e) => setF({ ...f, da_sistemare: e.target.value })} placeholder="es. Cena fuori: scegliere un piatto proteico" className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
       <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Impegni da organizzare</p><input value={f.impegni} onChange={(e) => setF({ ...f, impegni: e.target.value })} placeholder="es. Viaggio di lavoro mer-gio" className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
       <button onClick={salva} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva bilancio</button>
+      {client.token_bilancio && (
+        <div className="flex gap-2">
+          <a href={linkWhatsappTesto(client.telefono, testoLinkBilancio(client.nome, client.token_bilancio)) || undefined} target="_blank" rel="noreferrer" className="flex-1 py-2 rounded-xl text-xs font-semibold text-center" style={{ background: "#E1EEFB", color: "#27466D" }}>Invia link su WhatsApp</a>
+          <button onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/?bilancio=${client.token_bilancio}`); setStato("Link copiato ✨"); }} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Copia link</button>
+        </div>
+      )}
       {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
       {ultime.length > 0 && (
         <div className="pt-1">
@@ -10908,6 +10918,153 @@ function BilancioSettimanaleCliente({ client }) {
             </div>
           ))}
         </div>
+      )}
+    </Card>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Bilancio AVANZATO (percorso di preparazione atletica): punti 1–5, numeri della settimana, medie ponderate
+// ───────────────────────────────────────────────────────────────────────────
+const VOCI_ADERENZA = [["piano", "Piano alimentare"], ["allenamenti", "Allenamenti"], ["cardio", "Cardio e passi"], ["prestazioni", "Prestazioni in sala"]];
+const VOCI_RECUPERO = [["sonno", "Qualità del sonno"], ["energia", "Energia"], ["fame", "Fame"], ["stress", "Stress"], ["dolori", "Dolori muscolari"], ["digestione", "Digestione e gonfiore"]];
+const DIFFICOLTA_AV = ["Fame", "Stanchezza", "Sonno", "Dolori", "Cene fuori", "Lavoro", "Motivazione", "Ciclo"];
+const PESI_MEDIA = [4, 3, 2, 1];
+function testoLinkAvanzato(nome, token) {
+  return `Ciao ${(nome || "").split(" ")[0]}! ✨ È il momento del tuo bilancio settimanale: ci metti 2 minuti e mi permette di calibrare al meglio il tuo percorso 💪🏻🫶🏻\n${window.location.origin}/?avanzato=${token}`;
+}
+function mediaConPesi(valori) { // valori: dal più recente al più vecchio, null se mancante
+  let s = 0, p = 0;
+  valori.slice(0, 4).forEach((v, i) => { if (v != null && !isNaN(v)) { s += v * PESI_MEDIA[i]; p += PESI_MEDIA[i]; } });
+  return p ? s / p : null;
+}
+function valoreRiga(r, k) {
+  if (k === "aderenza") { const v = VOCI_ADERENZA.map(([c]) => r.punti?.[c]).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+  if (k === "recupero") {
+    const v = [r.punti?.sonno, r.punti?.energia, r.punti?.digestione, r.punti?.fame != null ? 6 - r.punti.fame : null, r.punti?.stress != null ? 6 - r.punti.stress : null, r.punti?.dolori != null ? 6 - r.punti.dolori : null].filter((x) => x != null);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  }
+  if (["peso_medio", "vita", "passi", "ore_sonno"].includes(k)) return r[k] != null ? Number(r[k]) : null;
+  return r.punti?.[k] ?? null;
+}
+const fmt1 = (n) => (n == null ? "–" : n.toFixed(1).replace(".", ","));
+function BilancioAvanzatoCliente({ client }) {
+  const [righe, setRighe] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const [stato, setStato] = useState("");
+  useEffect(() => { supabase.from("bilanci_avanzati").select("*").eq("client_id", client.id).order("settimana", { ascending: false }).then(({ data }) => setRighe(data || [])); }, [client.id]);
+  if (!righe) return null;
+  const sett = settimanaRiferimento(offset);
+  const fino = righe.filter((r) => r.settimana <= sett); // dal più recente
+  const finestra = (da) => Array.from({ length: 4 }, (_, i) => righe.find((r) => r.settimana === spostaGiorni(sett, -7 * (da + i))) || null);
+  const att = finestra(0), prv = finestra(4);
+  const med = (k, w) => mediaConPesi(w.map((r) => (r ? valoreRiga(r, k) : null)));
+  const delta = (k) => { const a = med(k, att), b = med(k, prv); return a != null && b != null ? a - b : null; };
+  const freccia = (d, invertito) => (d == null || Math.abs(d) < 0.15 ? "" : d > 0 ? " ↑" : " ↓");
+  const coloreVoce = (d, invertito) => { if (d == null || Math.abs(d) < 0.15) return "#27466D"; const bene = invertito ? d < 0 : d > 0; return bene ? "#3F78B3" : "#7a6a3a"; };
+  const n = att.filter(Boolean).length;
+  const rigaSett = att[0];
+  const aderenza = med("aderenza", att), recupero = med("recupero", att);
+  // Peso: variazione settimanale media sulle ultime settimane disponibili
+  const pesi = att.map((r) => (r?.peso_medio != null ? { s: r.settimana, v: Number(r.peso_medio) } : null)).filter(Boolean); // recente → vecchio
+  let pesoKg = null, pesoPct = null;
+  if (pesi.length >= 2) {
+    const a = pesi[0], b = pesi[pesi.length - 1];
+    const sett_diff = (new Date(a.s) - new Date(b.s)) / (7 * 86400000);
+    if (sett_diff > 0) { pesoKg = (a.v - b.v) / sett_diff; pesoPct = (pesoKg / b.v) * 100; }
+  }
+  const segnali = [];
+  const sonnoSerie = att.map((r) => r?.punti?.sonno ?? null), fameSerie = att.map((r) => r?.punti?.fame ?? null);
+  if (sonnoSerie[0] != null && sonnoSerie[1] != null && sonnoSerie[2] != null && sonnoSerie[0] < sonnoSerie[1] && sonnoSerie[1] < sonnoSerie[2] && fameSerie[0] != null && fameSerie[2] != null && fameSerie[0] > fameSerie[2])
+    segnali.push("Qualità del sonno in calo da 2 settimane con fame in aumento: possibile accumulo di fatica (overreaching funzionale), valuta un deload o un refeed.");
+  const dRec = delta("recupero");
+  if (dRec != null && dRec <= -0.4) segnali.push("Indice di recupero in calo rispetto alle 4 settimane precedenti: monitorare carico allenante e disponibilità energetica.");
+  const dAd = delta("aderenza");
+  if (dAd != null && dAd <= -0.5) segnali.push("Aderenza in calo rispetto al blocco precedente: indagare le barriere (organizzazione, motivazione, carico di lavoro).");
+  const prest = med("prestazioni", att);
+  if (prest != null && prest <= 2.5) segnali.push("Prestazioni in sala percepite sotto il previsto: possibile fatica residua o stimolo/carichi da rivedere.");
+  const dol = med("dolori", att);
+  if (dol != null && dol >= 3.8) segnali.push("Dolori muscolari persistentemente elevati (DOMS): valuta volume, frequenza per gruppo muscolare e qualità del recupero.");
+  const ore = med("ore_sonno", att);
+  if (ore != null && ore < 6.5) segnali.push(`Durata media del sonno ${fmt1(ore)} h: debito di sonno che può limitare recupero, ipertrofia e controllo dell'appetito.`);
+  if (pesoPct != null) {
+    if (Math.abs(pesoPct) < 0.15 && pesi.length >= 3) segnali.push("Peso stabile da 3 o più settimane: se l'obiettivo è variare la composizione corporea, valuta un aggiustamento dell'apporto energetico.");
+    else if (pesoPct <= -1) segnali.push(`Calo ponderale ${fmt1(Math.abs(pesoPct))}%/settimana: velocità elevata, rischio di perdita di massa magra, valuta di rallentare.`);
+    else if (pesoPct < -0.15) segnali.push(`Calo ponderale ${fmt1(Math.abs(pesoPct))}%/settimana: nel range atteso (0,3–1% a settimana) per una fase di definizione.`);
+    else if (pesoPct >= 0.5) segnali.push(`Aumento ponderale ${fmt1(pesoPct)}%/settimana: verifica che sia in linea con la fase (surplus controllato).`);
+  }
+  const conta = {};
+  att.forEach((r) => (r?.difficolta || []).forEach((d) => { conta[d] = (conta[d] || 0) + 1; }));
+  const ricorrenti = Object.entries(conta).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]);
+  const obiettivoPrec = righe.find((r) => r.settimana === spostaGiorni(sett, -7))?.obiettivo || null;
+  const esito = rigaSett?.esito_precedente || null;
+  const nomeEsito = { sistemato: "✅ Sistemato", meta: "🔸 A metà", no: "❌ Non riuscita" };
+  const voci = [...VOCI_ADERENZA.map(([k, l]) => [k, l, false]), ...VOCI_RECUPERO.map(([k, l]) => [k, l, k === "fame" || k === "stress" || k === "dolori"])];
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Bilancio avanzato</p>
+          <p className="text-[11px]" style={{ color: "#7a8da3" }}>Media ponderata (pesi 4·3·2·1, la settimana più recente conta di più) · fino a {etichettaSettimana(sett)}</p>
+        </div>
+        <div className="flex gap-1">
+          <button onClick={() => setOffset(offset - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>‹</button>
+          <button onClick={() => setOffset(Math.min(0, offset + 1))} disabled={offset >= 0} className="w-7 h-7 rounded-full text-sm disabled:opacity-30" style={{ background: "#E1EEFB", color: "#27466D" }}>›</button>
+        </div>
+      </div>
+      {client.token_bilancio && (
+        <div className="flex gap-2">
+          <a href={linkWhatsappTesto(client.telefono, testoLinkAvanzato(client.nome, client.token_bilancio)) || undefined} target="_blank" rel="noreferrer" className="flex-1 py-2 rounded-xl text-xs font-semibold text-center" style={{ background: "#E1EEFB", color: "#27466D" }}>Invia link avanzato su WhatsApp</a>
+          <button onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/?avanzato=${client.token_bilancio}`); setStato("Link copiato ✨"); }} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Copia link</button>
+        </div>
+      )}
+      {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
+      {n === 0 ? (
+        <p className="text-xs" style={{ color: "#7a8da3" }}>Nessun bilancio avanzato ricevuto per questo periodo. Appena {String(client.nome || "").split(" ")[0]} compila il link, qui compaiono medie, tendenze e segnali.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            {[["Aderenza", aderenza, delta("aderenza")], ["Recupero", recupero, delta("recupero")]].map(([l, v, d]) => (
+              <div key={l} className="rounded-xl p-2.5 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
+                <p className="text-lg font-semibold" style={{ color: "#27466D" }}>{fmt1(v)}<span className="text-[10px]" style={{ color: "#7a8da3" }}>/5</span></p>
+                <p className="text-[10px]" style={{ color: "#7a8da3" }}>{l}{d != null && Math.abs(d) >= 0.15 ? ` · ${d > 0 ? "+" : "−"}${fmt1(Math.abs(d))}` : ""}</p>
+              </div>
+            ))}
+            <div className="rounded-xl p-2.5 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
+              <p className="text-lg font-semibold" style={{ color: "#27466D" }}>{n}<span className="text-[10px]" style={{ color: "#7a8da3" }}>/4</span></p>
+              <p className="text-[10px]" style={{ color: "#7a8da3" }}>Bilanci nel blocco</p>
+            </div>
+          </div>
+          <div>
+            {voci.map(([k, l, inv]) => { const v = med(k, att); if (v == null) return null; const d = delta(k); return (
+              <div key={k} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0 text-sm" style={{ color: "#27466D" }}>
+                <span>{l}</span><span className="font-semibold" style={{ color: coloreVoce(d, inv) }}>{fmt1(v)}{freccia(d, inv)}</span>
+              </div>
+            ); })}
+            {pesi.length > 0 && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Peso medio</span><span className="font-semibold">{fmt1(pesi[0].v)} kg{pesoKg != null ? ` · ${pesoKg > 0 ? "+" : "−"}${fmt1(Math.abs(pesoKg)).replace(",", ",")} kg/sett (${pesoPct > 0 ? "+" : "−"}${fmt1(Math.abs(pesoPct))}%)` : ""}</span></div>}
+            {att.find((r) => r?.vita != null) && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Vita</span><span className="font-semibold">{fmt1(Number(att.find((r) => r?.vita != null).vita))} cm</span></div>}
+            {med("passi", att) != null && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Passi medi</span><span className="font-semibold">{Math.round(med("passi", att)).toLocaleString("it-IT")}</span></div>}
+            {ore != null && <div className="flex justify-between py-1.5 text-sm" style={{ color: "#27466D" }}><span>Ore di sonno medie</span><span className="font-semibold">{fmt1(ore)} h</span></div>}
+          </div>
+          {segnali.length > 0 && (
+            <div className="rounded-xl p-3 space-y-1.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
+              <p className="text-xs font-semibold" style={{ color: "#6b5d2e" }}>Segnali</p>
+              {segnali.map((s, i) => <p key={i} className="text-xs leading-snug" style={{ color: "#6b5d2e" }}>• {s}</p>)}
+            </div>
+          )}
+          {(ricorrenti.length > 0 || rigaSett?.difficolta_note) && (
+            <p className="text-xs" style={{ color: "#27466D" }}>
+              {ricorrenti.length > 0 && <><b>Difficoltà ricorrenti:</b> {ricorrenti.map(([d, c]) => `${d.toLowerCase()} (${c} sett.)`).join(", ")}<br /></>}
+              {rigaSett?.difficolta_note && <><b>Nota della settimana:</b> «{rigaSett.difficolta_note}»</>}
+            </p>
+          )}
+          {(rigaSett?.obiettivo || obiettivoPrec) && (
+            <div className="text-xs space-y-0.5" style={{ color: "#27466D" }}>
+              {obiettivoPrec && <p><b>Obiettivo della settimana prima:</b> «{obiettivoPrec}» {esito ? `· ${nomeEsito[esito]}` : "· da verificare"}</p>}
+              {rigaSett?.obiettivo && <p><b>Obiettivo per la nuova settimana:</b> «{rigaSett.obiettivo}»</p>}
+            </div>
+          )}
+        </>
       )}
     </Card>
   );
@@ -10949,7 +11106,7 @@ function BilanciLunediCoach({ clients, onSelect }) {
             <Card className="px-3.5 py-1">
               {daSentire.map((c) => {
                 const x = daSistemarePrec.get(c.id);
-                const link = linkWhatsappTesto(c.telefono, testoLunedi(c.nome, x));
+                const link = linkWhatsappTesto(c.telefono, c.token_bilancio ? testoLinkBilancio(c.nome, c.token_bilancio) : testoLunedi(c.nome, x));
                 return (
                   <div key={c.id} className="flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0">
                     <button onClick={() => onSelect && onSelect(c.id)} className="text-left min-w-0">
@@ -15405,9 +15562,188 @@ function ImpostaPassword({ onFatto }) {
   );
 }
 
+// ---------- Bilancio settimanale pubblico (link personale che la coach manda su WhatsApp: /?bilancio=CODICE) ----------
+function BilancioPubblico({ token }) {
+  const [info, setInfo] = useState(undefined); // undefined = carico, null = link non valido
+  const [passo, setPasso] = useState(0);
+  const [r, setR] = useState({ esito: null, voto: null, rispettato: [], meno: [], daSistemare: "", impegni: "" });
+  const [stato, setStato] = useState("form"); // form | invio | fatto
+  const [errore, setErrore] = useState("");
+  useEffect(() => { document.title = "Il tuo bilancio · Coaching by Morgana"; }, []);
+  useEffect(() => {
+    supabase.rpc("bilancio_info", { p_token: token }).then(({ data, error }) => setInfo(error ? null : data || null), () => setInfo(null));
+  }, [token]);
+  const sfondo = { background: "#F5FAFE", minHeight: "100dvh" };
+  if (info === undefined) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ ...sfondo, color: "#7a8da3" }}>Un attimo…</div>;
+  if (info === null) return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="max-w-md text-center space-y-2"><p className="text-3xl">✨</p><p style={{ color: "#27466D" }} className="font-semibold">Questo link non è più valido</p><p className="text-sm" style={{ color: "#7a8da3" }}>Scrivimi su WhatsApp e te ne mando uno nuovo 🫶🏻</p></div>
+    </div>
+  );
+  const nome = info.nome || "";
+  const prec = info.da_sistemare_prec;
+  const passi = [...(prec ? ["esito"] : []), "voto", "aree", "nuova"];
+  const corrente = passi[passo];
+  const aree = ["Allenamenti", "Alimentazione", "Passi", "Acqua", "Sonno", "Stress"];
+  const toggle = (k, v) => setR((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const chip = (on, f, t) => <button key={t} onClick={f} className="px-4 py-2.5 rounded-full text-sm font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
+  const bolla = (children) => <div className="rounded-2xl px-4 py-3 text-sm leading-snug max-w-[92%]" style={{ background: "#fff", border: "1px solid #dbe7f3", color: "#27466D", borderRadius: "18px 18px 18px 4px" }}>{children}</div>;
+  const risposta = (t) => <div className="self-end rounded-2xl px-4 py-2 text-sm text-white" style={{ background: "#27466D", borderRadius: "18px 18px 4px 18px" }}>{t}</div>;
+  const nomiEsito = { sistemato: "✅ Sistemato", meta: "🔸 A metà", no: "❌ Non ci sono riuscita" };
+  const puoAndare = corrente === "esito" ? !!r.esito : corrente === "voto" ? r.voto != null : true;
+  const ultimo = passo === passi.length - 1;
+  const invia = async () => {
+    setErrore(""); setStato("invio");
+    const { data, error } = await supabase.rpc("bilancio_invia", { p_token: token, p_esito: prec ? r.esito : null, p_voto: r.voto, p_rispettato: r.rispettato, p_meno: r.meno, p_da_sistemare: r.daSistemare, p_impegni: r.impegni });
+    if (error || data !== true) { setErrore("Non sono riuscita a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
+    setStato("fatto");
+  };
+  if (stato === "fatto") return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md rounded-3xl p-8 text-center space-y-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+        <p className="text-4xl">✨</p>
+        <p className="text-lg font-semibold">Grazie {nome}!</p>
+        <p className="text-sm">Ho ricevuto tutto 🫶🏻 Ti rispondo io su WhatsApp e ripartiamo da qui. Questa settimana ci sono con te 💪🏻</p>
+      </div>
+    </div>
+  );
+  const campo = "w-full border rounded-xl px-3 py-3 text-sm bg-white";
+  return (
+    <div className="px-5 py-6 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md flex flex-col gap-3" style={{ minHeight: "calc(100dvh - 3rem)" }}>
+        <div className="flex gap-1.5">{passi.map((_, i) => <i key={i} className="flex-1 h-1 rounded-full" style={{ background: i <= passo ? "#27466D" : "#C9E0F7" }} />)}</div>
+        <p className="text-[11px] tracking-widest uppercase text-center" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
+        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Nuova settimana 💪🏻 Ci metti 1 minuto e a me serve per seguirti bene 🫶🏻"}</>)}
+        {corrente === "esito" && bolla(<>Settimana scorsa volevi sistemare <b>«{prec}»</b>. Com'è andata?</>)}
+        {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
+        {corrente === "voto" && prec && r.esito && risposta(nomiEsito[r.esito])}
+        {corrente === "voto" && bolla(<>{prec ? (r.esito === "sistemato" ? "Che bello, brava! 🫶🏻" : "Capita, è già un passo 🫶🏻") + " " : ""}Da 1 a 10, com'è andata la settimana?</>)}
+        {corrente === "voto" && <div className="flex flex-wrap gap-2">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <button key={n} onClick={() => setR({ ...r, voto: n })} className="w-10 h-10 rounded-full text-sm font-semibold" style={r.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div>}
+        {corrente === "aree" && risposta(String(r.voto))}
+        {corrente === "aree" && bolla(<>Cosa hai rispettato di più? <span style={{ color: "#7a8da3" }}>(puoi sceglierne più di una)</span></>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{aree.map((a) => chip(r.rispettato.includes(a), () => toggle("rispettato", a), a))}</div>}
+        {corrente === "aree" && bolla(<>E di meno?</>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{aree.map((a) => chip(r.meno.includes(a), () => toggle("meno", a), a))}</div>}
+        {corrente === "nuova" && bolla(<>Una cosa che vuoi sistemare questa settimana?</>)}
+        {corrente === "nuova" && <textarea value={r.daSistemare} onChange={(e) => setR({ ...r, daSistemare: e.target.value })} rows={2} maxLength={300} placeholder="es. cena fuori: scegliere un piatto proteico" className={campo} style={{ borderColor: "#C9E0F7", color: "#27466D" }} />}
+        {corrente === "nuova" && bolla(<>Ci sono impegni da organizzare? <span style={{ color: "#7a8da3" }}>(viaggi, lavoro, cene)</span></>)}
+        {corrente === "nuova" && <textarea value={r.impegni} onChange={(e) => setR({ ...r, impegni: e.target.value })} rows={2} maxLength={300} placeholder="es. viaggio di lavoro mercoledì e giovedì" className={campo} style={{ borderColor: "#C9E0F7", color: "#27466D" }} />}
+        {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+        <div className="mt-auto pt-3 flex gap-2">
+          {passo > 0 && <button onClick={() => setPasso(passo - 1)} className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Indietro</button>}
+          <button disabled={!puoAndare || stato === "invio"} onClick={() => (ultimo ? invia() : setPasso(passo + 1))} className="flex-1 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>{ultimo ? (stato === "invio" ? "Invio…" : "Invia a Morgana") : "Avanti"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bilancio AVANZATO pubblico (/?avanzato=CODICE) ----------
+function ScalaPunti({ label, hint, valore, onChange }) {
+  return (
+    <div className="rounded-2xl px-4 py-3" style={{ background: "#fff", border: "1px solid #dbe7f3" }}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0"><p className="text-sm" style={{ color: "#27466D" }}>{label}</p>{hint && <p className="text-[10px]" style={{ color: "#7a8da3" }}>{hint}</p>}</div>
+        <div className="flex gap-1.5 shrink-0">
+          {[1, 2, 3, 4, 5].map((n) => <button key={n} onClick={() => onChange(n)} className="w-9 h-9 rounded-full text-sm font-semibold" style={valore === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+function numeroDa(t, intero) {
+  const s = String(t || "").trim();
+  if (!s) return null;
+  const x = intero ? Number(s.replace(/[.\s]/g, "")) : Number(s.replace(/\s/g, "").replace(",", "."));
+  return isNaN(x) ? null : x;
+}
+function BilancioAvanzatoPubblico({ token }) {
+  const [info, setInfo] = useState(undefined);
+  const [passo, setPasso] = useState(0);
+  const [r, setR] = useState({ esito: null, punti: {}, peso: "", vita: "", passi: "", ore: "", dif: [], note: "", obiettivo: "" });
+  const [stato, setStato] = useState("form");
+  const [errore, setErrore] = useState("");
+  useEffect(() => { document.title = "Il tuo bilancio · Coaching by Morgana"; }, []);
+  useEffect(() => {
+    supabase.rpc("bilancio_avanzato_info", { p_token: token }).then(({ data, error }) => setInfo(error ? null : data || null), () => setInfo(null));
+  }, [token]);
+  const sfondo = { background: "#F5FAFE", minHeight: "100dvh" };
+  if (info === undefined) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ ...sfondo, color: "#7a8da3" }}>Un attimo…</div>;
+  if (info === null) return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="max-w-md text-center space-y-2"><p className="text-3xl">✨</p><p style={{ color: "#27466D" }} className="font-semibold">Questo link non è più valido</p><p className="text-sm" style={{ color: "#7a8da3" }}>Scrivimi su WhatsApp e te ne mando uno nuovo 🫶🏻</p></div>
+    </div>
+  );
+  const nome = info.nome || "";
+  const prec = info.obiettivo_prec;
+  const passi = [...(prec ? ["esito"] : []), "aderenza", "recupero", "numeri", "difficolta", "obiettivo"];
+  const corrente = passi[passo];
+  const setP = (k, v) => setR((o) => ({ ...o, punti: { ...o.punti, [k]: v } }));
+  const chip = (on, f, t) => <button key={t} onClick={f} className="px-4 py-2.5 rounded-full text-sm font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
+  const bolla = (children) => <div className="rounded-2xl px-4 py-3 text-sm leading-snug max-w-[92%]" style={{ background: "#fff", border: "1px solid #dbe7f3", color: "#27466D", borderRadius: "18px 18px 18px 4px" }}>{children}</div>;
+  const campo = "w-full border rounded-xl px-3 py-3 text-sm bg-white";
+  const stileCampo = { borderColor: "#C9E0F7", color: "#27466D" };
+  const completo = (voci) => voci.every(([k]) => r.punti[k] != null);
+  const puoAndare = corrente === "esito" ? !!r.esito : corrente === "aderenza" ? completo(VOCI_ADERENZA) : corrente === "recupero" ? completo(VOCI_RECUPERO) : true;
+  const ultimo = passo === passi.length - 1;
+  const invia = async () => {
+    setErrore(""); setStato("invio");
+    const { data, error } = await supabase.rpc("bilancio_avanzato_invia", {
+      p_token: token, p_esito: prec ? r.esito : null, p_punti: r.punti, p_peso: numeroDa(r.peso), p_vita: numeroDa(r.vita), p_passi: numeroDa(r.passi, true),
+      p_ore: numeroDa(r.ore), p_difficolta: r.dif, p_note: r.note, p_obiettivo: r.obiettivo,
+    });
+    if (error || data !== true) { setErrore("Non sono riuscita a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
+    setStato("fatto");
+  };
+  if (stato === "fatto") return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md rounded-3xl p-8 text-center space-y-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+        <p className="text-4xl">✨</p>
+        <p className="text-lg font-semibold">Grazie {nome}!</p>
+        <p className="text-sm">Ho ricevuto tutto 🫶🏻 Analizzo i tuoi dati e ti scrivo io su WhatsApp. Continuiamo a costruire il percorso, passo dopo passo 💪🏻</p>
+      </div>
+    </div>
+  );
+  return (
+    <div className="px-5 py-6 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md flex flex-col gap-3" style={{ minHeight: "calc(100dvh - 3rem)" }}>
+        <div className="flex gap-1.5">{passi.map((_, i) => <i key={i} className="flex-1 h-1 rounded-full" style={{ background: i <= passo ? "#27466D" : "#C9E0F7" }} />)}</div>
+        <p className="text-[11px] tracking-widest uppercase text-center" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
+        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Il tuo bilancio della settimana appena conclusa: ci metti 2 minuti e mi serve per calibrare il tuo percorso 💪🏻"}</>)}
+        {corrente === "esito" && bolla(<>Settimana scorsa ti eri data come obiettivo <b>«{prec}»</b>. Com'è andata?</>)}
+        {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
+        {corrente === "aderenza" && bolla(<><b>Come hai gestito la settimana?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (al massimo)</span></>)}
+        {corrente === "aderenza" && VOCI_ADERENZA.map(([k, l]) => <ScalaPunti key={k} label={l} hint={k === "prestazioni" ? "carichi e ripetizioni rispetto al previsto" : null} valore={r.punti[k]} onChange={(v) => setP(k, v)} />)}
+        {corrente === "recupero" && bolla(<><b>E il recupero?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (moltissimo)</span></>)}
+        {corrente === "recupero" && VOCI_RECUPERO.map(([k, l]) => <ScalaPunti key={k} label={l} hint={k === "fame" ? "1 = nessuna, 5 = tantissima" : k === "stress" ? "1 = sereno, 5 = molto stressata" : k === "dolori" ? "1 = nessuno, 5 = molto forti" : k === "digestione" ? "1 = pesante e gonfia, 5 = ottima" : null} valore={r.punti[k]} onChange={(v) => setP(k, v)} />)}
+        {corrente === "numeri" && bolla(<><b>I tuoi numeri della settimana</b><br /><span style={{ color: "#7a8da3" }}>Se non li hai, lascia vuoto</span></>)}
+        {corrente === "numeri" && (
+          <div className="space-y-2">
+            {[["peso", "Peso medio (kg)", "es. 58,4", "decimal"], ["vita", "Vita (cm)", "es. 66", "decimal"], ["passi", "Passi medi al giorno", "es. 9500", "numeric"], ["ore", "Ore di sonno medie", "es. 7", "decimal"]].map(([k, l, ph, m]) => (
+              <div key={k} className="flex items-center justify-between gap-3"><span className="text-sm" style={{ color: "#27466D" }}>{l}</span><input value={r[k]} onChange={(e) => setR({ ...r, [k]: e.target.value })} inputMode={m} placeholder={ph} className="w-28 border rounded-xl px-3 py-2.5 text-sm bg-white text-right" style={stileCampo} /></div>
+            ))}
+          </div>
+        )}
+        {corrente === "difficolta" && bolla(<>Cosa è stato più difficile? <span style={{ color: "#7a8da3" }}>(puoi sceglierne più di una)</span></>)}
+        {corrente === "difficolta" && <div className="flex flex-wrap gap-2">{DIFFICOLTA_AV.map((d) => chip(r.dif.includes(d), () => setR({ ...r, dif: r.dif.includes(d) ? r.dif.filter((x) => x !== d) : [...r.dif, d] }), d))}</div>}
+        {corrente === "difficolta" && <textarea value={r.note} onChange={(e) => setR({ ...r, note: e.target.value })} rows={3} maxLength={300} placeholder="Spiegami meglio (facoltativo)" className={campo} style={stileCampo} />}
+        {corrente === "obiettivo" && bolla(<>Qual è il tuo obiettivo per la prossima settimana? <span style={{ color: "#7a8da3" }}>Una cosa concreta e piccola</span></>)}
+        {corrente === "obiettivo" && <textarea value={r.obiettivo} onChange={(e) => setR({ ...r, obiettivo: e.target.value })} rows={3} maxLength={300} placeholder="es. chiudere i 10.000 passi ogni giorno" className={campo} style={stileCampo} />}
+        {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+        <div className="mt-auto pt-3 flex gap-2">
+          {passo > 0 && <button onClick={() => setPasso(passo - 1)} className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Indietro</button>}
+          <button disabled={!puoAndare || stato === "invio"} onClick={() => (ultimo ? invia() : setPasso(passo + 1))} className="flex-1 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>{ultimo ? (stato === "invio" ? "Invio…" : "Invia a Morgana") : "Avanti"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const paginaPubblica = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("lista");
-  return paginaPubblica ? <ListaAttesaPubblica /> : <AppInterna />;
+  const qs = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  if (qs.get("avanzato")) return <BilancioAvanzatoPubblico token={qs.get("avanzato")} />;
+  if (qs.get("bilancio")) return <BilancioPubblico token={qs.get("bilancio")} />;
+  return qs.has("lista") ? <ListaAttesaPubblica /> : <AppInterna />;
 }
 
 function AppInterna() {
