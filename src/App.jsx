@@ -4319,7 +4319,7 @@ function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichett
   );
 }
 
-function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true, inScarico = false }) {
+function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true, inScarico = false, cambi = [] }) {
   const nSerie = Math.max(1, Math.min(serieDi(es), 10));
   const [bozza, setBozza] = useState({}); // { "n-kg": testo }
   const [nota, setNota] = useState("");
@@ -4335,6 +4335,8 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   // carico più basso dell'ultima volta (stessa serie): si chiede il motivo
   const calo = Array.from({ length: nSerie }).some((_, i) => { const e = entryDi(i + 1); const u = ultime[i + 1]; return !!e && e.kg != null && !!u && u.kg != null && Number(e.kg) < Number(u.kg); });
   const motiviSalvati = ((entries.find((e) => e.motivo_calo) || {}).motivo_calo || "").split(",").filter(Boolean);
+  // prima seduta di questo esercizio dopo un cambio di palestra o attrezzi: il confronto con prima non conta
+  const dopoCambio = cambi.some((c) => data >= c && ultime._ultima && ultime._ultima < c);
   const scegliMotivo = async (codice) => {
     const nuovi = motiviSalvati.includes(codice) ? motiviSalvati.filter((x) => x !== codice) : [...motiviSalvati, codice];
     const riga = entries.find((x) => x.numero_serie === 1) || entries[0];
@@ -4478,7 +4480,13 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
               );
             })}
           </div>
-          {!inScarico && (calo || motiviSalvati.length > 0) && (
+          {!inScarico && dopoCambio && (
+            <div className="mt-3 rounded-2xl p-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
+              <p className="text-sm font-semibold" style={{ color: "#6b5d2e" }}>Nuova palestra, nuova base ✨</p>
+              <p className="text-xs mt-0.5" style={{ color: "#6b5d2e" }}>Macchinari e attrezzi diversi: i carichi di prima non sono confrontabili{calo ? ", quindi un peso più basso non è un passo indietro" : ""}. Segna quello che usi oggi, da qui ripartiamo 🫶🏻</p>
+            </div>
+          )}
+          {!inScarico && !dopoCambio && (calo || motiviSalvati.length > 0) && (
             <div className="mt-3 rounded-2xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
               <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Carico più basso dell'ultima volta: com'è andata?</p>
               <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Capita, è normale! Scegli cosa c'entra di più: aiuta a leggere bene i progressi ✨</p>
@@ -4549,6 +4557,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
   const [libreria, setLibreria] = useState([]);
   const [sessoCl, setSessoCl] = useState("");
   const [scarCl, setScarCl] = useState([]);
+  const [cambiCl, setCambiCl] = useState([]);
   const [aperti, setAperti] = useState({});
   const [prep, setPrep] = useState([]);
   const [infoEs, setInfoEs] = useState(null);
@@ -4571,6 +4580,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
         const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi, sesso").eq("id", clientId).maybeSingle();
         if (c) setSessoCl(c.sesso || "");
         try { const { data: sc } = await supabase.from("scarichi").select("dal, al").eq("client_id", clientId); setScarCl(sc || []); } catch (e) { /* ignora */ }
+        try { const { data: cp } = await supabase.from("cambi_palestra").select("dal, tipo").eq("client_id", clientId).order("dal"); setCambiCl(cp || []); } catch (e) { /* ignora */ }
         if (c && c.video_attivi !== false && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")) {
           await caricaSceltaVideo();
           const { data: v } = await supabase.from("esercizi_video").select("*").order("ordine");
@@ -4702,6 +4712,12 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
         <p className="text-sm mt-1" style={{ color: "#7a8da3" }}>Registra carichi e ripetizioni, serie dopo serie.</p>
       </div>
       <StatoSyncLog />
+      {cambiCl.filter((x) => x.dal >= addGiorni(oggi, -60)).slice(-1).map((x) => (
+        <div key={x.dal} className="rounded-2xl p-3.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+          <p className="text-sm font-semibold">Hai cambiato palestra ✨</p>
+          <p className="text-xs mt-0.5">Dal {x.dal.split("-").reverse().join("/")} i carichi ripartono da una nuova base: macchinari e pesi diversi non sono un passo indietro. Registra con tranquillità quello che usi, Morgana lo tiene presente 🫶🏻</p>
+        </div>
+      ))}
 
       {giorni.length === 0 ? (
         <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
@@ -4767,7 +4783,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
             <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? correnteKey === es.id}
               onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? correnteKey === es.id) }))}
               entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
-              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} inScarico={scarCl.some((x) => data >= x.dal && data <= x.al)} />
+              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} inScarico={scarCl.some((x) => data >= x.dal && data <= x.al)} cambi={cambiCl.map((x) => x.dal)} />
           ))}
           {tuttiFatti ? (
             <div id="fine-allenamento" className="rounded-3xl p-5 text-center" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7" }}>
@@ -11015,11 +11031,65 @@ function valoreRiga(r, k) {
   return r.punti?.[k] ?? null;
 }
 const fmt1 = (n) => (n == null ? "–" : n.toFixed(1).replace(".", ","));
+function FormBilancioCoach({ riga, clientId, sett, onFatto, onAnnulla }) {
+  const [f, setF] = useState({
+    voto: riga?.voto ?? null, punti: riga?.punti || {}, peso: riga?.peso_medio != null ? String(riga.peso_medio).replace(".", ",") : "",
+    passi: riga?.passi != null ? String(riga.passi) : "", ore: riga?.ore_sonno != null ? String(riga.ore_sonno).replace(".", ",") : "",
+    dif: riga?.difficolta || [], note: riga?.difficolta_note || "", obiettivo: riga?.obiettivo || "", impegni: riga?.impegni || "",
+    rispettato: riga?.rispettato || [], meno: riga?.rispettato_meno || [], esito: riga?.esito_precedente || null,
+  });
+  const [stato, setStato] = useState("");
+  const tg = (k, v) => setF((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const chip = (on, fn, t) => <button key={t} onClick={fn} className="px-2.5 py-1 rounded-full text-[11px] font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
+  const num = (t, intero) => { const x = String(t || "").trim(); if (!x) return null; const n = intero ? Number(x.replace(/[.\s]/g, "")) : Number(x.replace(/\s/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
+  const salva = async () => {
+    setStato("salvo…");
+    const punti = {}; Object.entries(f.punti).forEach(([k, v]) => { if (v >= 1 && v <= 5) punti[k] = v; });
+    const riga2 = { client_id: clientId, settimana: sett, voto: f.voto, punti, peso_medio: num(f.peso), passi: num(f.passi, true), ore_sonno: num(f.ore), difficolta: f.dif, difficolta_note: f.note.trim() || null, obiettivo: f.obiettivo.trim() || null, impegni: f.impegni.trim() || null, rispettato: f.rispettato, rispettato_meno: f.meno, esito_precedente: f.esito, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("bilanci_avanzati").upsert(riga2, { onConflict: "client_id,settimana" });
+    if (error) { setStato("Non sono riuscita a salvare, riprova."); return; }
+    onFatto();
+  };
+  const scala = (k, l) => (
+    <div key={k} className="flex items-center justify-between gap-2">
+      <span className="text-xs" style={{ color: "#27466D" }}>{l}</span>
+      <div className="flex gap-1">{[1, 2, 3, 4, 5].map((n) => <button key={n} onClick={() => setF((o) => ({ ...o, punti: { ...o.punti, [k]: o.punti[k] === n ? null : n } }))} className="w-7 h-7 rounded-full text-xs font-semibold" style={f.punti[k] === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div>
+    </div>
+  );
+  const input = "w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm";
+  return (
+    <div className="space-y-3 rounded-xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>{riga ? "Modifica bilancio" : "Inserisci bilancio a mano"} · settimana {etichettaSettimana(sett)}</p>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Voto (1–10)</p><div className="flex flex-wrap gap-1.5 mt-1">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <button key={n} onClick={() => setF({ ...f, voto: f.voto === n ? null : n })} className="w-7 h-7 rounded-full text-xs font-semibold" style={f.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div></div>
+      <div className="space-y-1.5">{VOCI_ADERENZA.map(([k, l]) => scala(k, l))}</div>
+      <div className="space-y-1.5">{VOCI_RECUPERO.map(([k, l]) => scala(k, l))}</div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Rispettato di più</p><div className="flex flex-wrap gap-1.5 mt-1">{AREE_BILANCIO.map((a) => chip(f.rispettato.includes(a), () => tg("rispettato", a), a))}</div></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Rispettato di meno</p><div className="flex flex-wrap gap-1.5 mt-1">{AREE_BILANCIO.map((a) => chip(f.meno.includes(a), () => tg("meno", a), a))}</div></div>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-[11px] text-slate-500">Peso medio kg<input value={f.peso} onChange={(e) => setF({ ...f, peso: e.target.value })} inputMode="decimal" className={input} /></label>
+        <label className="text-[11px] text-slate-500">Passi medi<input value={f.passi} onChange={(e) => setF({ ...f, passi: e.target.value })} inputMode="numeric" className={input} /></label>
+        <label className="text-[11px] text-slate-500">Ore sonno<input value={f.ore} onChange={(e) => setF({ ...f, ore: e.target.value })} inputMode="decimal" className={input} /></label>
+      </div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Difficoltà</p><div className="flex flex-wrap gap-1.5 mt-1">{DIFFICOLTA_AV.map((d) => chip(f.dif.includes(d), () => tg("dif", d), d))}</div></div>
+      <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Nota sulle difficoltà" className={input} />
+      <input value={f.obiettivo} onChange={(e) => setF({ ...f, obiettivo: e.target.value })} placeholder="Obiettivo per la nuova settimana" className={input} />
+      <input value={f.impegni} onChange={(e) => setF({ ...f, impegni: e.target.value })} placeholder="Impegni da organizzare" className={input} />
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Esito dell'obiettivo precedente</p><div className="flex flex-wrap gap-1.5 mt-1">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ No"]].map(([v, l]) => chip(f.esito === v, () => setF({ ...f, esito: f.esito === v ? null : v }), l))}</div></div>
+      <div className="flex gap-2">
+        <button onClick={onAnnulla} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Annulla</button>
+        <button onClick={salva} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva</button>
+      </div>
+      {stato && <p className="text-xs text-center" style={{ color: "#7a6a3a" }}>{stato}</p>}
+    </div>
+  );
+}
 function BilancioAvanzatoCliente({ client }) {
   const [righe, setRighe] = useState(null);
   const [offset, setOffset] = useState(0);
   const [stato, setStato] = useState("");
-  useEffect(() => { supabase.from("bilanci_avanzati").select("*").eq("client_id", client.id).order("settimana", { ascending: false }).then(({ data }) => setRighe(data || [])); }, [client.id]);
+  const [modifica, setModifica] = useState(false);
+  const carica = () => supabase.from("bilanci_avanzati").select("*").eq("client_id", client.id).order("settimana", { ascending: false }).then(({ data }) => setRighe(data || []));
+  useEffect(() => { carica(); }, [client.id]);
   if (!righe) return null;
   const sett = settimanaRiferimento(offset);
   const fino = righe.filter((r) => r.settimana <= sett); // dal più recente
@@ -11086,6 +11156,14 @@ function BilancioAvanzatoCliente({ client }) {
         </div>
       )}
       {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
+      {modifica ? (
+        <FormBilancioCoach key={sett} riga={rigaSett} clientId={client.id} sett={sett} onAnnulla={() => setModifica(false)} onFatto={() => { setModifica(false); setStato("Salvato ✨"); carica(); }} />
+      ) : (
+        <div className="flex gap-2">
+          <button onClick={() => setModifica(true)} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>{rigaSett ? "Modifica questo bilancio" : "Inserisci a mano"}</button>
+          {rigaSett && <button onClick={async () => { if (!confirm(`Eliminare il bilancio della settimana ${etichettaSettimana(sett)}? Non si può annullare.`)) return; const { error } = await supabase.from("bilanci_avanzati").delete().eq("id", rigaSett.id); setStato(error ? "Non sono riuscita a eliminarlo, riprova." : "Bilancio eliminato ✨"); carica(); }} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>Elimina</button>}
+        </div>
+      )}
       {n === 0 ? (
         <p className="text-xs" style={{ color: "#7a8da3" }}>Nessun bilancio avanzato ricevuto per questo periodo. Appena {String(client.nome || "").split(" ")[0]} compila il link, qui compaiono medie, tendenze e segnali.</p>
       ) : (
