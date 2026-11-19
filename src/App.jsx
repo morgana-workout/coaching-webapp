@@ -8379,7 +8379,6 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "riepilogo" && (
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
-          <BilancioSettimanaleCliente client={client} />
           <BilancioAvanzatoCliente client={client} />
           <AcquaCoach clientId={client.id} nome={client.nome} />
           <AndamentoCliente client={client} checkins={checkins} />
@@ -10998,7 +10997,7 @@ const VOCI_RECUPERO = [["sonno", "Qualità del sonno"], ["energia", "Energia"], 
 const DIFFICOLTA_AV = ["Fame", "Stanchezza", "Sonno", "Dolori", "Cene fuori", "Lavoro", "Motivazione", "Ciclo"];
 const PESI_MEDIA = [4, 3, 2, 1];
 function testoLinkAvanzato(nome, token) {
-  return `Ciao ${(nome || "").split(" ")[0]} ✨ come stai? Ti lascio il bilancio della settimana precedente da compilare ✨\n${window.location.origin}/?avanzato=${token}`;
+  return `Ciao ${(nome || "").split(" ")[0]} ✨ come stai? Ti lascio il bilancio della settimana precedente da compilare ✨\n${window.location.origin}/?bilancio=${token}`;
 }
 function mediaConPesi(valori) { // valori: dal più recente al più vecchio, null se mancante
   let s = 0, p = 0;
@@ -11011,6 +11010,7 @@ function valoreRiga(r, k) {
     const v = [r.punti?.sonno, r.punti?.energia, r.punti?.digestione, r.punti?.fame != null ? 6 - r.punti.fame : null, r.punti?.stress != null ? 6 - r.punti.stress : null, r.punti?.dolori != null ? 6 - r.punti.dolori : null].filter((x) => x != null);
     return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
   }
+  if (k === "voto") return r.voto != null ? Number(r.voto) : null;
   if (["peso_medio", "vita", "passi", "ore_sonno"].includes(k)) return r[k] != null ? Number(r[k]) : null;
   return r.punti?.[k] ?? null;
 }
@@ -11071,7 +11071,7 @@ function BilancioAvanzatoCliente({ client }) {
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Bilancio avanzato</p>
+          <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Bilancio settimanale</p>
           <p className="text-[11px]" style={{ color: "#7a8da3" }}>Media ponderata (pesi 4·3·2·1, la settimana più recente conta di più) · fino a {etichettaSettimana(sett)}</p>
         </div>
         <div className="flex gap-1">
@@ -11081,8 +11081,8 @@ function BilancioAvanzatoCliente({ client }) {
       </div>
       {client.token_bilancio && (
         <div className="flex gap-2">
-          <a href={linkWhatsappTesto(client.telefono, testoLinkAvanzato(client.nome, client.token_bilancio)) || undefined} target="_blank" rel="noreferrer" className="flex-1 py-2 rounded-xl text-xs font-semibold text-center" style={{ background: "#E1EEFB", color: "#27466D" }}>Invia link avanzato su WhatsApp</a>
-          <button onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/?avanzato=${client.token_bilancio}`); setStato("Link copiato ✨"); }} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Copia link</button>
+          <a href={linkWhatsappTesto(client.telefono, testoLinkBilancio(client.nome, client.token_bilancio)) || undefined} target="_blank" rel="noreferrer" className="flex-1 py-2 rounded-xl text-xs font-semibold text-center" style={{ background: "#E1EEFB", color: "#27466D" }}>Invia link su WhatsApp</a>
+          <button onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/?bilancio=${client.token_bilancio}`); setStato("Link copiato ✨"); }} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Copia link</button>
         </div>
       )}
       {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
@@ -11090,16 +11090,16 @@ function BilancioAvanzatoCliente({ client }) {
         <p className="text-xs" style={{ color: "#7a8da3" }}>Nessun bilancio avanzato ricevuto per questo periodo. Appena {String(client.nome || "").split(" ")[0]} compila il link, qui compaiono medie, tendenze e segnali.</p>
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-2">
-            {[["Aderenza", aderenza, delta("aderenza")], ["Recupero", recupero, delta("recupero")]].map(([l, v, d]) => (
-              <div key={l} className="rounded-xl p-2.5 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
-                <p className="text-lg font-semibold" style={{ color: "#27466D" }}>{fmt1(v)}<span className="text-[10px]" style={{ color: "#7a8da3" }}>/5</span></p>
-                <p className="text-[10px]" style={{ color: "#7a8da3" }}>{l}{d != null && Math.abs(d) >= 0.15 ? ` · ${d > 0 ? "+" : "−"}${fmt1(Math.abs(d))}` : ""}</p>
+          <div className="grid grid-cols-4 gap-2">
+            {[["Voto", med("voto", att), delta("voto"), "/10"], ["Aderenza", aderenza, delta("aderenza"), "/5"], ["Recupero", recupero, delta("recupero"), "/5"]].map(([l, v, d, u]) => (
+              <div key={l} className="rounded-xl p-2 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
+                <p className="text-base font-semibold" style={{ color: "#27466D" }}>{fmt1(v)}<span className="text-[9px]" style={{ color: "#7a8da3" }}>{u}</span></p>
+                <p className="text-[10px]" style={{ color: "#7a8da3" }}>{l}{d != null && Math.abs(d) >= 0.15 ? ` ${d > 0 ? "+" : "−"}${fmt1(Math.abs(d))}` : ""}</p>
               </div>
             ))}
-            <div className="rounded-xl p-2.5 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
-              <p className="text-lg font-semibold" style={{ color: "#27466D" }}>{n}<span className="text-[10px]" style={{ color: "#7a8da3" }}>/4</span></p>
-              <p className="text-[10px]" style={{ color: "#7a8da3" }}>Bilanci nel blocco</p>
+            <div className="rounded-xl p-2 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
+              <p className="text-base font-semibold" style={{ color: "#27466D" }}>{n}<span className="text-[9px]" style={{ color: "#7a8da3" }}>/4</span></p>
+              <p className="text-[10px]" style={{ color: "#7a8da3" }}>Bilanci</p>
             </div>
           </div>
           <div>
@@ -11109,7 +11109,6 @@ function BilancioAvanzatoCliente({ client }) {
               </div>
             ); })}
             {pesi.length > 0 && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Peso medio</span><span className="font-semibold">{fmt1(pesi[0].v)} kg{pesoKg != null ? ` · ${pesoKg > 0 ? "+" : "−"}${fmt1(Math.abs(pesoKg)).replace(",", ",")} kg/sett (${pesoPct > 0 ? "+" : "−"}${fmt1(Math.abs(pesoPct))}%)` : ""}</span></div>}
-            {att.find((r) => r?.vita != null) && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Vita</span><span className="font-semibold">{fmt1(Number(att.find((r) => r?.vita != null).vita))} cm</span></div>}
             {med("passi", att) != null && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Passi medi</span><span className="font-semibold">{Math.round(med("passi", att)).toLocaleString("it-IT")}</span></div>}
             {ore != null && <div className="flex justify-between py-1.5 text-sm" style={{ color: "#27466D" }}><span>Ore di sonno medie</span><span className="font-semibold">{fmt1(ore)} h</span></div>}
           </div>
@@ -11125,6 +11124,17 @@ function BilancioAvanzatoCliente({ client }) {
               {rigaSett?.difficolta_note && <><b>Nota della settimana:</b> «{rigaSett.difficolta_note}»</>}
             </p>
           )}
+          {(() => {
+            const conta2 = (campo) => { const m = {}; att.forEach((r) => (r?.[campo] || []).forEach((x) => { m[x] = (m[x] || 0) + 1; })); return Object.entries(m).sort((a, b) => b[1] - a[1]).map(([x, c]) => `${x.toLowerCase()} (${c})`).join(", "); };
+            const piu = conta2("rispettato"), meno = conta2("rispettato_meno");
+            return (piu || meno || rigaSett?.impegni) ? (
+              <p className="text-xs" style={{ color: "#27466D" }}>
+                {piu && <><b>Rispettato di più (4 sett.):</b> {piu}<br /></>}
+                {meno && <><b>Rispettato di meno (4 sett.):</b> {meno}<br /></>}
+                {rigaSett?.impegni && <><b>Impegni da organizzare:</b> «{rigaSett.impegni}»</>}
+              </p>
+            ) : null;
+          })()}
           {(rigaSett?.obiettivo || obiettivoPrec) && (
             <div className="text-xs space-y-0.5" style={{ color: "#27466D" }}>
               {obiettivoPrec && <p><b>Obiettivo della settimana prima:</b> «{obiettivoPrec}» {esito ? `· ${nomeEsito[esito]}` : "· da verificare"}</p>}
@@ -11143,13 +11153,13 @@ function BilanciLunediCoach({ clients, onSelect }) {
   const sett = settimanaRiferimento(offset);
   const prec = spostaGiorni(sett, -7);
   useEffect(() => {
-    supabase.from("bilanci_settimanali").select("*").in("settimana", [sett, prec]).then(({ data }) => setRighe(data || []), () => setRighe([]));
+    supabase.from("bilanci_avanzati").select("client_id, settimana, voto, punti, obiettivo, esito_precedente").in("settimana", [sett, prec]).then(({ data }) => setRighe(data || []), () => setRighe([]));
   }, [sett]);
   if (!righe) return null;
   const attive = (clients || []).filter((c) => !c.archiviato);
   const risposte = new Map(righe.filter((r) => r.settimana === sett).map((r) => [r.client_id, r]));
-  const daSistemarePrec = new Map(righe.filter((r) => r.settimana === prec && r.da_sistemare).map((r) => [r.client_id, r.da_sistemare]));
-  const risposto = attive.filter((c) => risposte.has(c.id) && risposte.get(c.id).voto != null);
+  const daSistemarePrec = new Map(righe.filter((r) => r.settimana === prec && r.obiettivo).map((r) => [r.client_id, r.obiettivo]));
+  const risposto = attive.filter((c) => risposte.has(c.id));
   const daSentire = attive.filter((c) => !risposto.includes(c));
   const pct = attive.length ? Math.round((risposto.length / attive.length) * 100) : 0;
   return (
@@ -11195,8 +11205,8 @@ function BilanciLunediCoach({ clients, onSelect }) {
                 const r = risposte.get(c.id);
                 return (
                   <button key={c.id} onClick={() => onSelect && onSelect(c.id)} className="w-full flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0 text-left">
-                    <span className="text-sm" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}{r.da_sistemare && <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>da sistemare: {r.da_sistemare}</span>}</span>
-                    <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0" style={{ background: "#C9E0F7", color: "#27466D" }}>{r.voto}/10{r.esito_precedente ? ` · ${EMOJI_ESITO[r.esito_precedente]}` : ""}</span>
+                    <span className="text-sm" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}{r.obiettivo && <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>obiettivo: {r.obiettivo}</span>}</span>
+                    <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0" style={{ background: "#C9E0F7", color: "#27466D" }}>{r.voto != null ? `${r.voto}/10` : "ricevuto"}{r.esito_precedente ? ` · ${EMOJI_ESITO[r.esito_precedente]}` : ""}</span>
                   </button>
                 );
               })}
@@ -15727,7 +15737,7 @@ function numeroDa(t, intero) {
 function BilancioAvanzatoPubblico({ token }) {
   const [info, setInfo] = useState(undefined);
   const [passo, setPasso] = useState(0);
-  const [r, setR] = useState({ esito: null, punti: {}, peso: "", vita: "", passi: "", ore: "", dif: [], note: "", obiettivo: "" });
+  const [r, setR] = useState({ esito: null, voto: null, punti: {}, peso: "", passi: "", ore: "", dif: [], note: "", obiettivo: "", rispettato: [], meno: [], impegni: "" });
   const [stato, setStato] = useState("form");
   const [errore, setErrore] = useState("");
   useEffect(() => { document.title = "Il tuo bilancio · Coaching by Morgana"; }, []);
@@ -15743,7 +15753,9 @@ function BilancioAvanzatoPubblico({ token }) {
   );
   const nome = info.nome || "";
   const prec = info.obiettivo_prec;
-  const passi = [...(prec ? ["esito"] : []), "aderenza", "recupero", "numeri", "difficolta", "obiettivo"];
+  const passi = [...(prec ? ["esito"] : []), "voto", "aderenza", "recupero", "aree", "numeri", "difficolta", "obiettivo"];
+  const AREE_B = ["Allenamenti", "Alimentazione", "Passi", "Acqua", "Sonno", "Stress"];
+  const toggleA = (k, v) => setR((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
   const corrente = passi[passo];
   const setP = (k, v) => setR((o) => ({ ...o, punti: { ...o.punti, [k]: v } }));
   const chip = (on, f, t) => <button key={t} onClick={f} className="px-4 py-2.5 rounded-full text-sm font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
@@ -15751,13 +15763,13 @@ function BilancioAvanzatoPubblico({ token }) {
   const campo = "w-full border rounded-xl px-3 py-3 text-sm bg-white";
   const stileCampo = { borderColor: "#C9E0F7", color: "#27466D" };
   const completo = (voci) => voci.every(([k]) => r.punti[k] != null);
-  const puoAndare = corrente === "esito" ? !!r.esito : corrente === "aderenza" ? completo(VOCI_ADERENZA) : corrente === "recupero" ? completo(VOCI_RECUPERO) : true;
+  const puoAndare = corrente === "esito" ? !!r.esito : corrente === "voto" ? r.voto != null : corrente === "aderenza" ? completo(VOCI_ADERENZA) : corrente === "recupero" ? completo(VOCI_RECUPERO) : true;
   const ultimo = passo === passi.length - 1;
   const invia = async () => {
     setErrore(""); setStato("invio");
-    const { data, error } = await supabase.rpc("bilancio_avanzato_invia", {
-      p_token: token, p_esito: prec ? r.esito : null, p_punti: r.punti, p_peso: numeroDa(r.peso), p_vita: numeroDa(r.vita), p_passi: numeroDa(r.passi, true),
-      p_ore: numeroDa(r.ore), p_difficolta: r.dif, p_note: r.note, p_obiettivo: r.obiettivo,
+    const { data, error } = await supabase.rpc("bilancio_completo_invia", {
+      p_token: token, p_esito: prec ? r.esito : null, p_voto: r.voto, p_punti: r.punti, p_peso: numeroDa(r.peso), p_passi: numeroDa(r.passi, true),
+      p_ore: numeroDa(r.ore), p_difficolta: r.dif, p_note: r.note, p_obiettivo: r.obiettivo, p_rispettato: r.rispettato, p_meno: r.meno, p_impegni: r.impegni,
     });
     if (error || data !== true) { setErrore("Non sono riuscita a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
     setStato("fatto");
@@ -15779,6 +15791,12 @@ function BilancioAvanzatoPubblico({ token }) {
         {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Come stai? Ti lascio il bilancio della settimana precedente da compilare ✨ Ci metti 2 minuti e mi serve per calibrare il tuo percorso 💪🏻"}</>)}
         {corrente === "esito" && bolla(<>Settimana scorsa ti eri data come obiettivo <b>«{prec}»</b>. Com'è andata?</>)}
         {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
+        {corrente === "voto" && bolla(<>Da 1 a 10, com'è andata la settimana?</>)}
+        {corrente === "voto" && <div className="flex flex-wrap gap-2">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <button key={n} onClick={() => setR({ ...r, voto: n })} className="w-10 h-10 rounded-full text-sm font-semibold" style={r.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div>}
+        {corrente === "aree" && bolla(<>Cosa hai rispettato di più? <span style={{ color: "#7a8da3" }}>(puoi sceglierne più di una)</span></>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{AREE_B.map((a) => chip(r.rispettato.includes(a), () => toggleA("rispettato", a), a))}</div>}
+        {corrente === "aree" && bolla(<>E di meno?</>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{AREE_B.map((a) => chip(r.meno.includes(a), () => toggleA("meno", a), a))}</div>}
         {corrente === "aderenza" && bolla(<><b>Come hai gestito la settimana?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (al massimo)</span></>)}
         {corrente === "aderenza" && VOCI_ADERENZA.map(([k, l]) => <ScalaPunti key={k} label={l} hint={k === "prestazioni" ? "carichi e ripetizioni rispetto al previsto" : null} valore={r.punti[k]} onChange={(v) => setP(k, v)} />)}
         {corrente === "recupero" && bolla(<><b>E il recupero?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (moltissimo)</span></>)}
@@ -15786,7 +15804,7 @@ function BilancioAvanzatoPubblico({ token }) {
         {corrente === "numeri" && bolla(<><b>I tuoi numeri della settimana</b><br /><span style={{ color: "#7a8da3" }}>Se non li hai, lascia vuoto</span></>)}
         {corrente === "numeri" && (
           <div className="space-y-2">
-            {[["peso", "Peso medio (kg)", "es. 58,4", "decimal"], ["vita", "Vita (cm)", "es. 66", "decimal"], ["passi", "Passi medi al giorno", "es. 9500", "numeric"], ["ore", "Ore di sonno medie", "es. 7", "decimal"]].map(([k, l, ph, m]) => (
+            {[["peso", "Peso medio (kg)", "es. 58,4", "decimal"], ["passi", "Passi medi al giorno", "es. 9500", "numeric"], ["ore", "Ore di sonno medie", "es. 7", "decimal"]].map(([k, l, ph, m]) => (
               <div key={k} className="flex items-center justify-between gap-3"><span className="text-sm" style={{ color: "#27466D" }}>{l}</span><input value={r[k]} onChange={(e) => setR({ ...r, [k]: e.target.value })} inputMode={m} placeholder={ph} className="w-28 border rounded-xl px-3 py-2.5 text-sm bg-white text-right" style={stileCampo} /></div>
             ))}
           </div>
@@ -15796,6 +15814,8 @@ function BilancioAvanzatoPubblico({ token }) {
         {corrente === "difficolta" && <textarea value={r.note} onChange={(e) => setR({ ...r, note: e.target.value })} rows={3} maxLength={300} placeholder="Spiegami meglio (facoltativo)" className={campo} style={stileCampo} />}
         {corrente === "obiettivo" && bolla(<>Qual è il tuo obiettivo per la prossima settimana? <span style={{ color: "#7a8da3" }}>Una cosa concreta e piccola</span></>)}
         {corrente === "obiettivo" && <textarea value={r.obiettivo} onChange={(e) => setR({ ...r, obiettivo: e.target.value })} rows={3} maxLength={300} placeholder="es. chiudere i 10.000 passi ogni giorno" className={campo} style={stileCampo} />}
+        {corrente === "obiettivo" && bolla(<>Ci sono impegni da organizzare? <span style={{ color: "#7a8da3" }}>(viaggi, lavoro, cene)</span></>)}
+        {corrente === "obiettivo" && <textarea value={r.impegni} onChange={(e) => setR({ ...r, impegni: e.target.value })} rows={2} maxLength={300} placeholder="es. viaggio di lavoro mercoledì e giovedì" className={campo} style={stileCampo} />}
         {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
         <div className="mt-auto pt-3 flex gap-2">
           {passo > 0 && <button onClick={() => setPasso(passo - 1)} className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Indietro</button>}
@@ -15808,8 +15828,7 @@ function BilancioAvanzatoPubblico({ token }) {
 
 export default function App() {
   const qs = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
-  if (qs.get("avanzato")) return <BilancioAvanzatoPubblico token={qs.get("avanzato")} />;
-  if (qs.get("bilancio")) return <BilancioPubblico token={qs.get("bilancio")} />;
+  if (qs.get("avanzato") || qs.get("bilancio")) return <BilancioAvanzatoPubblico token={qs.get("avanzato") || qs.get("bilancio")} />;
   return qs.has("lista") ? <ListaAttesaPubblica /> : <AppInterna />;
 }
 
