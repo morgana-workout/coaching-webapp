@@ -55,6 +55,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
   const [ricettaAperta, setRicettaAperta] = useState(null);
   const [date, setDate] = useState(todayStr());
   const [macroOb, setMacroOb] = useState(null);
+  const [piani, setPiani] = useState([]);
   const [sez, setSez] = useState(vistaIniziale === "piano" && pianoNode ? "piano" : "oggi"); // oggi | piano | storico | altro | ricette | pasti | libreria | spesa
 
   const carica = async () => {
@@ -89,10 +90,11 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
     // Obiettivo = kcal del piano nutrizionale attivo (se c'è); altrimenti nessun obiettivo
     let ob = null;
     if (cl?.nutrizione_attiva !== false) {
-      const { data: piani } = await supabase.from("nutrition_plans").select("kcal, proteine_g, carboidrati_g, grassi_g, data_inizio, data_fine, data_aggiornamento, created_at").eq("client_id", clientId);
+      const { data: pianiDb } = await supabase.from("nutrition_plans").select("kcal, proteine_g, carboidrati_g, grassi_g, data_inizio, data_fine, data_aggiornamento, created_at").eq("client_id", clientId);
       const oggi = todayStr();
+      setPiani(pianiDb || []);
       const k = (r) => r.data_inizio || r.data_aggiornamento || "";
-      const iniz = (piani || []).filter((r) => r.kcal != null && k(r) && k(r) <= oggi);
+      const iniz = (pianiDb || []).filter((r) => r.kcal != null && k(r) && k(r) <= oggi);
       const validi = iniz.filter((r) => !r.data_fine || r.data_fine >= oggi);
       const pool = validi.length ? validi : iniz;
       const att = [...pool].sort((a, b) => k(b).localeCompare(k(a)) || (b.created_at || "").localeCompare(a.created_at || ""))[0];
@@ -109,6 +111,18 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
     voci.forEach((v) => { (m[v.data] = m[v.data] || []).push(v); });
     return m;
   }, [voci]);
+
+  // Obiettivo del giorno scelto: ogni giorno può avere il suo piano (date di inizio/fine), quindi si cerca quello valido per quella data
+  const pianoPerData = (d) => {
+    const k = (r) => r.data_inizio || r.data_aggiornamento || "";
+    const iniz = piani.filter((r) => r.kcal != null && k(r) && k(r) <= d);
+    const validi = iniz.filter((r) => !r.data_fine || r.data_fine >= d);
+    const pool = validi.length ? validi : iniz;
+    const att = [...pool].sort((a, b) => k(b).localeCompare(k(a)) || (b.created_at || "").localeCompare(a.created_at || ""))[0];
+    if (!att) return { ob: null, macro: null };
+    return { ob: Number(att.kcal), macro: att.proteine_g != null && att.carboidrati_g != null && att.grassi_g != null ? { p: Number(att.proteine_g), c: Number(att.carboidrati_g), g: Number(att.grassi_g) } : null };
+  };
+  const giornoPiano = piani.length ? pianoPerData(date) : { ob: obiettivo, macro: macroOb };
 
   if (caricando) return <Spinner />;
 
@@ -130,7 +144,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
     );
     return (
       <div className="space-y-3 pb-28">
-        <TestataNutrizione tot={tot} ob={obiettivo} macroOb={macroOb} data={date} />
+        <TestataNutrizione tot={tot} ob={giornoPiano.ob} macroOb={giornoPiano.macro} data={date} />
         {sez === "oggi" && (
           <>
             <div className="flex items-center gap-1">
@@ -148,7 +162,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
             <DiarioGiorno compatto
               clientId={clientId} isAdmin={isAdmin} date={date} setDate={setDate}
               foods={foods} vociGiorno={vociOggi} vociIeri={vociPerGiorno[addDays(date, -1)] || []}
-              obiettivo={obiettivo} onCambiato={carica} ricette={ricette} pasti={pasti}
+              obiettivo={giornoPiano.ob} onCambiato={carica} ricette={ricette} pasti={pasti}
             />
           </>
         )}
@@ -202,7 +216,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
         <DiarioGiorno
           clientId={clientId} isAdmin={isAdmin} date={date} setDate={setDate}
           foods={foods} vociGiorno={vociPerGiorno[date] || []} vociIeri={vociPerGiorno[addDays(date, -1)] || []}
-          obiettivo={obiettivo} onCambiato={carica} ricette={ricette} pasti={pasti}
+          obiettivo={giornoPiano.ob} onCambiato={carica} ricette={ricette} pasti={pasti}
         />
       )}
       {vista === "piano" && pianoNode}
