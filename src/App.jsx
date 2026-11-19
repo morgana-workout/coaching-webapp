@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
+import { AcquaCliente, AcquaCoach } from "./Acqua";
 import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
 import AnalisiCibo from "./AnalisiCibo";
 import MessaggioPronto from "./MessaggioPronto";
@@ -5406,6 +5407,7 @@ function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
         {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false || client.seguita_da_nutrizionista) && (
           <div className="px-5 pt-6 pb-24">
+            {(client.kcal_attivo === false || client.seguita_da_nutrizionista) && <div className="mb-4"><AcquaCliente clientId={client.id} /></div>}
             <DiarioKcal clientId={client.id} vistaIniziale={tab === "nutrizione" ? "piano" : "diario"}
               senzaDiario={client.kcal_attivo === false}
               soloPianoERicette={!!client.seguita_da_nutrizionista}
@@ -8325,6 +8327,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <QuadroGenerale client={client} checkins={checkins} />
           <BilancioSettimanaleCliente client={client} />
           <BilancioAvanzatoCliente client={client} />
+          <AcquaCoach clientId={client.id} nome={client.nome} />
           <AndamentoCliente client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-2 gap-4 items-start">
             <ConsigliProgramma client={client} />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import { X, Plus, Utensils, ClipboardList, TrendingUp, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
+import { AcquaCliente } from "./Acqua";
 import { RicetteVista, RicettaDettaglio, PastiVista, SceltaAggiunta, SalvaPastoModal, inserisciPasto } from "./MacrosExtra";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine,
@@ -143,6 +144,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
               </div>
               <button onClick={() => setDate(addDays(date, 7))} className="w-7 h-14 flex items-center justify-center" style={{ color: "#7a8da3" }}><ChevronRight size={18} /></button>
             </div>
+            {date === todayStr() && <AcquaCliente clientId={clientId} />}
             <DiarioGiorno compatto
               clientId={clientId} isAdmin={isAdmin} date={date} setDate={setDate}
               foods={foods} vociGiorno={vociOggi} vociIeri={vociPerGiorno[addDays(date, -1)] || []}
