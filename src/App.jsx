@@ -2028,7 +2028,7 @@ function TrendCarichi({ trend, isAdmin, clientId, onRicarica }) {
             <XAxis dataKey="sett" tick={{ fontSize: 11, fill: "#64748b" }} />
             <YAxis tick={{ fontSize: 11, fill: "#64748b" }} domain={["auto", "auto"]} />
             <Tooltip content={<Tip />} />
-            {(trend.cambi || []).map((c, i) => <ReferenceLine key={"cp" + i} x={c.x} stroke="#3F78B3" strokeDasharray="4 3" label={{ value: "cambio palestra", fontSize: 10, fill: "#3F78B3", position: "insideTopRight" }} />)}
+            {(trend.cambi || []).map((c, i) => <ReferenceLine key={"cp" + i} x={c.x} stroke="#3F78B3" strokeDasharray="4 3" label={{ value: "altra palestra", fontSize: 10, fill: "#3F78B3", position: "insideTopRight" }} />)}
             {(trend.bande || []).map((b, i) => <ReferenceArea key={i} x1={b.x1} x2={b.x2} fill="#C9E0F7" fillOpacity={0.55} stroke="none" ifOverflow="visible" />)}
             <Line type="monotone" dataKey="upper" name="Upper" stroke="#27466D" strokeWidth={2.5} dot={Punto("#27466D")} activeDot={{ r: 6 }} connectNulls />
             <Line type="monotone" dataKey="lower" name="Lower" stroke="#4F8FD0" strokeWidth={2.5} dot={Punto("#4F8FD0")} activeDot={{ r: 6 }} connectNulls />
@@ -2040,7 +2040,7 @@ function TrendCarichi({ trend, isAdmin, clientId, onRicarica }) {
         </div>
         {haScarico && <p className="text-xs text-center mt-1" style={{ color: "#3F78B3" }}>La fascia azzurra indica una settimana di scarico programmato: il calo è voluto, non una regressione ✨</p>}
         {(trend.cambi || []).length > 0 && (
-          <p className="text-xs mt-1 text-center" style={{ color: "#3F78B3" }}>{isAdmin ? "Cambio di palestra o attrezzi: i carichi prima e dopo non sono confrontabili. L'indice riparte da una nuova base e le riduzioni di quel passaggio sono attribuite a differenze strumentali, non a regressione di forza." : "Hai cambiato palestra: i carichi ripartono da una nuova base, non è un passo indietro 🫶🏻"}</p>
+          <p className="text-xs mt-1 text-center" style={{ color: "#3F78B3" }}>{isAdmin ? "Le linee tratteggiate indicano allenamenti svolti in un'altra palestra o con attrezzi diversi: quelle sedute sono escluse dal confronto dei carichi, quindi macchinari e tarature differenti non vengono letti come regressione di forza." : "Le linee tratteggiate sono allenamenti fatti in un'altra palestra: non contano nel confronto dei carichi, non è un passo indietro 🫶🏻"}</p>
         )}
         {caliTot > 0 && (
           <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-0.5">
@@ -2098,7 +2098,7 @@ function ScarichiCoach({ clientId, scarichi, onChange }) {
   );
 }
 
-const TIPI_CAMBIO = ["Nuova palestra", "Attrezzi diversi", "Allenamento a casa", "Viaggio"];
+const TIPI_CAMBIO = ["Altra palestra", "Attrezzi diversi", "Allenamento a casa", "Viaggio"];
 function CambiPalestraCoach({ clientId, cambi, onChange }) {
   const [aperto, setAperto] = useState(false);
   const [dal, setDal] = useState("");
@@ -2116,22 +2116,22 @@ function CambiPalestraCoach({ clientId, cambi, onChange }) {
   return (
     <Card className="p-3">
       <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
-        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cambio palestra o attrezzi{cambi.length ? ` · ${cambi.length}` : ""}</span>
-        <span className="text-xs" style={{ color: "#3F78B3" }}>{aperto ? "chiudi" : "segna cambio"}</span>
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Allenamenti in altra palestra o con attrezzi diversi{cambi.length ? ` · ${cambi.length}` : ""}</span>
+        <span className="text-xs" style={{ color: "#3F78B3" }}>{aperto ? "chiudi" : "segna allenamento"}</span>
       </button>
       {aperto && (
         <div className="mt-2 space-y-2">
-          <p className="text-xs text-slate-500">Da quella data i carichi non si confrontano con quelli di prima: niente regressioni, l'analisi riparte da una nuova base (servono almeno 3 sedute nella nuova sede).</p>
+          <p className="text-xs text-slate-500">Segna i singoli allenamenti svolti altrove (anche la cliente può farlo dal suo diario). Quelle sedute non entrano nel confronto dei carichi: niente regressioni per macchinari o tarature diversi.</p>
           {cambi.map((x) => (
             <div key={x.id} className="flex items-center justify-between text-sm text-slate-700 rounded-xl px-3 py-2" style={{ background: "#E1EEFB" }}>
-              <span>dal {fmtD(x.dal)} · {x.tipo}{x.nota ? ` · ${x.nota}` : ""}</span>
+              <span>{fmtD(x.dal)} · {x.tipo}{x.nota ? ` · ${x.nota}` : ""}</span>
               <button onClick={() => togli(x.id)} className="text-xs text-slate-500 underline">togli</button>
             </div>
           ))}
-          <label className="text-xs text-slate-500 block">Dal giorno<input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
+          <label className="text-xs text-slate-500 block">Giorno dell'allenamento<input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
           <div className="flex flex-wrap gap-1.5">{TIPI_CAMBIO.map((t) => <button key={t} onClick={() => setTipo(t)} className="px-3 py-1.5 rounded-full text-xs font-medium" style={tipo === t ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>)}</div>
           <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nota (facoltativa), es. macchinari diversi" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
-          <button onClick={aggiungi} disabled={busy || !dal} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Salva cambio</button>
+          <button onClick={aggiungi} disabled={busy || !dal} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Salva allenamento</button>
         </div>
       )}
     </Card>
@@ -2311,7 +2311,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
         let cambi = [];
         try { const { data: cp } = await supabase.from("cambi_palestra").select("id, dal, tipo, nota").eq("client_id", clientId).order("dal"); cambi = cp || []; } catch (e) { /* ignora */ }
         if (vivo) setCambiPal(cambi);
-        const dateCambio = cambi.map((x) => x.dal);
+        const dateAltra = new Set(cambi.map((x) => x.dal)); // sedute in un'altra palestra o con attrezzi diversi: fuori dal confronto dei carichi
         const inScar = (d) => scar.some((x) => d >= x.dal && d <= x.al);
         const mappa = {};
         righe.forEach((r) => {
@@ -2323,6 +2323,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
           const rip = parseFloat(String(r.ripetizioni ?? "").replace(",", "."));
           if (rip > 0) { g.ton[r.data] = (g.ton[r.data] || 0) + kg * rip; g.rep[r.data] = true; }
+          if (dateAltra.has(r.data)) { const ma = (g.mot[r.data] = g.mot[r.data] || new Set()); ma.add("attrezzo"); }
           if (inScar(r.data)) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); m.add("scarico"); }
           if (r.motivo_calo) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); String(r.motivo_calo).split(",").filter(Boolean).forEach((x) => m.add(x)); }
         });
@@ -2332,16 +2333,14 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
         const ridLista = [];
         Object.values(mappa).forEach((g) => {
           const gr = gruppoCarico(g.nome); if (!gr) return;
-          const dd = Object.keys(g.date).sort();
+          const dd = Object.keys(g.date).sort().filter((d) => !dateAltra.has(d));
           // misura per sessione: volume-carico (kg × ripetizioni × serie) se le ripetizioni sono sempre segnate, altrimenti il carico massimo
           const conVolume = dd.every((d) => g.rep[d] && g.ton[d] > 0);
           const misura = (d) => (conVolume ? g.ton[d] : g.date[d]);
           for (let i = 1; i < dd.length; i++) {
             const prev = g.date[dd[i - 1]], cur = g.date[dd[i]]; const w = lun(dd[i]);
             const o = (perSett[gr][w] = perSett[gr][w] || { rel: [], pesi: [], cali: 0, senza: 0, motivi: {} });
-            const traCambio = dateCambio.some((c) => dd[i - 1] < c && dd[i] >= c); // prima seduta nella nuova palestra: confronto non attendibile
-            if (traCambio) { const mc = (g.mot[dd[i]] = g.mot[dd[i]] || new Set()); mc.add("attrezzo"); }
-            else { o.rel.push(misura(dd[i]) / misura(dd[i - 1]) - 1); o.pesi.push(misura(dd[i - 1])); }
+            o.rel.push(misura(dd[i]) / misura(dd[i - 1]) - 1); o.pesi.push(misura(dd[i - 1]));
             if (cur < prev) { const mm = g.mot[dd[i]]; ridLista.push({ nome: g.nome, exId: g.exId, data: dd[i], prevData: dd[i - 1], prev, cur, gr, motivi: mm ? [...mm].filter((x) => x !== "scarico") : [], inScarico: !!(mm && mm.has("scarico")) }); o.cali += 1; const m = g.mot[dd[i]]; if (m && m.size) m.forEach((x) => { o.motivi[x] = (o.motivi[x] || 0) + 1; }); else o.senza += 1; }
           }
         });
@@ -2360,7 +2359,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
         const motiviTot = {}; let caliTot = 0, senzaTot = 0;
         ["upper", "lower"].forEach((gr) => Object.values(perSett[gr]).forEach((o) => { caliTot += o.cali; senzaTot += o.senza; Object.entries(o.motivi).forEach(([k, n]) => { motiviTot[k] = (motiviTot[k] || 0) + n; }); }));
         const bande = scar.map((x) => { const ws = punti.filter((q) => q.w >= lun(x.dal) && q.w <= lun(x.al)); return ws.length ? { x1: ws[0].sett, x2: ws[ws.length - 1].sett } : null; }).filter(Boolean);
-        const lineeCambio = cambi.map((x) => { const w0 = lun(x.dal); const pt = punti.find((q) => q.w >= w0); return pt ? { x: pt.sett, dal: x.dal, tipo: x.tipo } : null; }).filter(Boolean);
+        const lineeCambio = [...new Map(cambi.map((x) => { const w0 = lun(x.dal); const pt = punti.find((q) => q.w === w0); return pt ? [pt.sett, { x: pt.sett, dal: x.dal, tipo: x.tipo }] : null; }).filter(Boolean)).values()];
         if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot, bande, cambi: lineeCambio, riduzioni: ridLista.sort((x, y) => y.data.localeCompare(x.data)) } : null);
         const lista = Object.values(mappa).map((g) => {
           const date = Object.keys(g.date).sort();
@@ -2391,7 +2390,7 @@ function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
   const inAumento = esercizi.filter((e) => e.diff > 0).length;
   const fmt = (n) => String(n).replace(".", ",");
   const oggiStr = formatDataLocale(new Date());
-  const inCalo = esercizi.filter((e) => e.diffScorsa != null && e.diffScorsa < 0 && e.ultimaData >= addGiorni(oggiStr, -21) && !e.motUlt.includes("scarico"));
+  const inCalo = esercizi.filter((e) => e.diffScorsa != null && e.diffScorsa < 0 && e.ultimaData >= addGiorni(oggiStr, -21) && !e.motUlt.includes("scarico") && !e.motUlt.includes("attrezzo"));
 
   return (
     <div className="space-y-2">
@@ -4319,7 +4318,7 @@ function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichett
   );
 }
 
-function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true, inScarico = false, cambi = [] }) {
+function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true, inScarico = false, altraPalestra = false }) {
   const nSerie = Math.max(1, Math.min(serieDi(es), 10));
   const [bozza, setBozza] = useState({}); // { "n-kg": testo }
   const [nota, setNota] = useState("");
@@ -4335,8 +4334,8 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   // carico più basso dell'ultima volta (stessa serie): si chiede il motivo
   const calo = Array.from({ length: nSerie }).some((_, i) => { const e = entryDi(i + 1); const u = ultime[i + 1]; return !!e && e.kg != null && !!u && u.kg != null && Number(e.kg) < Number(u.kg); });
   const motiviSalvati = ((entries.find((e) => e.motivo_calo) || {}).motivo_calo || "").split(",").filter(Boolean);
-  // prima seduta di questo esercizio dopo un cambio di palestra o attrezzi: il confronto con prima non conta
-  const dopoCambio = cambi.some((c) => data >= c && ultime._ultima && ultime._ultima < c);
+  // seduta segnata come altra palestra o attrezzi diversi: il confronto con le altre sedute non conta
+  const dopoCambio = altraPalestra; // allenamento di oggi segnato come altra palestra / attrezzi diversi
   const scegliMotivo = async (codice) => {
     const nuovi = motiviSalvati.includes(codice) ? motiviSalvati.filter((x) => x !== codice) : [...motiviSalvati, codice];
     const riga = entries.find((x) => x.numero_serie === 1) || entries[0];
@@ -4482,8 +4481,8 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
           </div>
           {!inScarico && dopoCambio && (
             <div className="mt-3 rounded-2xl p-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
-              <p className="text-sm font-semibold" style={{ color: "#6b5d2e" }}>Nuova palestra, nuova base ✨</p>
-              <p className="text-xs mt-0.5" style={{ color: "#6b5d2e" }}>Macchinari e attrezzi diversi: i carichi di prima non sono confrontabili{calo ? ", quindi un peso più basso non è un passo indietro" : ""}. Segna quello che usi oggi, da qui ripartiamo 🫶🏻</p>
+              <p className="text-sm font-semibold" style={{ color: "#6b5d2e" }}>Oggi in un'altra palestra ✨</p>
+              <p className="text-xs mt-0.5" style={{ color: "#6b5d2e" }}>Macchinari e attrezzi diversi: oggi i carichi non si confrontano con le altre sedute{calo ? ", quindi un peso più basso non è un passo indietro" : ""}. Segna quello che usi, Morgana lo tiene presente 🫶🏻</p>
             </div>
           )}
           {!inScarico && !dopoCambio && (calo || motiviSalvati.length > 0) && (
@@ -4712,12 +4711,22 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
         <p className="text-sm mt-1" style={{ color: "#7a8da3" }}>Registra carichi e ripetizioni, serie dopo serie.</p>
       </div>
       <StatoSyncLog />
-      {cambiCl.filter((x) => x.dal >= addGiorni(oggi, -60)).slice(-1).map((x) => (
-        <div key={x.dal} className="rounded-2xl p-3.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
-          <p className="text-sm font-semibold">Hai cambiato palestra ✨</p>
-          <p className="text-xs mt-0.5">Dal {x.dal.split("-").reverse().join("/")} i carichi ripartono da una nuova base: macchinari e pesi diversi non sono un passo indietro. Registra con tranquillità quello che usi, Morgana lo tiene presente 🫶🏻</p>
-        </div>
-      ))}
+      {giorni.length > 0 && (() => {
+        const altra = cambiCl.some((x) => x.dal === data);
+        const imposta = async () => {
+          if (altra) { setCambiCl((l) => l.filter((x) => x.dal !== data)); await supabase.from("cambi_palestra").delete().eq("client_id", clientId).eq("dal", data); }
+          else { setCambiCl((l) => [...l, { dal: data, tipo: "Altra palestra" }]); await supabase.from("cambi_palestra").insert({ client_id: clientId, dal: data, tipo: "Altra palestra" }); }
+        };
+        return altra ? (
+          <div className="rounded-2xl p-3.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+            <p className="text-sm font-semibold">Oggi ti alleni in un'altra palestra ✨</p>
+            <p className="text-xs mt-0.5">Macchinari e pesi diversi non sono un passo indietro: questo allenamento non entra nel confronto dei carichi. Morgana lo tiene presente 🫶🏻</p>
+            <button onClick={imposta} className="text-xs font-semibold mt-1.5 underline">Annulla, ero nella palestra di sempre</button>
+          </div>
+        ) : (
+          <button onClick={imposta} className="w-full rounded-2xl py-2.5 text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px dashed #C9E0F7" }}>Oggi mi alleno in un'altra palestra o con attrezzi diversi</button>
+        );
+      })()}
 
       {giorni.length === 0 ? (
         <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
@@ -4783,7 +4792,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
             <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? correnteKey === es.id}
               onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? correnteKey === es.id) }))}
               entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
-              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} inScarico={scarCl.some((x) => data >= x.dal && data <= x.al)} cambi={cambiCl.map((x) => x.dal)} />
+              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} inScarico={scarCl.some((x) => data >= x.dal && data <= x.al)} altraPalestra={cambiCl.some((x) => x.dal === data)} />
           ))}
           {tuttiFatti ? (
             <div id="fine-allenamento" className="rounded-3xl p-5 text-center" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7" }}>
@@ -8179,7 +8188,7 @@ async function esportaPerAnalisiEsterna(client, setInCorso) {
     });
     r.push("");
     if (calo.length) { r.push("## Carichi scesi rispetto alla volta prima"); calo.forEach((c) => r.push(`- ${c.data}: ${c.esercizio} ${n(c.kg_prima)} → ${n(c.kg_oggi)} kg`)); r.push(""); }
-    if (cambiPal.length) { r.push("## Cambio di palestra o attrezzi"); cambiPal.forEach((x) => r.push(`- dal ${x.dal}: ${x.tipo}${x.nota ? " — " + x.nota : ""}. I carichi dopo questa data NON sono confrontabili con quelli precedenti (macchinari e tarature diversi): le riduzioni di carico al passaggio non indicano regressione di forza; valutare la progressione dalla nuova base.`)); r.push(""); }
+    if (cambiPal.length) { r.push("## Allenamenti in altra palestra o con attrezzi diversi"); r.push("Queste sedute NON sono confrontabili con le altre (macchinari, leve e tarature diversi): le differenze di carico non indicano progressione né regressione di forza."); cambiPal.forEach((x) => r.push(`- ${x.dal}: ${x.tipo}${x.nota ? " — " + x.nota : ""}`)); r.push(""); }
     if (scarichi.length) { r.push("## Settimane di scarico programmato"); scarichi.forEach((s) => r.push(`- dal ${s.dal} al ${s.al}${s.nota ? " — " + s.nota : ""}`)); r.push(""); }
     if (nlog.length) { r.push("## Note finali degli allenamenti"); nlog.forEach((x) => r.push(`- ${x.data}: ${String(x.nota || "").replace(/\s+/g, " ")}`)); r.push(""); }
     if (feedback.length) { r.push("## Feedback soggettivo"); feedback.forEach((f) => r.push(`- ${f.data}: ${(f.tags || []).join(", ")}${f.nota_libera ? " — " + f.nota_libera : ""}`)); r.push(""); }
@@ -10571,13 +10580,10 @@ function CaricheInCaloCoach({ onChanged }) {
     // gli scarichi programmati non vanno motivati
     const { data: scar } = await supabase.from("scarichi").select("client_id, dal, al").in("client_id", [...new Set(lista.map((x) => x.client_id))]);
     const inScar = (r) => (scar || []).some((s) => s.client_id === r.client_id && r.data >= s.dal && r.data <= s.al);
-    let cambiAll = [], entDopo = [];
-    try {
-      const { data: cp } = await supabase.from("cambi_palestra").select("client_id, dal").in("client_id", [...new Set(lista.map((x) => x.client_id))]); cambiAll = cp || [];
-      if (cambiAll.length) { const minC = cambiAll.map((x) => x.dal).sort()[0]; const { data: ed } = await supabase.from("training_entries").select("client_id, exercise_id, data").in("exercise_id", lista.map((x) => x.exercise_id)).gte("data", minC); entDopo = ed || []; }
-    } catch (e) { /* senza tabella: nessun filtro */ }
-    // prima seduta di un esercizio nella nuova palestra: il calo è dovuto al cambio, non va motivato
-    const primaDopoCambio = (r) => cambiAll.some((c) => c.client_id === r.client_id && c.dal <= r.data && !entDopo.some((e) => e.client_id === r.client_id && e.exercise_id === r.exercise_id && e.data >= c.dal && e.data < r.data));
+    let cambiAll = [];
+    try { const { data: cp } = await supabase.from("cambi_palestra").select("client_id, dal").in("client_id", [...new Set(lista.map((x) => x.client_id))]); cambiAll = cp || []; } catch (e) { /* senza tabella: nessun filtro */ }
+    // allenamento segnato come "altra palestra o attrezzi diversi": il calo è strumentale, non va motivato
+    const primaDopoCambio = (r) => cambiAll.some((c) => c.client_id === r.client_id && c.dal === r.data);
     setRighe(lista.filter((r) => !conMotivo.has(`${r.exercise_id}|${r.data}`) && !inScar(r) && !primaDopoCambio(r)).map((r) => ({ ...r, nome: nomi[r.client_id] || "Cliente" })));
   };
   useEffect(() => { carica(); }, []);
@@ -10627,10 +10633,10 @@ function TrendClientiCoach({ clients, onSelect }) {
         const oggi = formatDataLocale(new Date());
         const da = addGiorni(oggi, -56);
         const dati = await leggiTutto(() => supabase.from("training_entries").select("client_id, data, kg, exercise_id").gte("data", da).order("data").order("id"));
-        let cambiRec = {};
-        try { const { data: cpa } = await supabase.from("cambi_palestra").select("client_id, dal").gte("dal", da); (cpa || []).forEach((x) => { cambiRec[x.client_id] = x.dal; }); } catch (e) { /* senza tabella */ }
+        const altrove = new Set();
+        try { const { data: cpa } = await supabase.from("cambi_palestra").select("client_id, dal").gte("dal", da); (cpa || []).forEach((x) => altrove.add(`${x.client_id}|${x.dal}`)); } catch (e) { /* senza tabella */ }
         const per = {};
-        dati.forEach((r) => { const kg = Number(r.kg); if (!r.client_id || !r.data) return; (per[r.client_id] = per[r.client_id] || []).push({ d: r.data, kg, ex: r.exercise_id }); });
+        dati.forEach((r) => { const kg = Number(r.kg); if (!r.client_id || !r.data || altrove.has(`${r.client_id}|${r.data}`)) return; (per[r.client_id] = per[r.client_id] || []).push({ d: r.data, kg, ex: r.exercise_id }); });
         const lim = addGiorni(oggi, -28);
         const lista = clients.filter((c) => !c.gruppo_id).map((c) => {
           const e = per[c.id] || [];
@@ -10643,9 +10649,8 @@ function TrendClientiCoach({ clients, onSelect }) {
           const visti = new Set();
           e.forEach((x) => { if (visti.has(x.d)) return; visti.add(x.d); const i = 7 - Math.floor((new Date(`${oggi}T12:00:00`) - new Date(`${x.d}T12:00:00`)) / 86400000 / 7); if (i >= 0 && i < 8) sett[i] += 1; });
           const ultimo = e.length ? e[e.length - 1].d : null;
-          const cambio = cambiRec[c.id] || null; // cambio palestra recente: il confronto dei carichi non è attendibile
-          const stato = cambio ? "cambio" : pct == null ? "senza" : pct > 2 ? "crescita" : pct < -2 ? "calo" : "stabile";
-          return { c, pct, sett, ultimo, stato, n: visti.size, cambio };
+          const stato = pct == null ? "senza" : pct > 2 ? "crescita" : pct < -2 ? "calo" : "stabile";
+          return { c, pct, sett, ultimo, stato, n: visti.size };
         });
         if (vivo) setRighe(lista);
       } catch (e) { if (vivo) setRighe([]); }
@@ -10657,11 +10662,11 @@ function TrendClientiCoach({ clients, onSelect }) {
   const conDati = righe.filter((r) => r.pct != null);
   const media = conDati.length ? conDati.reduce((a, r) => a + r.pct, 0) / conDati.length : null;
   const f1 = (n) => String(Math.round(n * 10) / 10).replace(".", ",");
-  const FILTRI = [["tutti", "Tutte"], ["crescita", "In crescita"], ["stabile", "Stabili"], ["calo", "In calo"], ["cambio", "Cambio palestra"], ["senza", "Senza dati"]];
+  const FILTRI = [["tutti", "Tutte"], ["crescita", "In crescita"], ["stabile", "Stabili"], ["calo", "In calo"], ["senza", "Senza dati"]];
   const maxS = Math.max(1, ...righe.flatMap((r) => r.sett));
   return (
     <div className="space-y-2">
-      <p className="text-slate-500 text-xs">Carico massimo per esercizio, ultimi 28 giorni rispetto ai 28 precedenti (servono almeno 2 esercizi in comune). Le barrette sono gli allenamenti registrati nelle ultime 8 settimane. Chi ha cambiato palestra o attrezzi di recente non viene valutata sui carichi («Nuova base»): il confronto con prima non è attendibile.{media != null ? ` Media generale: ${media > 0 ? "+" : ""}${f1(media)}%.` : ""}</p>
+      <p className="text-slate-500 text-xs">Carico massimo per esercizio, ultimi 28 giorni rispetto ai 28 precedenti (servono almeno 2 esercizi in comune). Le barrette sono gli allenamenti registrati nelle ultime 8 settimane. Gli allenamenti segnati in un'altra palestra o con attrezzi diversi non entrano nel confronto.{media != null ? ` Media generale: ${media > 0 ? "+" : ""}${f1(media)}%.` : ""}</p>
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {FILTRI.map(([k, l]) => <button key={k} onClick={() => setFiltro(k)} className="text-[11px] rounded-full px-3 py-1 flex-shrink-0 font-medium" style={filtro === k ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{l}</button>)}
       </div>
@@ -10676,8 +10681,8 @@ function TrendClientiCoach({ clients, onSelect }) {
             <svg width="56" height="24" viewBox="0 0 56 24" className="flex-shrink-0">
               {r.sett.map((v, i) => <rect key={i} x={i * 7} y={24 - Math.max(2, (v / maxS) * 22)} width="5" height={Math.max(2, (v / maxS) * 22)} rx="1.5" fill={v ? "#4F8FD0" : "#C9E0F7"} />)}
             </svg>
-            <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 w-16 text-center" style={r.stato === "crescita" ? { background: "#C9E0F7", color: "#27466D" } : r.stato === "calo" ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : r.stato === "cambio" ? { background: "#E1EEFB", color: "#3F78B3" } : { background: "#F5FAFE", color: "#7a8da3" }}>
-              {r.stato === "cambio" ? "Nuova base" : r.pct == null ? "—" : `${r.pct > 0 ? "+" : ""}${f1(r.pct)}%`}
+            <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 w-16 text-center" style={r.stato === "crescita" ? { background: "#C9E0F7", color: "#27466D" } : r.stato === "calo" ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : { background: "#F5FAFE", color: "#7a8da3" }}>
+              {r.pct == null ? "—" : `${r.pct > 0 ? "+" : ""}${f1(r.pct)}%`}
             </span>
           </button>
         </Card>

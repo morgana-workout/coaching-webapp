@@ -206,18 +206,16 @@ function analizza(esercizi, giorni, righe, sesso, leve, scarichi = [], cambi = [
   const perEs = {};
   righe.forEach((r) => { const kg = Number(r.kg); if (!r.data || !(kg > 0)) return; const cid = canon.map[r.exercise_id] || r.exercise_id; (perEs[cid] = perEs[cid] || {}); const s = (perEs[cid][r.data] = perEs[cid][r.data] || { kg: 0, reps: 0, motivi: new Set() }); if (r.motivo_calo) String(r.motivo_calo).split(",").filter(Boolean).forEach((m) => s.motivi.add(m)); if (inScaricoDi(scarichi, r.data)) { s.motivi.add("scarico"); s.scar = true; } const rp = num(r.ripetizioni) || 0; if (kg > s.kg) { s.kg = kg; s.reps = rp; } else if (kg === s.kg) s.reps = Math.max(s.reps, rp); });
   const nomeDi = canon.nomi;
-  // Cambio di palestra o attrezzi: i carichi di prima non sono confrontabili. Si valuta solo dalla nuova base (sedute dalla data del cambio).
-  const cambiDate = (cambi || []).map((x) => x.dal).filter((d) => d && d <= oggi).sort();
-  const ultimoCambio = cambiDate.length ? cambiDate[cambiDate.length - 1] : null;
+  // Allenamenti in un'altra palestra o con attrezzi diversi: macchinari e tarature non sono equivalenti, quelle sedute restano fuori dal confronto dei carichi
+  const dateAltra = new Set((cambi || []).map((x) => x.dal).filter(Boolean));
   const senzaBase = {};
-  if (ultimoCambio) {
+  if (dateAltra.size) {
+    let escluse = 0;
     Object.keys(perEs).forEach((cid) => {
-      const ds = Object.keys(perEs[cid]).sort();
-      if (ds.some((d) => d >= ultimoCambio)) ds.filter((d) => d < ultimoCambio).forEach((d) => { delete perEs[cid][d]; });
-      else { senzaBase[cid] = perEs[cid][ds[ds.length - 1]]; delete perEs[cid]; }
+      Object.keys(perEs[cid]).forEach((d) => { if (dateAltra.has(d)) { delete perEs[cid][d]; escluse += 1; } });
+      if (!Object.keys(perEs[cid]).length) delete perEs[cid];
     });
-    const etC = ultimoCambio.split("-").reverse().join("/");
-    consigli.push({ t: "fl", tit: `Cambio di palestra o attrezzi dal ${etC}`, testo: "Carichi non confrontabili con il periodo precedente: macchinari, leve e tarature differiscono, quindi le riduzioni di carico non indicano regressione di forza. La progressione viene valutata dalla nuova base (servono almeno 3 sedute nella nuova sede).", peso: 5 });
+    if (escluse) consigli.push({ t: "fl", tit: `Sedute in altra palestra o con attrezzi diversi: ${dateAltra.size}`, testo: "Gli allenamenti svolti altrove sono esclusi dal confronto dei carichi: macchinari, leve e tarature differiscono, quindi un carico diverso non indica regressione né progressione di forza. La valutazione si basa sulle sedute nella palestra abituale.", peso: 5 });
   }
   const su = [], giu = [], ok = [];
   Object.entries(perEs).forEach(([id, sess]) => {
@@ -310,11 +308,6 @@ function analizza(esercizi, giorni, righe, sesso, leve, scarichi = [], cambi = [
     }
     if (caloUlt && !motiviUlt.length && !inScarico) motivo += " · calo senza motivo indicato: chiedere alla cliente";
     prossimo.push({ id: e.id, nome, ultimo: `${kgFmt(ult.kg)} kg × ${ult.reps || "—"}`, prova, motivo, tecnica, serieEff: e.serieEff || 0, giorno: e.training_day_id });
-  });
-  Object.entries(senzaBase).forEach(([cid, u]) => {
-    const nome = nomeDi[cid]; if (!nome) return;
-    const e = programma.find((x) => (canon.map[x.id] || x.id) === cid); if (!e) return;
-    prossimo.push({ id: e.id, nome, ultimo: `${kgFmt(u.kg)} kg × ${u.reps || "—"} (palestra precedente)`, prova: "carico di prova a RIR 2–3, poi si costruisce la nuova base", motivo: "cambio di palestra o attrezzi: i carichi precedenti non sono confrontabili, si riparte da una nuova base senza leggerlo come regressione", tecnica: null, serieEff: e.serieEff || 0, giorno: e.training_day_id });
   });
   const mantenere = ok.slice(0, 5);
   const gravi = controlloGravi(programma, giorni.filter((g) => !g.scheda_archiviata));
