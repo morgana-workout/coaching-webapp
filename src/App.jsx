@@ -10883,11 +10883,11 @@ function testoLunedi(nome, daSistemare) {
   return `Buongiorno ${n}! ✨ Nuova settimana, nuove occasioni 💪🏻 Mi dedichi 1 minuto? Così capisco come stai andando e come aiutarti al meglio 🫶🏻\n\nCom'è andata la settimana appena finita:\n1️⃣ Da 1 a 10, com'è andata?\n2️⃣ Cosa hai rispettato di più?\n3️⃣ Cosa hai rispettato di meno?\n\nE per questa che inizia:\n4️⃣ Una cosa che vuoi sistemare o migliorare?\n5️⃣ Ci sono giorni o impegni in cui serve organizzarsi meglio? (viaggi, lavoro, cene…)\n\nBastano anche due righe, poi ti rispondo io ✨`;
 }
 function testoLinkBilancio(nome, token) {
-  return `Ciao ${(nome || "").split(" ")[0]}! ✨ Ecco il tuo bilancio della settimana: ci metti 1 minuto e per me è prezioso 🫶🏻\n${window.location.origin}/?bilancio=${token}`;
+  return `Ciao ${(nome || "").split(" ")[0]} ✨ come stai? Ti lascio il bilancio della settimana precedente da compilare ✨\n${window.location.origin}/?bilancio=${token}`;
 }
 function linkWhatsappTesto(telefono, testo) {
   const n = String(telefono || "").replace(/[^\d]/g, "");
-  if (!n) return null;
+  if (!n) return `https://wa.me/?text=${encodeURIComponent(testo)}`; // numero non salvato: WhatsApp si apre e scegli tu la chat
   return `https://wa.me/${n.length > 10 ? n : "39" + n}?text=${encodeURIComponent(testo)}`;
 }
 
@@ -10998,7 +10998,7 @@ const VOCI_RECUPERO = [["sonno", "Qualità del sonno"], ["energia", "Energia"], 
 const DIFFICOLTA_AV = ["Fame", "Stanchezza", "Sonno", "Dolori", "Cene fuori", "Lavoro", "Motivazione", "Ciclo"];
 const PESI_MEDIA = [4, 3, 2, 1];
 function testoLinkAvanzato(nome, token) {
-  return `Ciao ${(nome || "").split(" ")[0]}! ✨ È il momento del tuo bilancio settimanale: ci metti 2 minuti e mi permette di calibrare al meglio il tuo percorso 💪🏻🫶🏻\n${window.location.origin}/?avanzato=${token}`;
+  return `Ciao ${(nome || "").split(" ")[0]} ✨ come stai? Ti lascio il bilancio della settimana precedente da compilare ✨\n${window.location.origin}/?avanzato=${token}`;
 }
 function mediaConPesi(valori) { // valori: dal più recente al più vecchio, null se mancante
   let s = 0, p = 0;
@@ -15680,7 +15680,7 @@ function BilancioPubblico({ token }) {
       <div className="w-full max-w-md flex flex-col gap-3" style={{ minHeight: "calc(100dvh - 3rem)" }}>
         <div className="flex gap-1.5">{passi.map((_, i) => <i key={i} className="flex-1 h-1 rounded-full" style={{ background: i <= passo ? "#27466D" : "#C9E0F7" }} />)}</div>
         <p className="text-[11px] tracking-widest uppercase text-center" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
-        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Nuova settimana 💪🏻 Ci metti 1 minuto e a me serve per seguirti bene 🫶🏻"}</>)}
+        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Come stai? Ti lascio il bilancio della settimana precedente da compilare ✨ Ci metti 1 minuto 🫶🏻"}</>)}
         {corrente === "esito" && bolla(<>Settimana scorsa volevi sistemare <b>«{prec}»</b>. Com'è andata?</>)}
         {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
         {corrente === "voto" && prec && r.esito && risposta(nomiEsito[r.esito])}
@@ -15776,7 +15776,7 @@ function BilancioAvanzatoPubblico({ token }) {
       <div className="w-full max-w-md flex flex-col gap-3" style={{ minHeight: "calc(100dvh - 3rem)" }}>
         <div className="flex gap-1.5">{passi.map((_, i) => <i key={i} className="flex-1 h-1 rounded-full" style={{ background: i <= passo ? "#27466D" : "#C9E0F7" }} />)}</div>
         <p className="text-[11px] tracking-widest uppercase text-center" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
-        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Il tuo bilancio della settimana appena conclusa: ci metti 2 minuti e mi serve per calibrare il tuo percorso 💪🏻"}</>)}
+        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Come stai? Ti lascio il bilancio della settimana precedente da compilare ✨ Ci metti 2 minuti e mi serve per calibrare il tuo percorso 💪🏻"}</>)}
         {corrente === "esito" && bolla(<>Settimana scorsa ti eri data come obiettivo <b>«{prec}»</b>. Com'è andata?</>)}
         {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
         {corrente === "aderenza" && bolla(<><b>Come hai gestito la settimana?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (al massimo)</span></>)}
