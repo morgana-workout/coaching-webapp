@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { supabase } from "./supabaseClient";
-import { X, Plus, Search, Trash2, Pencil, BookOpen, UtensilsCrossed, Apple } from "lucide-react";
+import { X, Plus, Search, Trash2, Pencil, BookOpen, UtensilsCrossed, Apple, Mic } from "lucide-react";
 
 /* Ricette e pasti standard della sezione Macros (usati da DiarioKcal) */
 
@@ -32,8 +32,9 @@ function labelData(date) {
 export function voceDa(food, a) {
   const m = macroFor(food, a);
   return {
-    food_id: food.id || null, nome: food.nome, marca: food.marca || null, unit: food.unit, uname: food.uname || null,
+    food_id: food.comune ? null : food.id || null, nome: food.nome, marca: food.marca || null, unit: food.unit, uname: food.uname || null,
     quantita: a, kcal: foodKcal(food, a), proteine: m?.p ?? null, carboidrati: m?.c ?? null, grassi: m?.g ?? null,
+    sale: food.sale != null ? Math.round((food.sale * a) / food.per * 100) / 100 : null,
   };
 }
 function somma(voci) {
@@ -63,7 +64,7 @@ const inputCls = "w-full border border-slate-200 rounded-xl px-3 py-2 text-sm";
 export async function inserisciPasto(p, { clientId, date, meal, isAdmin }) {
   const righe = (p.voci || []).map((v) => ({
     client_id: clientId, data: date, pasto: meal, food_id: v.food_id || null, nome: v.nome, marca: v.marca || null,
-    unit: v.unit, uname: v.uname || null, quantita: v.quantita, kcal: v.kcal, proteine: v.proteine, carboidrati: v.carboidrati, grassi: v.grassi,
+    unit: v.unit, uname: v.uname || null, quantita: v.quantita, kcal: v.kcal, proteine: v.proteine, carboidrati: v.carboidrati, grassi: v.grassi, sale: v.sale ?? null,
     creato_da: isAdmin ? "coach" : "cliente",
   }));
   if (!righe.length) return;
@@ -472,7 +473,7 @@ export function SalvaPastoModal({ voci, meal, clientId, isAdmin, onChiudi, onSal
   const salva = async () => {
     if (!nome.trim()) return;
     setSalvando(true);
-    const snap = voci.map((v) => ({ food_id: v.food_id || null, nome: v.nome, marca: v.marca || null, unit: v.unit, uname: v.uname || null, quantita: v.quantita, kcal: v.kcal, proteine: v.proteine, carboidrati: v.carboidrati, grassi: v.grassi }));
+    const snap = voci.map((v) => ({ food_id: v.food_id || null, nome: v.nome, marca: v.marca || null, unit: v.unit, uname: v.uname || null, quantita: v.quantita, kcal: v.kcal, proteine: v.proteine, carboidrati: v.carboidrati, grassi: v.grassi, sale: v.sale ?? null }));
     const { error } = await supabase.from("kcal_pasti_standard").insert({
       nome: nome.trim(), pasto: meal, voci: snap, client_id: isAdmin && per === "tutte" ? null : clientId, creato_da: isAdmin ? "coach" : "cliente",
     });
@@ -502,7 +503,7 @@ export function SalvaPastoModal({ voci, meal, clientId, isAdmin, onChiudi, onSal
 }
 
 /* ---------- "+ Aggiungi" nel diario: pasto standard / ricetta / alimento ---------- */
-export function SceltaAggiunta({ meal, pasti, ricette, onAlimento, onPasto, onRicetta, onChiudi }) {
+export function SceltaAggiunta({ meal, pasti, ricette, onAlimento, onPasto, onRicetta, onVoce, onChiudi }) {
   const [modo, setModo] = useState(null);
   const ordinati = (arr, key) => [...arr].sort((a, b) => (b[key] === meal) - (a[key] === meal) || a.nome.localeCompare(b.nome, "it"));
   const bottone = (Icon, titolo, sotto, onClick) => (
@@ -519,6 +520,7 @@ export function SceltaAggiunta({ meal, pasti, ricette, onAlimento, onPasto, onRi
       </div>
       {!modo && (
         <div className="space-y-2">
+          {onVoce && bottone(Mic, "A voce o a testo", "Racconta cosa hai mangiato ✨ ci penso io", onVoce)}
           {bottone(UtensilsCrossed, "Pasto standard", `${pasti.length} disponibili · tutto il pasto con un tocco`, () => setModo("pasto"))}
           {bottone(BookOpen, "Ricetta", `${ricette.length} disponibili · con macro a porzione`, () => setModo("ricetta"))}
           {bottone(Apple, "Singolo alimento", "Cerca nella tua lista alimenti", onAlimento)}

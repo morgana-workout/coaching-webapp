@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import { X, Plus, Utensils, ClipboardList, TrendingUp, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
 import { AcquaCliente } from "./Acqua";
+import { VoceAggiungi, CompletaVoce } from "./Voce";
 import { RicetteVista, RicettaDettaglio, PastiVista, SceltaAggiunta, SalvaPastoModal, inserisciPasto } from "./MacrosExtra";
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ReferenceLine,
@@ -26,6 +27,10 @@ function todayStr() { return fmtDate(new Date()); }
 function parseDate(s) { const p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
 function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return fmtDate(d); }
 function round1(n) { return Math.round(n * 10) / 10; }
+function round2(n) { return Math.round(n * 100) / 100; }
+const SALE_RIF = 5; // g al giorno: riferimento OMS (indicativo)
+function saleFor(f, amt) { return f && f.sale != null ? round2((f.sale * amt) / f.per) : null; }
+const chiaveAl = (f) => [(f.nome || "").trim().toLowerCase(), (f.marca || "").trim().toLowerCase(), f.unit, Number(f.per), Number(f.kcal)].join("|");
 function num(n) { return Number(n ?? 0).toLocaleString("it-IT", { maximumFractionDigits: 1 }); }
 
 function foodKcal(f, amt) { return round1((f.kcal * amt) / f.per); }
@@ -37,7 +42,7 @@ function macroFor(f, amt) {
 }
 function perLabel(f) { return f.unit === "pz" ? "1 " + (f.uname || "pezzo") : num(f.per) + " " + f.unit; }
 function amtLabel(unit, uname, amt) { return unit === "pz" ? num(amt) + " × " + (uname || "pezzo") : num(amt) + " " + unit; }
-function mLine(m) { return m ? `P ${num(m.p)} · C ${num(m.c)} · G ${num(m.g)}` : "Macro non inseriti"; }
+function mLine(m, sale) { return m ? `P ${num(m.p)} · C ${num(m.c)} · G ${num(m.g)}${sale != null ? ` · Sale ${num(sale)}` : ""}` : "Macro non inseriti"; }
 
 /* ------------------------------------------------------------------ */
 /* Componente principale — usato sia nell'area cliente sia, con       */
@@ -67,9 +72,16 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
       supabase.from("kcal_foods").select("*").in("client_id", idLibrerie).order("nome"),
       supabase.from("kcal_voci").select("*").eq("client_id", clientId).order("data"),
     ]);
-    let alimenti = fd || [];
+    // Libreria comune (uguale per tutte le clienti) + alimenti personali non già presenti nella comune
+    let comuni = [];
+    try {
+      const { data: cm } = await supabase.from("kcal_foods_comuni").select("*").order("nome");
+      comuni = (cm || []).map((x) => ({ ...x, comune: true }));
+    } catch (e) { /* senza libreria comune si usa quella personale */ }
+    const chiaviComuni = new Set(comuni.map(chiaveAl));
+    let alimenti = [...comuni, ...(fd || []).filter((f) => !chiaviComuni.has(chiaveAl(f)))].sort((x, y) => x.nome.localeCompare(y.nome, "it"));
     // Libreria completamente vuota (cliente nuova): inserisce gli alimenti base, che poi si possono modificare o eliminare
-    if (alimenti.length === 0 && !(vc || []).length && !cl?.libreria_con) {
+    if (alimenti.length === 0 && !(vc || []).length && !cl?.libreria_con && !comuni.length) {
       try {
         const { data: base } = await supabase.from("kcal_foods_base").select("*");
         if (base?.length) {
@@ -130,7 +142,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
 
   if (!isAdmin && !senzaDiario && !soloPianoERicette) {
     const vociOggi = vociPerGiorno[date] || [];
-    const tot = vociOggi.reduce((a, v) => ({ kcal: a.kcal + Number(v.kcal || 0), p: a.p + Number(v.proteine || 0), c: a.c + Number(v.carboidrati || 0), g: a.g + Number(v.grassi || 0) }), { kcal: 0, p: 0, c: 0, g: 0 });
+    const tot = vociOggi.reduce((a, v) => ({ kcal: a.kcal + Number(v.kcal || 0), p: a.p + Number(v.proteine || 0), c: a.c + Number(v.carboidrati || 0), g: a.g + Number(v.grassi || 0), s: a.s + Number(v.sale || 0) }), { kcal: 0, p: 0, c: 0, g: 0, s: 0 });
     const lun = (() => { const d = parseDate(date); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return fmtDate(d); })();
     const settimana = Array.from({ length: 7 }, (_, i) => addDays(lun, i));
     const NOMI = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
@@ -185,7 +197,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
             <button onClick={() => setSez("altro")} className="flex items-center gap-1 text-sm font-semibold" style={{ color: "#3F78B3" }}><ChevronLeft size={16} /> {TITOLI[sez]}</button>
             {sez === "ricette" && <RicetteVista ricette={ricette} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} aperta={ricettaAperta} setAperta={setRicettaAperta} senzaLog={false} />}
             {sez === "pasti" && <PastiVista pasti={pasti} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} />}
-            {sez === "libreria" && <LibreriaAlimenti clientId={clientId} foods={foods} onCambiato={carica} />}
+            {sez === "libreria" && <LibreriaAlimenti clientId={clientId} isAdmin={isAdmin} foods={foods} onCambiato={carica} />}
             {sez === "spesa" && <ListaSpesa clientId={clientId} ricette={ricette} pasti={pasti} />}
           </>
         )}
@@ -224,7 +236,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
       {vista === "pasti" && <PastiVista pasti={pasti} foods={foods} clientId={clientId} isAdmin={isAdmin} date={date} onCambiato={carica} />}
       {vista === "spesa" && <ListaSpesa clientId={clientId} ricette={ricette} pasti={pasti} />}
       {vista === "storico" && <StoricoKcal voci={voci} obiettivo={obiettivo} onVaiAGiorno={(d) => { setDate(d); setVista("diario"); }} />}
-      {vista === "libreria" && <LibreriaAlimenti clientId={clientId} foods={foods} onCambiato={carica} />}
+      {vista === "libreria" && <LibreriaAlimenti clientId={clientId} isAdmin={isAdmin} foods={foods} onCambiato={carica} />}
       {vista === "analisi" && isAdmin && <AnalisiCoach voci={voci} obiettivo={obiettivo} />}
     </div>
   );
@@ -239,12 +251,13 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
   const [p, setP] = useState(val(esistente?.proteine));
   const [c, setC] = useState(val(esistente?.carboidrati));
   const [g, setG] = useState(val(esistente?.grassi));
+  const [sl, setSl] = useState(val(esistente?.sale));
   const [salvando, setSalvando] = useState(false);
   const n = (x) => (x === "" || isNaN(Number(x)) ? null : Number(x));
   const salva = async () => {
     if (n(kcal) == null) return;
     setSalvando(true);
-    const riga = { client_id: clientId, data: date, pasto: "totale", food_id: null, nome: "Totali del giorno", marca: null, unit: "pz", uname: "giorno", quantita: 1, kcal: n(kcal), proteine: n(p), carboidrati: n(c), grassi: n(g) };
+    const riga = { client_id: clientId, data: date, pasto: "totale", food_id: null, nome: "Totali del giorno", marca: null, unit: "pz", uname: "giorno", quantita: 1, kcal: n(kcal), proteine: n(p), carboidrati: n(c), grassi: n(g), sale: n(sl) };
     if (esistente?.id) await supabase.from("kcal_voci").update(riga).eq("id", esistente.id);
     else await supabase.from("kcal_voci").insert({ ...riga, creato_da: isAdmin ? "coach" : "cliente" });
     setSalvando(false);
@@ -270,6 +283,7 @@ function TotaliGiorno({ clientId, isAdmin, date, esistente, onChiudi, onFatto })
         {campo("Proteine (g)", p, setP)}
         {campo("Carboidrati (g)", c, setC)}
         {campo("Grassi (g)", g, setG)}
+        {campo("Sale (g)", sl, setSl)}
       </div>
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando || n(kcal) == null} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-40">{salvando ? "Salvo..." : "Salva totali"}</button>
@@ -285,7 +299,7 @@ function TestataNutrizione({ tot, ob, macroOb, data }) {
   const R = 38, C = 2 * Math.PI * R;
   const frac = ob ? Math.min(1, tot.kcal / ob) : 0;
   const resta = ob ? Math.round(ob - tot.kcal) : null;
-  const barre = [["Proteine", tot.p, macroOb?.p, "#fff"], ["Carboidrati", tot.c, macroOb?.c, "#C9E0F7"], ["Grassi", tot.g, macroOb?.g, "#8EBDED"]];
+  const barre = [["Proteine", tot.p, macroOb?.p, "#fff"], ["Carboidrati", tot.c, macroOb?.c, "#C9E0F7"], ["Grassi", tot.g, macroOb?.g, "#8EBDED"], ["Sale", tot.s || 0, SALE_RIF, "#E1EEFB"]];
   const label = parseDate(data).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
   return (
     <div className="rounded-3xl p-4 text-white" style={{ background: "#27466D" }}>
@@ -297,7 +311,7 @@ function TestataNutrizione({ tot, ob, macroOb, data }) {
           <text x="48" y={ob ? 47 : 53} textAnchor="middle" fill="#fff" fontSize="21" fontWeight="700">{ob ? Math.abs(resta) : Math.round(tot.kcal)}</text>
           <text x="48" y="62" textAnchor="middle" fill="#C9E0F7" fontSize="9">{ob ? (resta >= 0 ? "kcal rimaste" : "kcal oltre") : "kcal"}</text>
         </svg>
-        <div className="flex-1 space-y-2.5">
+        <div className="flex-1 space-y-2">
           {barre.map(([nome, v, obj, col]) => (
             <div key={nome}>
               <div className="flex justify-between text-xs font-semibold"><span>{nome}</span><span style={{ color: "#C9E0F7", fontWeight: 400 }}>{num(round1(v))}{obj ? ` / ${num(obj)}` : ""} g</span></div>
@@ -316,13 +330,18 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
   const [ricettaDa, setRicettaDa] = useState(null); // { r, meal }
   const [salvaPasto, setSalvaPasto] = useState(null); // { meal, voci }
   const [mostraTotali, setMostraTotali] = useState(false);
+  const [voceMeal, setVoceMeal] = useState(null); // inserimento a voce
+  const [completa, setCompleta] = useState(null); // voce da completare
   const totaleManuale = vociGiorno.find((v) => v.pasto === "totale");
 
   const totaleKcal = vociGiorno.reduce((a, v) => a + Number(v.kcal), 0);
   const totaleMacro = vociGiorno.reduce((a, v) => ({
     p: a.p + (v.proteine ?? 0), c: a.c + (v.carboidrati ?? 0), g: a.g + (v.grassi ?? 0),
-    mancanti: a.mancanti + (v.proteine == null ? 1 : 0),
-  }), { p: 0, c: 0, g: 0, mancanti: 0 });
+    s: a.s + (v.sale ?? 0),
+    mancanti: a.mancanti + (v.proteine == null && !v.da_completare ? 1 : 0),
+    senzaSale: a.senzaSale + (v.sale == null && !v.da_completare && v.pasto !== "totale" ? 1 : 0),
+    daCompletare: a.daCompletare + (v.da_completare ? 1 : 0),
+  }), { p: 0, c: 0, g: 0, s: 0, mancanti: 0, senzaSale: 0, daCompletare: 0 });
 
   const label = parseDate(date).toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
   const pct = obiettivo ? Math.min(100, (totaleKcal / obiettivo) * 100) : 0;
@@ -333,7 +352,7 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
     if (!daCopiare.length) return;
     await supabase.from("kcal_voci").insert(daCopiare.map((v) => ({
       client_id: clientId, data: date, pasto: meal, food_id: v.food_id, nome: v.nome, marca: v.marca,
-      unit: v.unit, uname: v.uname, quantita: v.quantita, kcal: v.kcal, proteine: v.proteine, carboidrati: v.carboidrati, grassi: v.grassi,
+      unit: v.unit, uname: v.uname, quantita: v.quantita, kcal: v.kcal, proteine: v.proteine, carboidrati: v.carboidrati, grassi: v.grassi, sale: v.sale ?? null, da_completare: !!v.da_completare,
       creato_da: isAdmin ? "coach" : "cliente",
     })));
     onCambiato();
@@ -352,12 +371,18 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
           <span className="text-4xl font-semibold text-slate-800">{Math.round(totaleKcal)}</span>
           <span className="text-slate-400 text-sm">kcal {date === todayStr() ? "oggi" : "in questo giorno"}</span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-slate-50 rounded-xl px-3 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.p)} g</div><div className="text-slate-400 text-xs">Proteine</div></div>
-          <div className="bg-slate-50 rounded-xl px-3 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.c)} g</div><div className="text-slate-400 text-xs">Carboidrati</div></div>
-          <div className="bg-slate-50 rounded-xl px-3 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.g)} g</div><div className="text-slate-400 text-xs">Grassi</div></div>
+        <div className="grid grid-cols-4 gap-2">
+          <div className="bg-slate-50 rounded-xl px-2.5 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.p)} g</div><div className="text-slate-400 text-xs">Proteine</div></div>
+          <div className="bg-slate-50 rounded-xl px-2.5 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.c)} g</div><div className="text-slate-400 text-xs">Carboidrati</div></div>
+          <div className="bg-slate-50 rounded-xl px-2.5 py-2"><div className="font-semibold text-slate-800">{num(totaleMacro.g)} g</div><div className="text-slate-400 text-xs">Grassi</div></div>
+          <div className="rounded-xl px-2.5 py-2" style={{ background: "#E1EEFB" }}><div className="font-semibold text-slate-800">{num(round1(totaleMacro.s))} g</div><div className="text-slate-500 text-xs">Sale</div></div>
+        </div>
+        <div>
+          <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full" style={{ width: Math.min(100, (totaleMacro.s / SALE_RIF) * 100) + "%", background: totaleMacro.s > SALE_RIF ? "#27466D" : "#4F8FD0" }} /></div>
+          <p className="text-slate-500 text-xs mt-1">Sale: {num(round1(totaleMacro.s))} g su {SALE_RIF} g · riferimento OMS (indicativo){totaleMacro.senzaSale > 0 ? ` · ${totaleMacro.senzaSale} alimento/i senza dato: valore parziale` : ""}</p>
         </div>
         {totaleMacro.mancanti > 0 && <p className="text-slate-600 text-xs">Macro parziali: {totaleMacro.mancanti} alimento/i senza valori inseriti.</p>}
+        {totaleMacro.daCompletare > 0 && <p className="text-slate-600 text-xs">{totaleMacro.daCompletare} alimento/i da completare: i totali sono parziali.</p>}
 
         {obiettivo ? (
           <div>
@@ -404,13 +429,16 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
                 <button onClick={() => setSalvaPasto({ meal: key, voci: list })} className="text-sky-600 text-xs font-medium py-1.5">Salva come pasto standard</button>
               )}
               {list.map((v) => (
-                <button key={v.id} onClick={() => setSheet({ meal: key, entryId: v.id, food: v, amt: v.quantita })}
+                <button key={v.id} onClick={() => (v.da_completare ? setCompleta(v) : setSheet({ meal: key, entryId: v.id, food: v, amt: v.quantita }))}
                   className="w-full flex items-center gap-3 text-left border-b border-slate-100 py-2.5">
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-slate-800 text-sm">{v.nome}</div>
                     <div className="text-slate-400 text-xs">{amtLabel(v.unit, v.uname, v.quantita)}{v.marca ? " · " + v.marca : ""}{v.creato_da === "coach" ? " · aggiunto dal coach" : ""}</div>
+                    {v.da_completare && <span className="inline-block mt-1 text-[11px] rounded-lg px-2 py-0.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#27466D" }}>da completare</span>}
                   </div>
-                  <span className="text-slate-700 text-sm font-medium flex-shrink-0">{Math.round(v.kcal)} kcal</span>
+                  {v.da_completare
+                    ? <span className="text-xs font-semibold flex-shrink-0" style={{ color: "#3F78B3" }}>Completa</span>
+                    : <span className="text-slate-700 text-sm font-medium flex-shrink-0">{Math.round(v.kcal)} kcal</span>}
                 </button>
               ))}
             </div>
@@ -418,7 +446,7 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
         })}
       </div>
 
-      {compatto && !scelta && !sheet && !ricettaDa && !salvaPasto && (
+      {compatto && !scelta && !sheet && !ricettaDa && !salvaPasto && !voceMeal && !completa && (
         <button onClick={() => { const h = new Date().getHours(); setScelta({ meal: h < 10 ? "colazione" : h < 15 ? "pranzo" : h < 18 ? "spuntini" : "cena" }); }} className="fixed z-[56] right-4 rounded-full px-5 py-3 text-sm font-bold text-white shadow-xl" style={{ background: "#27466D", bottom: "calc(env(safe-area-inset-bottom) + 84px)" }}>+ Aggiungi cibo</button>
       )}
       {scelta && (
@@ -426,6 +454,7 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
           onChiudi={() => setScelta(null)}
           onAlimento={() => { const m = scelta.meal; setScelta(null); setSheet({ meal: m }); }}
           onPasto={async (p) => { const m = scelta.meal; setScelta(null); await inserisciPasto(p, { clientId, date, meal: m, isAdmin }); onCambiato(); }}
+          onVoce={() => { const m = scelta.meal; setScelta(null); setVoceMeal(m); }}
           onRicetta={(r) => { const m = scelta.meal; setScelta(null); setRicettaDa({ r, meal: m }); }} />
       )}
       {ricettaDa && (
@@ -435,6 +464,14 @@ function DiarioGiorno({ clientId, isAdmin, date, setDate, foods, vociGiorno, voc
       {salvaPasto && (
         <SalvaPastoModal voci={salvaPasto.voci} meal={salvaPasto.meal} clientId={clientId} isAdmin={isAdmin}
           onChiudi={() => setSalvaPasto(null)} onSalvato={() => { setSalvaPasto(null); onCambiato(); }} />
+      )}
+      {voceMeal && (
+        <VoceAggiungi clientId={clientId} isAdmin={isAdmin} date={date} meal={voceMeal} foods={foods}
+          onChiudi={() => setVoceMeal(null)} onFatto={() => { setVoceMeal(null); onCambiato(); }} />
+      )}
+      {completa && (
+        <CompletaVoce voce={completa} clientId={clientId} isAdmin={isAdmin}
+          onChiudi={() => setCompleta(null)} onFatto={() => { setCompleta(null); onCambiato(); }} />
       )}
       {sheet && (
         <SchedaAggiungi clientId={clientId} isAdmin={isAdmin} date={date} foods={foods} sheet={sheet} setSheet={setSheet} onSalvato={onCambiato} />
@@ -453,6 +490,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
   const [amt, setAmt] = useState(sheet.amt || "");
   const [salvando, setSalvando] = useState(false);
   const [nuovo, setNuovo] = useState(false); // creazione di un alimento direttamente dal pasto
+  const [marchio, setMarchio] = useState(""); // "" = tutti, "__none" = senza marchio
 
   // In modifica di una voce già salvata, ricostruiamo un "alimento" equivalente a partire
   // dalla voce stessa (così la modifica funziona anche se l'alimento originale è stato
@@ -463,7 +501,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
       setFood(originale || {
         id: sheet.food.food_id, nome: sheet.food.nome, marca: sheet.food.marca, unit: sheet.food.unit,
         uname: sheet.food.uname, per: sheet.food.quantita, kcal: sheet.food.kcal,
-        proteine: sheet.food.proteine, carboidrati: sheet.food.carboidrati, grassi: sheet.food.grassi,
+        proteine: sheet.food.proteine, carboidrati: sheet.food.carboidrati, grassi: sheet.food.grassi, sale: sheet.food.sale,
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -471,9 +509,16 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
 
   const risultati = useMemo(() => {
     const t = q.trim().toLowerCase();
-    const list = foods.filter((f) => !t || (f.nome + " " + (f.marca || "")).toLowerCase().includes(t));
+    const list = foods.filter((f) => (!t || (f.nome + " " + (f.marca || "")).toLowerCase().includes(t))
+      && (!marchio || (marchio === "__none" ? !f.marca : (f.marca || "").toLowerCase() === marchio.toLowerCase())));
     return list.sort((a, b) => a.nome.localeCompare(b.nome, "it"));
-  }, [foods, q]);
+  }, [foods, q, marchio]);
+  // marchi presenti in libreria (i più frequenti per primi), per i filtri rapidi
+  const marchi = useMemo(() => {
+    const c = {};
+    foods.forEach((f) => { const m = (f.marca || "").trim(); if (m) c[m] = (c[m] || 0) + 1; });
+    return Object.entries(c).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "it")).slice(0, 8).map((x) => x[0]);
+  }, [foods]);
 
   const chiudi = () => setSheet(null);
 
@@ -485,9 +530,10 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
     setSalvando(true);
     const m = macroFor(food, a);
     const riga = {
-      client_id: clientId, data: date, pasto: sheet.meal, food_id: food.id || null,
+      client_id: clientId, data: date, pasto: sheet.meal, food_id: food.comune ? null : food.id || null,
       nome: food.nome, marca: food.marca || null, unit: food.unit, uname: food.uname || null,
       quantita: a, kcal: foodKcal(food, a), proteine: m?.p ?? null, carboidrati: m?.c ?? null, grassi: m?.g ?? null,
+      sale: saleFor(food, a), da_completare: false,
     };
     if (sheet.entryId) {
       await supabase.from("kcal_voci").update(riga).eq("id", sheet.entryId);
@@ -516,7 +562,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
     <div className="fixed inset-0 bg-black/50 z-[65] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) chiudi(); }}>
       <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">
         {nuovo ? (
-          <FormAlimento clientId={clientId} alimento={null} nomeIniziale={q.trim()} onAnnulla={() => setNuovo(false)} onSalvato={creato} />
+          <FormAlimento clientId={clientId} isAdmin={isAdmin} alimento={null} nomeIniziale={q.trim()} onAnnulla={() => setNuovo(false)} onSalvato={creato} />
         ) : !food ? (
           <>
             <div className="flex items-center justify-between">
@@ -525,13 +571,18 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
             </div>
             <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Cerca tra i tuoi alimenti"
               className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {[["", "Tutti"], ...marchi.map((m) => [m, m]), ["__none", "Senza marchio"]].map(([k, l]) => (
+                <button key={k || "tutti"} onClick={() => setMarchio(k)} className="text-xs rounded-full px-3 py-1 whitespace-nowrap flex-shrink-0 font-medium" style={marchio === k ? { background: "#27466D", color: "#fff", border: "1px solid #27466D" } : { background: "#fff", color: "#27466D", border: "1px solid #C9E0F7" }}>{l}</button>
+              ))}
+            </div>
             <button onClick={() => setNuovo(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">+ Nuovo alimento{q.trim() ? ` «${q.trim()}»` : ""}</button>
             <div className="space-y-1 max-h-[50vh] overflow-y-auto">
               {risultati.map((f) => (
                 <button key={f.id} onClick={() => scegli(f)} className="w-full flex items-center justify-between text-left border-b border-slate-100 py-2.5">
                   <div className="min-w-0">
                     <div className="font-medium text-slate-800 text-sm">{f.nome}</div>
-                    <div className="text-slate-400 text-xs">{f.marca || "Senza marca"} · {mLine(hasMacro(f) ? macroFor(f, f.per) : null)}</div>
+                    <div className="text-slate-400 text-xs">{f.marca ? <b style={{ color: "#3F78B3" }}>{f.marca}</b> : "Senza marchio"} · {mLine(hasMacro(f) ? macroFor(f, f.per) : null, f.sale)}</div>
                   </div>
                   <span className="text-slate-500 text-xs text-right flex-shrink-0 ml-2">{num(f.kcal)} kcal<br />per {perLabel(f)}</span>
                 </button>
@@ -547,7 +598,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
         ) : (
           <>
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0"><h3 className="text-lg font-semibold text-slate-800 break-words">{food.nome}</h3><p className="text-slate-400 text-xs">{food.marca || "Senza marca"} · {num(food.kcal)} kcal per {perLabel(food)}</p></div>
+              <div className="min-w-0"><h3 className="text-lg font-semibold text-slate-800 break-words">{food.nome}</h3><p className="text-slate-400 text-xs">{food.marca ? <b style={{ color: "#3F78B3" }}>{food.marca}</b> : "Senza marchio"} · {num(food.kcal)} kcal per {perLabel(food)}</p></div>
               <button onClick={chiudi} className="text-slate-400 flex-shrink-0"><X size={20} /></button>
             </div>
             <div>
@@ -560,7 +611,8 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
             </div>
             <div className="text-center py-2">
               <div className="text-3xl font-semibold text-slate-800">{Math.round(foodKcal(food, Number(amt || 0)))} <span className="text-base font-normal text-slate-400">kcal</span></div>
-              <div className="text-slate-400 text-sm mt-1">{mLine(macroFor(food, Number(amt || 0)))}</div>
+              <div className="text-slate-400 text-sm mt-1">{mLine(macroFor(food, Number(amt || 0)), saleFor(food, Number(amt || 0)))}</div>
+              {food.sale == null && <div className="text-slate-400 text-xs mt-1">Sale non inserito per questo alimento</div>}
             </div>
             <div className="flex gap-2">
               <button onClick={conferma} disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-50">{salvando ? "Salvo..." : sheet.entryId ? "Salva modifica" : `Aggiungi a ${nomeTitolo}`}</button>
@@ -578,11 +630,11 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
 /* ------------------------------------------------------------------ */
 /* Libreria alimenti personale                                        */
 /* ------------------------------------------------------------------ */
-function LibreriaAlimenti({ clientId, foods, onCambiato }) {
+function LibreriaAlimenti({ clientId, isAdmin = false, foods, onCambiato }) {
   const [modifica, setModifica] = useState(undefined); // undefined = form chiuso, null = nuovo, oggetto = modifica
 
   if (modifica !== undefined) {
-    return <FormAlimento clientId={clientId} alimento={modifica} onAnnulla={() => setModifica(undefined)} onSalvato={() => { setModifica(undefined); onCambiato(); }} />;
+    return <FormAlimento clientId={clientId} isAdmin={isAdmin} alimento={modifica} onAnnulla={() => setModifica(undefined)} onSalvato={() => { setModifica(undefined); onCambiato(); }} />;
   }
 
   return (
@@ -590,15 +642,15 @@ function LibreriaAlimenti({ clientId, foods, onCambiato }) {
       <button onClick={() => setModifica(null)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5">+ Nuovo alimento</button>
       <Card className="divide-y divide-slate-100">
         {[...foods].sort((a, b) => a.nome.localeCompare(b.nome, "it")).map((f) => (
-          <button key={f.id} onClick={() => setModifica(f)} className="w-full flex items-center justify-between text-left px-4 py-3">
+          <button key={f.id} onClick={() => { if (f.comune && !isAdmin) return; setModifica(f); }} className="w-full flex items-center justify-between text-left px-4 py-3">
             <div className="min-w-0">
               <div className="font-medium text-slate-800 text-sm">{f.nome}</div>
-              <div className="text-slate-400 text-xs">{f.marca || "Senza marca"} · {mLine(hasMacro(f) ? macroFor(f, f.per) : null)}</div>
+              <div className="text-slate-400 text-xs">{f.marca ? <b style={{ color: "#3F78B3" }}>{f.marca}</b> : "Senza marchio"} · {mLine(hasMacro(f) ? macroFor(f, f.per) : null, f.sale)}{f.comune ? " · libreria comune" : ""}{f.da_controllare && isAdmin ? " · da controllare" : ""}</div>
             </div>
             <span className="text-slate-500 text-xs text-right flex-shrink-0 ml-2">{num(f.kcal)} kcal<br />per {perLabel(f)}</span>
           </button>
         ))}
-        {!foods.length && <p className="text-slate-400 text-sm p-4">Non hai ancora alimenti. Aggiungine uno per iniziare a usare il diario.</p>}
+        {!foods.length && <p className="text-slate-400 text-sm p-4">Non ci sono ancora alimenti. Aggiungine uno per iniziare a usare il diario.</p>}
       </Card>
     </div>
   );
@@ -647,9 +699,10 @@ function ScannerBarcode({ onCodice, onChiudi }) {
   );
 }
 
-function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale = "" }) {
-  const x = alimento || { nome: nomeIniziale, marca: "", unit: "g", uname: "", per: 100, kcal: "", proteine: "", carboidrati: "", grassi: "", quantita_abituale: "" };
-  const [f, setF] = useState({ ...x });
+function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvato, nomeIniziale = "" }) {
+  const x = alimento || { nome: nomeIniziale, marca: "", unit: "g", uname: "", per: 100, kcal: "", proteine: "", carboidrati: "", grassi: "", sale: "", quantita_abituale: "" };
+  const [f, setF] = useState({ ...x, marca: x.marca || "", sale: x.sale == null ? "" : x.sale });
+  const [perTutte, setPerTutte] = useState(false); // solo coach: nuovo alimento nella libreria comune
   const [salvando, setSalvando] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const [scanner, setScanner] = useState(false);
@@ -663,7 +716,7 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
       if (j?.status !== 1 || !n) { setCerca(`Codice ${codice} non trovato: inserisci i valori a mano, ci metti un attimo 🫶🏻`); return; }
       const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] != null ? n["energy_100g"] / 4.184 : null);
       const r1 = (v) => (v == null || isNaN(Number(v)) ? "" : String(Math.round(Number(v) * 10) / 10));
-      setF((s) => ({ ...s, nome: j.product.product_name || s.nome, marca: (j.product.brands || "").split(",")[0].trim() || s.marca, unit: "g", per: 100, kcal: r1(kcal), proteine: r1(n.proteins_100g), carboidrati: r1(n.carbohydrates_100g), grassi: r1(n.fat_100g) }));
+      setF((s) => ({ ...s, nome: j.product.product_name || s.nome, marca: (j.product.brands || "").split(",")[0].trim() || s.marca, unit: "g", per: 100, kcal: r1(kcal), proteine: r1(n.proteins_100g), carboidrati: r1(n.carbohydrates_100g), grassi: r1(n.fat_100g), sale: r1(n.salt_100g) }));
       setCerca("Trovato ✨ Valori per 100 g: controllali prima di salvare.");
     } catch (e) { setCerca("Non riesco a collegarmi ora: riprova tra poco oppure inserisci a mano."); }
   };
@@ -676,24 +729,26 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
     const per = f.unit === "pz" ? 1 : (Number(String(f.per).replace(",", ".")) || 100);
     const mv = (v) => { const n = Number(String(v).replace(",", ".")); return v === "" || isNaN(n) ? null : n; };
     const riga = {
-      client_id: clientId, nome, marca: f.marca.trim() || null, unit: f.unit,
+      ...(alimento?.comune || (isAdmin && perTutte && !alimento?.id) ? {} : { client_id: clientId }), nome, marca: (f.marca || "").trim() || null, unit: f.unit,
       uname: f.unit === "pz" ? (f.uname.trim() || "pezzo") : null, per, kcal,
-      proteine: mv(f.proteine), carboidrati: mv(f.carboidrati), grassi: mv(f.grassi),
+      proteine: mv(f.proteine), carboidrati: mv(f.carboidrati), grassi: mv(f.grassi), sale: mv(f.sale),
       quantita_abituale: mv(f.quantita_abituale),
     };
     setSalvando(true);
+    const tab = alimento?.comune || (isAdmin && perTutte && !alimento?.id) ? "kcal_foods_comuni" : "kcal_foods";
+    if (tab === "kcal_foods_comuni" && alimento?.id) { const completo = riga.proteine != null && riga.carboidrati != null && riga.grassi != null; riga.da_controllare = !completo; if (completo) riga.nota = null; }
     const { data: salvato, error } = alimento?.id
-      ? await supabase.from("kcal_foods").update(riga).eq("id", alimento.id).select().single()
-      : await supabase.from("kcal_foods").insert(riga).select().single();
+      ? await supabase.from(tab).update(riga).eq("id", alimento.id).select().single()
+      : await supabase.from(tab).insert(riga).select().single();
     setSalvando(false);
     if (error) { alert("Non sono riuscita a salvare l'alimento. Riprova tra un attimo 🫶🏻"); return; }
-    onSalvato(salvato);
+    onSalvato(salvato && tab === "kcal_foods_comuni" ? { ...salvato, comune: true } : salvato);
   };
 
   const elimina = async () => {
-    if (!confirm(`Eliminare "${alimento.nome}" dalla libreria? Le voci già registrate nel diario non vengono toccate.`)) return;
+    if (!confirm(`Eliminare "${alimento.nome}" dalla libreria${alimento.comune ? " COMUNE (sparisce per tutte le clienti)" : ""}? Le voci già registrate nel diario non vengono toccate.`)) return;
     setSalvando(true);
-    await supabase.from("kcal_foods").delete().eq("id", alimento.id);
+    await supabase.from(alimento.comune ? "kcal_foods_comuni" : "kcal_foods").delete().eq("id", alimento.id);
     setSalvando(false);
     onSalvato();
   };
@@ -713,7 +768,7 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
         )}
         {scanner && <ScannerBarcode onCodice={daCodice} onChiudi={() => setScanner(false)} />}
         <div><label className="text-slate-400 text-xs">Nome</label><input value={f.nome} onChange={set("nome")} required placeholder="Es. Albume d'uovo" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
-        <div><label className="text-slate-400 text-xs">Marca (facoltativa)</label><input value={f.marca} onChange={set("marca")} placeholder="Es. Lidl" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
+        <div><label className="text-slate-400 text-xs">Marchio (facoltativo)</label><input value={f.marca} onChange={set("marca")} placeholder="Es. Lidl" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
         <div>
           <label className="text-slate-400 text-xs">Come lo pesi</label>
           <select value={f.unit} onChange={set("unit")} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
@@ -733,6 +788,9 @@ function FormAlimento({ clientId, alimento, onAnnulla, onSalvato, nomeIniziale =
             <input type="number" inputMode="decimal" step="any" min="0" value={f.grassi} onChange={set("grassi")} placeholder="Grassi" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           </div>
         </div>
+        <div><label className="text-slate-400 text-xs">Sale in grammi (come da etichetta, per la stessa quantità; facoltativo)</label><input type="number" inputMode="decimal" step="any" min="0" value={f.sale} onChange={set("sale")} placeholder="Es. 0,9" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
+        {isAdmin && alimento?.da_controllare && alimento?.nota && <p className="text-xs rounded-lg px-3 py-2" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#27466D" }}>{alimento.nota}</p>}
+        {isAdmin && !alimento?.id && <label className="flex items-start gap-2 text-xs text-slate-600"><input type="checkbox" checked={perTutte} onChange={(e) => setPerTutte(e.target.checked)} className="mt-0.5" /><span>Aggiungilo alla libreria comune (visibile a tutte le clienti)</span></label>}
         <div><label className="text-slate-400 text-xs">Quantità abituale (facoltativa)</label><input type="number" inputMode="decimal" step="any" min="0" value={f.quantita_abituale} onChange={set("quantita_abituale")} placeholder="Compare già pronta quando lo aggiungi" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" /></div>
         <div className="flex gap-2 pt-1">
           <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-50">{salvando ? "Salvo..." : "Salva alimento"}</button>
