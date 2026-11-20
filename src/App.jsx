@@ -1,3 +1,4 @@
+import AnalisiCarichi from "./AnalisiCarichi";
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
@@ -2756,7 +2757,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
       <div className="px-5 pt-16 pb-24 space-y-6">
         <p className="text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</p>
         {isAdmin && clientId && <AderenzaAllenamenti clientId={clientId} />}
-        {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} />}
+        {clientId && (isAdmin ? <AnalisiCarichi clientId={clientId} renderGestione={(g) => (<><ScarichiCoach clientId={clientId} scarichi={g.scarichi} onChange={g.ricarica} /><CambiPalestraCoach clientId={clientId} cambi={g.cambi} onChange={g.ricarica} /></>)} /> : <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} />)}
       </div>
     );
   }
@@ -2765,7 +2766,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
       {isAdmin && clientId && <AderenzaAllenamenti clientId={clientId} />}
-      {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="trend" />}
+      {clientId && (isAdmin ? <AnalisiCarichi clientId={clientId} renderGestione={(g) => (<><ScarichiCoach clientId={clientId} scarichi={g.scarichi} onChange={g.ricarica} /><CambiPalestraCoach clientId={clientId} cambi={g.cambi} onChange={g.ricarica} /></>)} /> : <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="trend" />)}
+      {isAdmin && <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1 pt-2">Progressi estetici · foto, misure e peso</p>}
       <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} obiettivoDal={obiettivoDal} />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {opzioni.map((o) => (
@@ -2800,7 +2802,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
       </div>
 
-      {clientId && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="resto" />}
+      {clientId && !isAdmin && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="resto" />}
     </div>
   );
 }
@@ -14518,7 +14520,7 @@ function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoV
           <button onClick={() => setSezione(sezione === "consigli" ? null : "consigli")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "consigli" ? "#27466D" : "#fff", color: sezione === "consigli" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prossimo allenamento</button>
           <button onClick={() => setSezione(sezione === "valutazione" ? null : "valutazione")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "valutazione" ? "#27466D" : "#fff", color: sezione === "valutazione" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazione</button>
         </div>
-        {sezione === "progressi" && <><AderenzaAllenamenti clientId={cl.id} /><ProgressiCarichi clientId={cl.id} isAdmin /></>}
+        {sezione === "progressi" && <><AderenzaAllenamenti clientId={cl.id} /><AnalisiCarichi clientId={cl.id} renderGestione={(g) => (<><ScarichiCoach clientId={cl.id} scarichi={g.scarichi} onChange={g.ricarica} /><CambiPalestraCoach clientId={cl.id} cambi={g.cambi} onChange={g.ricarica} /></>)} /></>}
         {sezione === "consigli" && <ConsigliProgramma client={cl} />}
         {sezione === "valutazione" && <ValutazioniBulb client={cl} />}
         <div className="flex justify-between text-xs pt-1">
