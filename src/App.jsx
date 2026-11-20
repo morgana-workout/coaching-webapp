@@ -4729,7 +4729,14 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
       })()}
 
       {giorni.length === 0 ? (
-        <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
+        isAdmin ? (
+          <Card className="p-6 text-center space-y-3">
+            <p className="text-sm text-slate-500">Questa cliente non ha ancora un programma 🫶🏻</p>
+            <button onClick={onStorico} className="w-full text-white text-sm font-semibold rounded-xl py-2.5" style={{ background: "#27466D" }}>📥 Importa il programma da CSV (o crealo a mano)</button>
+          </Card>
+        ) : (
+          <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
+        )
       ) : (
         <>
           <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1">
