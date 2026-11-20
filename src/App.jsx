@@ -13164,6 +13164,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
 function GrigliaCompletezza({ clients, onSelect }) {
   const [nutrizione, setNutrizione] = useState({});
   const [allenamento, setAllenamento] = useState({});
+  const [azioni, setAzioni] = useState({ programma: {}, nutrizione: {}, commento: {}, messaggio: {} });
   const [caricando, setCaricando] = useState(true);
 
   useEffect(() => {
@@ -13185,6 +13186,22 @@ function GrigliaCompletezza({ clients, onSelect }) {
         if (!teMap[r.client_id] || (r.data || "") > teMap[r.client_id]) teMap[r.client_id] = r.data;
       });
       setAllenamento(teMap);
+
+      // Le MIE ultime azioni per cliente (data più recente di ciascuna)
+      const piuRecente = (mappa, cid, v) => { const d = v ? String(v).slice(0, 10) : ""; if (cid && d && (!mappa[cid] || d > mappa[cid])) mappa[cid] = d; };
+      const az = { programma: {}, nutrizione: {}, commento: {}, messaggio: {} };
+      try {
+        const gg = await leggiTutto(() => supabase.from("training_days").select("id, client_id, created_at, scheda_archiviata").order("id"));
+        const attivi = new Set();
+        gg.forEach((g) => { if (!g.scheda_archiviata) { attivi.add(g.id); piuRecente(az.programma, g.client_id, g.created_at); } });
+        const ee = await leggiTutto(() => supabase.from("training_exercises").select("id, client_id, training_day_id, created_at").order("id"));
+        ee.forEach((x) => { if (attivi.has(x.training_day_id)) piuRecente(az.programma, x.client_id, x.created_at); });
+      } catch (e) { /* ignora */ }
+      (nu || []).forEach((r) => { piuRecente(az.nutrizione, r.client_id, r.data_aggiornamento); });
+      try { const { data: np } = await supabase.from("nutrition_plans").select("client_id, created_at"); (np || []).forEach((r) => piuRecente(az.nutrizione, r.client_id, r.created_at)); } catch (e) { /* ignora */ }
+      try { const { data: cc } = await supabase.from("commenti_check").select("client_id, created_at, updated_at"); (cc || []).forEach((r) => { piuRecente(az.commento, r.client_id, r.created_at); piuRecente(az.commento, r.client_id, r.updated_at); }); } catch (e) { /* ignora */ }
+      try { const { data: mm } = await supabase.from("messaggi").select("client_id, created_at").eq("mittente", "coach"); (mm || []).forEach((r) => piuRecente(az.messaggio, r.client_id, r.created_at)); } catch (e) { /* ignora */ }
+      setAzioni(az);
 
       setCaricando(false);
     })();
@@ -13218,9 +13235,11 @@ function GrigliaCompletezza({ clients, onSelect }) {
             <tr className="bg-slate-50 text-slate-500 text-left">
               <th className="sticky left-0 bg-slate-50 px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
               <th className="px-2 py-2 font-medium text-center">Scadenza</th>
-              <th className="px-2 py-2 font-medium text-center">Scheda</th>
-              <th className="px-2 py-2 font-medium text-center">Log allen.</th>
+              <th className="px-2 py-2 font-medium text-center">Programma</th>
               <th className="px-2 py-2 font-medium text-center">Nutrizione</th>
+              <th className="px-2 py-2 font-medium text-center">Commento check</th>
+              <th className="px-2 py-2 font-medium text-center">Messaggio</th>
+              <th className="px-2 py-2 font-medium text-center">Log cliente</th>
               <th className="px-2 py-2 font-medium text-center">Prossimo check</th>
             </tr>
           </thead>
@@ -13243,14 +13262,16 @@ function GrigliaCompletezza({ clients, onSelect }) {
                       <span className="text-slate-600">○ mancante</span>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-center"><Pallino stato={schedaStato} /></td>
+                  {[azioni.programma[c.id] || (schedaStato ? "link" : null), nutData || azioni.nutrizione[c.id], azioni.commento[c.id], azioni.messaggio[c.id]].map((d, i) => (
+                    <td key={i} className="px-2 py-2 text-center">
+                      <Pallino stato={!!d} />
+                      {d && d !== "link" && <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(d).slice(0, 5)} · {giorniDa(d)}g fa</div>}
+                      {d === "link" && <div className="text-[10px] text-slate-400 whitespace-nowrap">link/PDF</div>}
+                    </td>
+                  ))}
                   <td className="px-2 py-2 text-center">
                     <Pallino stato={!!logData} />
-                    {logData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(logData)}g fa</div>}
-                  </td>
-                  <td className="px-2 py-2 text-center">
-                    <Pallino stato={!!nutData} />
-                    {nutData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(nutData)}g fa</div>}
+                    {logData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(logData).slice(0, 5)} · {giorniDa(logData)}g fa</div>}
                   </td>
                   <td className="px-2 py-2 text-center">
                     {c.prossimo_check ? (
@@ -13268,7 +13289,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
               );
             })}
             {righe.length === 0 && (
-              <tr><td colSpan={6} className="text-center text-slate-400 py-6">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
+              <tr><td colSpan={8} className="text-center text-slate-400 py-6">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
             )}
           </tbody>
         </table>
@@ -13277,6 +13298,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
         <span className="flex items-center gap-1 text-sky-500">● presente</span>
         <span className="flex items-center gap-1 text-slate-600">○ mancante</span>
         <span>n/d = non si applica (pacchetto senza scadenza fissa)</span>
+        <span>Sotto il pallino: data e giorni dall'ultima mia azione (programma inserito, piano nutrizione, commento al check, messaggio). “Log cliente” = ultimo allenamento segnato da lei.</span>
       </div>
     </Card>
   );
