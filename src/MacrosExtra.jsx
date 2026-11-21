@@ -1,3 +1,4 @@
+import { confermaApp } from "./Dialoghi";
 import React, { useState, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import { X, Plus, Search, Trash2, Pencil, BookOpen, UtensilsCrossed, Apple, Mic } from "lucide-react";
@@ -237,7 +238,7 @@ export function RicettaDettaglio({ r, clientId, isAdmin, date, mealIniziale, onC
     onFatto();
   };
   const elimina = async () => {
-    if (!confirm("Eliminare questa ricetta?")) return;
+    if (!await confermaApp("Eliminare questa ricetta?")) return;
     await supabase.from("kcal_ricette").delete().eq("id", r.id);
     (onEliminata || onFatto)();
   };
@@ -394,7 +395,7 @@ function PastoCard({ p, clientId, isAdmin, date, onCambiato, onModifica }) {
     alert(`Aggiunto a ${nomePasto(meal)} ✨`);
   };
   const elimina = async () => {
-    if (!confirm("Eliminare questo pasto standard?")) return;
+    if (!await confermaApp("Eliminare questo pasto standard?")) return;
     await supabase.from("kcal_pasti_standard").delete().eq("id", p.id);
     onCambiato();
   };

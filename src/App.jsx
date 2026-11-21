@@ -1,3 +1,4 @@
+import { confermaApp } from "./Dialoghi";
 import AnalisiCarichi from "./AnalisiCarichi";
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -631,7 +632,7 @@ function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
     const testo = inTempo
       ? "Vuoi annullare questa lezione? Nessuna penale: l'annullamento è più di 24 ore prima."
       : "Mancano meno di 24 ore alla lezione: se la annulli verrà conteggiata come lezione persa. Vuoi annullarla comunque?";
-    if (!confirm(testo)) return;
+    if (!await confermaApp(testo)) return;
     await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa", ...(inTempo && client.gruppo_id ? { recupero_entro: fineMeseSuccessivo(evento.data), recuperata: false } : {}) }).eq("id", evento.id);
     if (inTempo) await scollegaLezionePacchetto(evento.id);
     // se c'era una richiesta di spostamento in attesa, decade
@@ -3389,7 +3390,7 @@ function LibreriaEserciziCoach() {
   };
 
   const elimina = async () => {
-    if (!confirm(`Eliminare "${edit.nome}" dalla libreria? Non si può annullare.`)) return;
+    if (!await confermaApp(`Eliminare "${edit.nome}" dalla libreria? Non si può annullare.`)) return;
     await supabase.from("esercizi_video").delete().eq("id", edit.id);
     setEdit(null); carica();
   };
@@ -3556,7 +3557,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
     carica();
   };
   const eliminaPrep = async (id) => {
-    if (!confirm("Eliminare questa riga?")) return;
+    if (!await confermaApp("Eliminare questa riga?")) return;
     await supabase.from("training_exercises").delete().eq("id", id);
     carica();
   };
@@ -3597,7 +3598,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
   };
 
   const eliminaEsercizio = async (id) => {
-    if (!confirm("Eliminare questo esercizio e tutto il suo storico di carichi registrati?")) return;
+    if (!await confermaApp("Eliminare questo esercizio e tutto il suo storico di carichi registrati?")) return;
     await supabase.from("training_entries").delete().eq("exercise_id", id);
     await supabase.from("training_exercises").delete().eq("id", id);
     carica();
@@ -3820,7 +3821,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
   useEffect(() => { carica(); }, [clientId]);
   if (righe === null || (righe.length === 0 && !isAdmin)) return null;
   const aggiorna = async (id, campo, valore) => { await supabase.from("training_exercises").update({ [campo]: valore }).eq("id", id); carica(); };
-  const elimina = async (id) => { if (!confirm("Eliminare questa riga?")) return; await supabase.from("training_exercises").delete().eq("id", id); carica(); };
+  const elimina = async (id) => { if (!await confermaApp("Eliminare questa riga?")) return; await supabase.from("training_exercises").delete().eq("id", id); carica(); };
   const aggiungi = async () => {
     if (!nome.trim()) return;
     await supabase.from("training_exercises").insert({ client_id: clientId, training_day_id: null, nome: nome.trim(), note: note.trim() || null, esecuzione: esec.trim() || null, tipo, ordine: righe.length + 1 });
@@ -3924,7 +3925,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
 
   const eliminaProgramma = async (lista, testo) => {
     if (!lista.length) return;
-    if (!confirm(testo)) return;
+    if (!await confermaApp(testo)) return;
     const ids = lista.map((g) => g.id);
     const { data: es } = await supabase.from("training_exercises").select("id").in("training_day_id", ids);
     const idsEs = (es || []).map((e) => e.id);
@@ -3936,7 +3937,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   };
 
   const eliminaGiorno = async (giornoId) => {
-    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
+    if (!await confermaApp("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
     const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giornoId);
     const idsEsercizi = (es || []).map((e) => e.id);
     if (idsEsercizi.length) await supabase.from("training_entries").delete().in("exercise_id", idsEsercizi);
@@ -4080,7 +4081,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   };
 
   const sostituisciConNuovaScheda = async (file) => {
-    if (giorni.length > 0 && !confirm("Il diario attuale (" + giorni.length + " giorno/i) verrà chiuso e archiviato come scheda T.N, con tutti i carichi registrati. Poi importo la nuova scheda dal CSV. Vuoi procedere?")) return;
+    if (giorni.length > 0 && !await confermaApp("Il diario attuale (" + giorni.length + " giorno/i) verrà chiuso e archiviato come scheda T.N, con tutti i carichi registrati. Poi importo la nuova scheda dal CSV. Vuoi procedere?")) return;
     setImportando(true);
     if (giorni.length > 0) {
       const numeri = archiviati.map((g) => parseInt((g.scheda_archiviata || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
@@ -5026,7 +5027,7 @@ function LeMieLezioni({ client }) {
     const oreAllaLezione = (dataOra - new Date()) / 3600000;
     const inTempo = oreAllaLezione >= 24;
     if (!inTempo) {
-      const conferma = confirm("Mancano meno di 24 ore alla lezione: verrà comunque conteggiata come persa. Vuoi annullare comunque?");
+      const conferma = await confermaApp("Mancano meno di 24 ore alla lezione: verrà comunque conteggiata come persa. Vuoi annullare comunque?", { si: "Sì, annulla", no: "No, la tengo" });
       if (!conferma) return;
     }
     await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa", ...(inTempo && client.gruppo_id ? { recupero_entro: fineMeseSuccessivo(e.data), recuperata: false } : {}) }).eq("id", e.id);
@@ -5687,7 +5688,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
           nuovi.push({ client_id: clientId, nome, marca, unit, uname: unit === "pz" ? ((iP >= 0 && (r[iP] || "").trim()) || "pezzo") : null, per: unit === "pz" ? 1 : (num(iPer >= 0 ? r[iPer] : null) || 100), kcal, proteine: iPr >= 0 ? num(r[iPr]) : null, carboidrati: iC >= 0 ? num(r[iC]) : null, grassi: iG >= 0 ? num(r[iG]) : null, quantita_abituale: iQ >= 0 ? num(r[iQ]) : null });
         }
         if (nuovi.length === 0) { setMsg(`Nessun alimento nuovo da importare (${saltati} righe saltate: vuote o già presenti).`); setLavoro(false); return; }
-        if (!confirm(`Importo ${nuovi.length} alimenti nella lista di questa cliente? (${saltati} righe saltate)`)) { setLavoro(false); return; }
+        if (!await confermaApp(`Importo ${nuovi.length} alimenti nella lista di questa cliente? (${saltati} righe saltate)`)) { setLavoro(false); return; }
         const { error } = await supabase.from("kcal_foods").insert(nuovi);
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} alimenti ✓${saltati ? ` (${saltati} saltati)` : ""}`);
         if (!error) onFatto?.();
@@ -5724,9 +5725,9 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
         cicli.forEach((c, i) => { c.end = c.fin || (cicli[i + 1] ? addGiorni(cicli[i + 1].start, -1) : null); });
         const nuovi = cicli.map((c) => ({ client_id: clientId, data_aggiornamento: c.start, data_inizio: c.start, data_fine: c.end, kcal: Math.round(c.tot.kcal), proteine_g: c.tot.proteine_g, carboidrati_g: c.tot.carboidrati_g, grassi_g: c.tot.grassi_g, note: c.nota, pasti: c.pasti.length ? c.pasti : null }));
         const fd = (d) => d.split("-").reverse().slice(0, 2).join("/");
-        if (!confirm(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
+        if (!await confermaApp(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
         const { count: giaPresenti } = await supabase.from("nutrition_plans").select("id", { count: "exact", head: true }).eq("client_id", clientId);
-        if (giaPresenti > 0 && confirm(`Questa cliente ha già ${giaPresenti} cicli salvati. OK = li elimino e metto solo quelli nuovi. Annulla = li tengo e aggiungo i nuovi (rischi di averli doppi).`)) {
+        if (giaPresenti > 0 && await confermaApp(`Questa cliente ha già ${giaPresenti} cicli salvati. Conferma = li elimino e metto solo quelli nuovi. Annulla = li tengo e aggiungo i nuovi (rischi di averli doppi).`)) {
           await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
         }
         const { error } = await supabase.from("nutrition_plans").insert(nuovi);
@@ -6187,7 +6188,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
     onRegistrato();
   };
   const elimina = async (p) => {
-    if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
+    if (!await confermaApp(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
     await supabase.from("payments").delete().eq("id", p.id);
     // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
@@ -7730,7 +7731,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   };
   const rinominaGiorno = async (giornoId, nome) => { aggiornaGiornoLocale(giornoId, { nome }); await supabase.from("scheda_giorni").update({ nome }).eq("id", giornoId); };
   const eliminaGiorno = async (giornoId) => {
-    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi?")) return;
+    if (!await confermaApp("Eliminare questo giorno e tutti i suoi esercizi?")) return;
     setSchedaCorrente((prev) => ({ ...prev, giorni: prev.giorni.filter((g) => g.id !== giornoId) }));
     await supabase.from("scheda_giorni").delete().eq("id", giornoId);
   };
@@ -8161,7 +8162,7 @@ async function esportaPerAnalisiEsterna(client, setInCorso, opz = {}) {
   let cons = null;
   try { const { data } = await supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle(); cons = data; } catch (e) { /* senza tabella: nessun blocco */ }
   if (cons?.analisi_esterna === false) { alert(`${client.nome || "La cliente"} ha scelto di NON far elaborare i suoi dati con strumenti esterni. Non esporto nulla 🫶🏻`); return; }
-  if (cons?.analisi_esterna == null && !confirm(`${client.nome || "La cliente"} non ha ancora dato il consenso all'analisi con strumenti esterni. Vuoi esportare lo stesso?`)) return;
+  if (cons?.analisi_esterna == null && !await confermaApp(`${client.nome || "La cliente"} non ha ancora dato il consenso all'analisi con strumenti esterni. Vuoi esportare lo stesso?`)) return;
   setInCorso(true);
   try {
     const cid = client.id;
@@ -8622,7 +8623,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <InputData key={client.data_scadenza || "nessuna"} defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
               className="mt-1" />
             {client.data_scadenza && (
-              <button onClick={() => { if (confirm("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
+              <button onClick={async () => { if (await confermaApp("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
                 className="mt-2 text-slate-800 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
             )}
           </div>
@@ -8770,7 +8771,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!confirm(`Eliminare il check del ${r.data_check}? L'operazione non è reversibile.`)) return;
+                          if (!await confermaApp(`Eliminare il check del ${r.data_check}? L'operazione non è reversibile.`)) return;
                           await supabase.from("checkins").delete().eq("id", r.id);
                           carica();
                         }}
@@ -8822,7 +8823,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <ImportaNutrizioneCSV clientId={clientId} onFatto={carica} />
           <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica}
             onElimina={async (r) => {
-              if (!confirm(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
+              if (!await confermaApp(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
               const { error } = await supabase.from("nutrition_plans").delete().eq("id", r.id);
               if (error) { alert("Non sono riuscita a eliminarlo."); return; }
               if (nutrizioneModifica?.id === r.id) setNutrizioneModifica(null);
@@ -8830,7 +8831,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             }} />
           {nutrizioneStorico.length > 0 && (
             <button onClick={async () => {
-              if (!confirm(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
+              if (!await confermaApp(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
               const { error } = await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
               if (error) { alert("Non sono riuscita a eliminarlo."); return; }
               setNutrizioneModifica(null);
@@ -9136,7 +9137,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
     onSalvato();
   };
   const elimina = async () => {
-    if (!confirm("Eliminare definitivamente questo evento?")) return;
+    if (!await confermaApp("Eliminare definitivamente questo evento?")) return;
     setSalvando(true);
     for (const x of tutti) await scollegaLezionePacchetto(x.id);
     await supabase.from("calendar_events").delete().in("id", tutti.map((x) => x.id));
@@ -9573,7 +9574,7 @@ function AttivitaClienti({ clients, singola = false }) {
       testo += `${nuove.length ? "\n\nInoltre " : "Ho visto che "}mancano ${lista} da un po': ti va di segnarli sull'app? Più dati mi dai e più riesco a calibrare tutto su di te 💪🏻`;
     }
     testo += `\n\nSe hai dubbi su come fare scrivimi pure, ci sono io 🫶🏻`;
-    if (!confirm(`Mando questo messaggio a ${c.nome}?\n\n${testo}`)) return;
+    if (!await confermaApp(`Mando questo messaggio a ${c.nome}?\n\n${testo}`)) return;
     setInvio(c.id);
     try {
       const { data: nm, error } = await supabase.from("messaggi").insert({ client_id: c.id, mittente: "coach", testo }).select("id").single();
@@ -10193,7 +10194,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   };
 
   const cancellaChat = async () => {
-    if (!confirm("Cancello questa chat dalla tua vista? L'altra persona continua a vedere i suoi messaggi.")) return;
+    if (!await confermaApp("Cancello questa chat dalla tua vista? L'altra persona continua a vedere i suoi messaggi.")) return;
     const { error } = await supabase.rpc("nascondi_chat", { p_client_id: clientId });
     if (error) { setErrore("Non sono riuscita a cancellare la chat, riprova."); return; }
     setMsgs([]);
@@ -10848,7 +10849,7 @@ function ListaAttesaCoach({ onChanged, aperta = false }) {
   const inp = "border border-slate-200 rounded-lg px-3 py-2 text-sm w-full";
   const promoDi = (data) => data <= PROMO_ATTESA.fine;
   const segna = async (r) => { await supabase.from("lista_attesa").update({ contattata: !r.contattata }).eq("id", r.id); carica(); };
-  const elimina = async (r) => { if (!confirm(`Elimino ${r.nome} dalla lista? Non si può annullare.`)) return; await supabase.from("lista_attesa").delete().eq("id", r.id); carica(); };
+  const elimina = async (r) => { if (!await confermaApp(`Elimino ${r.nome} dalla lista? Non si può annullare.`)) return; await supabase.from("lista_attesa").delete().eq("id", r.id); carica(); };
   const messaggio = (r) => `Ciao ${r.nome.split(" ")[0]}! ✨ Il tuo posto per il coaching online di gennaio è riservato 🫶🏻 Non devi pagare nulla adesso: partiremo a gennaio, dopo il pagamento${r.promo_mese_gratis ? ", e avrai 1 mese in regalo 🎁" : ""}. Ti scrivo appena sono pronta a iniziare 💪🏻`;
   const wa = (r) => { const n = String(r.whatsapp || "").replace(/[^\d]/g, ""); const num = n.length > 10 ? n : "39" + n; window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio(r))}`, "_blank"); };
   const csv = () => {
@@ -11233,7 +11234,7 @@ function BilancioAvanzatoCliente({ client }) {
       ) : (
         <div className="flex gap-2">
           <button onClick={() => setModifica(true)} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>{rigaSett ? "Modifica questo bilancio" : "Inserisci a mano"}</button>
-          {rigaSett && <button onClick={async () => { if (!confirm(`Eliminare il bilancio della settimana ${etichettaSettimana(sett)}? Non si può annullare.`)) return; const { error } = await supabase.from("bilanci_avanzati").delete().eq("id", rigaSett.id); setStato(error ? "Non sono riuscita a eliminarlo, riprova." : "Bilancio eliminato ✨"); carica(); }} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>Elimina</button>}
+          {rigaSett && <button onClick={async () => { if (!await confermaApp(`Eliminare il bilancio della settimana ${etichettaSettimana(sett)}? Non si può annullare.`)) return; const { error } = await supabase.from("bilanci_avanzati").delete().eq("id", rigaSett.id); setStato(error ? "Non sono riuscita a eliminarlo, riprova." : "Bilancio eliminato ✨"); carica(); }} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>Elimina</button>}
         </div>
       )}
       {n === 0 ? (
@@ -12996,7 +12997,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
     carica();
   };
   const elimina = async (p) => {
-    if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
+    if (!await confermaApp(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
     await supabase.from("payments").delete().eq("id", p.id);
     // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
@@ -13823,7 +13824,7 @@ function ValutazioniBulb({ client }) {
   const aperta = lista.find((v) => v.id === vista);
   if (aperta) return <ModificaValutazione client={client} val={aperta} nPrecedenti={lista.length} onAnnulla={() => setVista("elenco")} onFatto={() => { setVista("elenco"); carica(); }} />;
   const elimina = async (v) => {
-    if (!confirm(`Elimino "${v.titolo || "valutazione"}" del ${fmtDataIt(v.data)}? Non si può annullare.`)) return;
+    if (!await confermaApp(`Elimino "${v.titolo || "valutazione"}" del ${fmtDataIt(v.data)}? Non si può annullare.`)) return;
     await supabase.from("valutazioni_bulb").delete().eq("id", v.id);
     carica();
   };
@@ -14259,7 +14260,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
   };
   const eliminaGiorno = async () => {
     if (!giorno) return;
-    if (!confirm(`Elimino la sessione "${giorno.nome}" di ${cl.nome || "questa cliente"}, con esercizi e carichi registrati? Non si può annullare.`)) return;
+    if (!await confermaApp(`Elimino la sessione "${giorno.nome}" di ${cl.nome || "questa cliente"}, con esercizi e carichi registrati? Non si può annullare.`)) return;
     const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giorno.id);
     const ids = (es || []).map((e) => e.id);
     if (ids.length) await supabase.from("training_entries").delete().in("exercise_id", ids);
@@ -14276,7 +14277,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
   };
   const salvaEs = async (id, campi) => { await supabase.from("training_exercises").update(campi).eq("id", id); onCambiato(); };
   const eliminaEs = async (es) => {
-    if (!confirm(`Tolgo "${es.nome}" da questa sessione, con i carichi registrati? Non si può annullare.`)) return;
+    if (!await confermaApp(`Tolgo "${es.nome}" da questa sessione, con i carichi registrati? Non si può annullare.`)) return;
     await supabase.from("training_entries").delete().eq("exercise_id", es.id);
     await supabase.from("training_exercises").delete().eq("id", es.id);
     onCambiato();
@@ -14294,7 +14295,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
     if (!giorno) return;
     const altre = (membri || []).filter((m) => m.id !== cl.id);
     if (!altre.length) return;
-    if (!confirm(`Copio la sessione "${giorno.nome}" (${esercizi.length} esercizi) a: ${altre.map((m) => m.nome).join(", ")}? Viene AGGIUNTA a quello che hanno già.`)) return;
+    if (!await confermaApp(`Copio la sessione "${giorno.nome}" (${esercizi.length} esercizi) a: ${altre.map((m) => m.nome).join(", ")}? Viene AGGIUNTA a quello che hanno già.`)) return;
     try {
       for (const m of altre) {
         const { data: ex } = await supabase.from("training_days").select("ordine").eq("client_id", m.id);
@@ -14893,7 +14894,7 @@ function ProgrammaGruppo({ membri }) {
   };
   const eliminaSessione = async (nome) => {
     const gg = giorni.filter((g) => g.nome === nome).map((g) => g.id);
-    if (!confirm(`Elimino "${nome}" per TUTTE le clienti, con esercizi e carichi registrati? Non si può annullare.`)) return;
+    if (!await confermaApp(`Elimino "${nome}" per TUTTE le clienti, con esercizi e carichi registrati? Non si può annullare.`)) return;
     const exIds = esercizi.filter((e) => gg.includes(e.training_day_id)).map((e) => e.id);
     if (exIds.length) await supabase.from("training_entries").delete().in("exercise_id", exIds);
     await supabase.from("training_exercises").delete().in("training_day_id", gg);
@@ -14915,7 +14916,7 @@ function ProgrammaGruppo({ membri }) {
     setLavoro(false);
   };
   const eliminaEsercizio = async (nomeSess, nomeEs) => {
-    if (!confirm(`Tolgo "${nomeEs}" da "${nomeSess}" per tutte le clienti? I carichi già segnati su questo esercizio vengono eliminati.`)) return;
+    if (!await confermaApp(`Tolgo "${nomeEs}" da "${nomeSess}" per tutte le clienti? I carichi già segnati su questo esercizio vengono eliminati.`)) return;
     const gg = giorni.filter((g) => g.nome === nomeSess).map((g) => g.id);
     const daTogliere = esercizi.filter((e) => gg.includes(e.training_day_id) && e.nome === nomeEs).map((e) => e.id);
     if (daTogliere.length) { await supabase.from("training_entries").delete().in("exercise_id", daTogliere); await supabase.from("training_exercises").delete().in("id", daTogliere); }
@@ -15033,7 +15034,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
     const dest = (csvDest || (membri || []).map((m) => m.id));
     if (!dest.length) return;
     const nomi = dest.map((id) => (membri || []).find((m) => m.id === id)).filter(Boolean).map((m) => `${m.nome} ${m.cognome || ""}`.trim()).join(", ");
-    if (!confirm(`Importo il programma del file per: ${nomi}.${csvSostituisci ? " Il programma attuale di ognuna verrà archiviato (con tutti i carichi) e sostituito." : " Viene aggiunto a quello che hanno già."} Procedo?`)) return;
+    if (!await confermaApp(`Importo il programma del file per: ${nomi}.${csvSostituisci ? " Il programma attuale di ognuna verrà archiviato (con tutti i carichi) e sostituito." : " Viene aggiunto a quello che hanno già."} Procedo?`)) return;
     setCsvInCorso(true); setMsg("Importo…");
     try {
       const righe = parseCSV(await file.text());
@@ -15078,13 +15079,13 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
     await supabase.from("clients").insert({ codice, nome: `Cliente ${n}`, cognome: "", tipo_servizio: "presenza", sede_abituale: "Via San Secondo 39, Torino", gruppo_id: gruppo.id });
     await carica();
   };
-  const togli = async (id) => { if (!confirm("Tolgo questa cliente dal gruppo? Il suo profilo e i suoi allenamenti restano.")) return; await supabase.from("clients").update({ gruppo_id: null }).eq("id", id); await carica(); };
+  const togli = async (id) => { if (!await confermaApp("Tolgo questa cliente dal gruppo? Il suo profilo e i suoi allenamenti restano.")) return; await supabase.from("clients").update({ gruppo_id: null }).eq("id", id); await carica(); };
   const nomeCompleto = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Senza nome";
 
   const svuotaAllenamentiGruppo = async () => {
     const ids = (membri || []).map((m) => m.id);
     if (!ids.length) return;
-    if (!confirm(`Elimino TUTTI i programmi (attuali e archiviati) con esercizi e carichi registrati di: ${(membri || []).map((m) => m.nome).join(", ")}? Non si può annullare.`)) return;
+    if (!await confermaApp(`Elimino TUTTI i programmi (attuali e archiviati) con esercizi e carichi registrati di: ${(membri || []).map((m) => m.nome).join(", ")}? Non si può annullare.`)) return;
     setMsg("Elimino…");
     try {
       await supabase.from("training_entries").delete().in("client_id", ids);
@@ -15100,7 +15101,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
     if (!copia.da || !copia.a.length) return;
     const dest = copia.a.filter((x) => x !== copia.da);
     const nomiDest = dest.map((id) => nomeCompleto(membri.find((m) => m.id === id))).join(", ");
-    if (!confirm(`Copio il programma di ${nomeCompleto(membri.find((m) => m.id === copia.da))} a: ${nomiDest}? Viene AGGIUNTO ai programmi che hanno già (niente viene cancellato). Poi potrai ritoccare ogni cliente con le sue variazioni.`)) return;
+    if (!await confermaApp(`Copio il programma di ${nomeCompleto(membri.find((m) => m.id === copia.da))} a: ${nomiDest}? Viene AGGIUNTO ai programmi che hanno già (niente viene cancellato). Poi potrai ritoccare ogni cliente con le sue variazioni.`)) return;
     setMsg("Copio…");
     try {
       const { data: giorni } = await supabase.from("training_days").select("*").eq("client_id", copia.da).order("ordine");
@@ -15283,7 +15284,7 @@ function GruppiBulb({ onSelect }) {
     if (data) setAperto(data);
   };
   const elimina = async (g) => {
-    if (!confirm(`Elimino il gruppo "${g.nome}"? Le clienti e i loro allenamenti restano, escono solo dal gruppo.`)) return;
+    if (!await confermaApp(`Elimino il gruppo "${g.nome}"? Le clienti e i loro allenamenti restano, escono solo dal gruppo.`)) return;
     await supabase.from("gruppi_bulb").delete().eq("id", g.id);
     carica();
   };

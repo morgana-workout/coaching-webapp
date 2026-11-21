@@ -1,3 +1,4 @@
+import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 
@@ -228,7 +229,7 @@ export default function CicloCliente({ client, isAdmin = false }) {
     carica();
   };
   const elimina = async (r) => {
-    if (!confirm(`Eliminare l'inizio ciclo del ${fmtIt(r.data_inizio)}?`)) return;
+    if (!await confermaApp(`Eliminare l'inizio ciclo del ${fmtIt(r.data_inizio)}?`)) return;
     await supabase.from("ciclo_mestruale").delete().eq("id", r.id);
     carica();
   };
@@ -237,7 +238,7 @@ export default function CicloCliente({ client, isAdmin = false }) {
     const r = righe.find((x) => x.data_inizio === data);
     if (r) { elimina(r); return; }
     if (data > oggi) { alert("Puoi segnare solo giorni già passati o di oggi."); return; }
-    if (confirm(`Segno l'inizio delle mestruazioni il ${fmtIt(data)}?`)) segna(data);
+    if (await confermaApp(`Segno l'inizio delle mestruazioni il ${fmtIt(data)}?`)) segna(data);
   };
   const salvaImpostazioni = async (patch) => {
     const nuove = { client_id: client.id, attivo: impostazioni?.attivo ?? true, durata: impostazioni?.durata ?? null, ...patch };

@@ -1,3 +1,4 @@
+import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
@@ -212,7 +213,7 @@ export default function AnalisiCibo({ client }) {
     const nome1 = (client.nome || "").trim().split(" ")[0];
     const punti = err.filter((e) => e.livello !== "g").slice(0, 3).map((e) => `• ${e.testo}`).join("\n");
     const testo = `Ciao ${nome1}! 🫶🏻 Ho guardato come sta andando l'alimentazione e vorrei parlarne con te:\n\n${punti}\n\nNiente di grave, sistemiamo insieme 💪🏻 Scrivimi pure come ti sembra sia andata la settimana ✨`;
-    if (!confirm(`Mando questo messaggio a ${client.nome}?\n\n${testo}`)) return;
+    if (!await confermaApp(`Mando questo messaggio a ${client.nome}?\n\n${testo}`)) return;
     setInvio(true);
     try {
       const { data: nm, error } = await supabase.from("messaggi").insert({ client_id: client.id, mittente: "coach", testo }).select("id").single();

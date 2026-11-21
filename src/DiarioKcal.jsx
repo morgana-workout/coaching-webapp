@@ -1,3 +1,4 @@
+import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import { X, Plus, Utensils, ClipboardList, TrendingUp, MoreHorizontal, ChevronLeft, ChevronRight } from "lucide-react";
@@ -746,7 +747,7 @@ function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvat
   };
 
   const elimina = async () => {
-    if (!confirm(`Eliminare "${alimento.nome}" dalla libreria${alimento.comune ? " COMUNE (sparisce per tutte le clienti)" : ""}? Le voci già registrate nel diario non vengono toccate.`)) return;
+    if (!await confermaApp(`Eliminare "${alimento.nome}" dalla libreria${alimento.comune ? " COMUNE (sparisce per tutte le clienti)" : ""}? Le voci già registrate nel diario non vengono toccate.`)) return;
     setSalvando(true);
     await supabase.from(alimento.comune ? "kcal_foods_comuni" : "kcal_foods").delete().eq("id", alimento.id);
     setSalvando(false);
@@ -868,7 +869,7 @@ function ListaSpesa({ clientId, ricette, pasti }) {
         {(elenco.length > 0 || extra.length > 0) && (
           <div className="flex gap-3 pt-1">
             <button onClick={() => { const t = [...elenco.map(([k, o]) => `${spunte[k] ? "✓" : "•"} ${o.nome}${qtaTxt(o) ? " — " + qtaTxt(o) : ""}`), ...extra.map((x, i) => `${spunte["x" + i] ? "✓" : "•"} ${x}`)].join("\n"); if (navigator.share) navigator.share({ title: "Lista della spesa", text: t }).catch(() => {}); else { try { navigator.clipboard.writeText(t); alert("Lista copiata ✨"); } catch (e) { /* niente */ } } }} className="text-xs font-medium" style={{ color: "#3F78B3" }}>Condividi / copia</button>
-            <button onClick={() => { if (confirm("Svuotare la lista?")) salva({}); }} className="text-xs text-slate-400">Svuota</button>
+            <button onClick={async () => { if (await confermaApp("Svuotare la lista?")) salva({}); }} className="text-xs text-slate-400">Svuota</button>
           </div>
         )}
       </Card>

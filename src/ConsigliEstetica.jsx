@@ -1,3 +1,4 @@
+import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 import { mappaCanonica } from "./nomiEsercizi";
@@ -451,7 +452,7 @@ function ProssimoLog({ r, onApplicato }) {
   const applica = async (x) => {
     const t = x.tecnica; if (!t?.t) return;
     const campi = { tecnica: t.t, ...(t.t === "top_back" ? { serie_top: t.top, serie_backoff: t.back, serie: t.top + t.back } : {}) };
-    if (!confirm(`Imposto "${nomeTecnica(t.t)}" su ${x.nome}${t.t === "top_back" ? ` (${t.top} top + ${t.back} back-off)` : ""}?`)) return;
+    if (!await confermaApp(`Imposto "${nomeTecnica(t.t)}" su ${x.nome}${t.t === "top_back" ? ` (${t.top} top + ${t.back} back-off)` : ""}?`)) return;
     await supabase.from("training_exercises").update(campi).eq("id", x.id);
     setFatti({ ...fatti, [x.id]: true }); onApplicato && onApplicato();
   };
@@ -534,7 +535,7 @@ function Simulatore({ r, sesso, leve, onApplicato }) {
       const T = tecDi(e);
       return `${e.nome}: ${e.serieEff || "—"} → ${serieDi(e)} serie${T.t ? ` · ${nomeTecnica(T.t)}${T.t === "top_back" ? ` (${T.top || 0} top + ${T.back || 0} back-off)` : ""}` : ""}`;
     });
-    if (!confirm(`Applico ${cambi.length} modifiche al programma vero (serie, tecniche, ordine)?\n\n` + righe.join("\n"))) return;
+    if (!await confermaApp(`Applico ${cambi.length} modifiche al programma vero (serie, tecniche, ordine)?\n\n` + righe.join("\n"))) return;
     setApplicando(true);
     for (const e of cambi) {
       const T = tecDi(e);
