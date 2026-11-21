@@ -20,7 +20,7 @@ input:focus, textarea:focus, select:focus { outline: none; box-shadow: 0 0 0 3px
 @keyframes appPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .75; transform: scale(.97); } }
 @keyframes appShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .sk { border-radius: 12px; background: linear-gradient(90deg, #E6EFF8 25%, #F4F8FC 50%, #E6EFF8 75%); background-size: 200% 100%; animation: appShimmer 1.4s linear infinite; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+@media (prefers-reduced-motion: reduce) { #root *, #root *::before, #root *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 #splash { position: fixed; inset: 0; z-index: 2147483000; background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 #splash img { display: block; width: 190px; max-width: none; height: auto; will-change: transform, opacity; transform: translateZ(0); backface-visibility: hidden; }
 #splash.esce { animation: spVia 1100ms cubic-bezier(.4,0,.2,1) forwards; pointer-events: none; }
