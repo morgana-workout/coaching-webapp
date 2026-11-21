@@ -39,11 +39,11 @@ input:focus, textarea:focus, select:focus { outline: none; box-shadow: 0 0 0 3px
         function esci() {
           var el = document.getElementById("splash");
           if (!el || el.className === "esce") return;
-          el.className = "esce";
+          void el.offsetWidth; el.className = "esce";
           el.addEventListener("animationend", function (e) { if (e.target === el && el.parentNode) el.parentNode.removeChild(el); });
           setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 2500);
         }
-        window.splashEsci = function () { var resto = Math.max(0, 1800 - (Date.now() - inizio)); setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(esci); }); }, resto); };
+        window.splashEsci = function () { var resto = Math.max(0, 1800 - (Date.now() - inizio)); setTimeout(esci, resto); };
         // esce appena l'app ha disegnato qualcosa (non aspetta font e librerie esterne)
         var root = document.getElementById("root");
         if (window.MutationObserver && root) {
