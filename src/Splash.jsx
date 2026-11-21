@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 
-/* Schermata di apertura: logo + barra di caricamento, visibile almeno ~1,9 secondi
-   alla prima apertura dell'app (poi sfuma). Una volta per sessione del browser. */
-const DURATA_MIN = 1900;
-const DISSOLVENZA = 500;
+/* Schermata di apertura: logo fermo per ~1,5 secondi alla prima apertura dell'app,
+   poi si ingrandisce e svanisce mostrando l'app. Una volta per sessione del browser. */
+const DURATA_MIN = 1500;
+const DISSOLVENZA = 1100;
 
 function giaMostrata() {
   try { return sessionStorage.getItem("splash_vista") === "1"; } catch (e) { return false; }
@@ -25,16 +25,13 @@ export default function Splash() {
   }, []);
 
   if (fase === "off") return null;
+  const esce = fase === "out";
   return (
     <div
       aria-hidden="true"
-      style={{ position: "fixed", inset: 0, zIndex: 200000, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 22, opacity: fase === "out" ? 0 : 1, transition: `opacity ${DISSOLVENZA}ms ease`, pointerEvents: fase === "out" ? "none" : "auto" }}
+      style={{ position: "fixed", inset: 0, zIndex: 200000, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", opacity: esce ? 0 : 1, transition: `opacity ${DISSOLVENZA}ms cubic-bezier(.4,0,.2,1)`, pointerEvents: esce ? "none" : "auto" }}
     >
-      <style>{`@keyframes splLogo{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:none}}@keyframes splBarra{from{transform:scaleX(0)}to{transform:scaleX(1)}}`}</style>
-      <img src="/logo.png" alt="" style={{ width: 170, height: "auto" }} />
-      <div style={{ width: 120, height: 3, borderRadius: 3, background: "#E6EFF8", overflow: "hidden" }}>
-        <div style={{ height: "100%", background: "#3F78B3", borderRadius: 3, transformOrigin: "left", animation: `splBarra ${DURATA_MIN}ms cubic-bezier(.4,0,.2,1) both` }} />
-      </div>
+      <img src="/logo.png" alt="" style={{ width: 170, height: "auto", transform: esce ? "scale(8)" : "scale(1)", opacity: esce ? 0 : 1, transition: `transform ${DISSOLVENZA}ms cubic-bezier(.3,0,.2,1), opacity ${DISSOLVENZA * 0.8}ms ease-out` }} />
     </div>
   );
 }
