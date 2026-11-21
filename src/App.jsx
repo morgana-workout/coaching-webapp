@@ -1,5 +1,6 @@
 import Ic from "./Ic";
 import { confermaApp, chiediApp } from "./Dialoghi";
+import { trovaVideoPreciso } from "./matchVideo";
 import AnalisiCarichi from "./AnalisiCarichi";
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -3176,18 +3177,7 @@ async function caricaSceltaVideo() {
   } catch (e) { /* ignora */ }
 }
 function trovaEsercizioVideo(nome, libreria) {
-  const n = normVideoNome(nome);
-  const sc = SCELTE_VIDEO[n];
-  if (sc) { if (sc.nessuno || !sc.video_id) return null; return (libreria || []).find((e) => e.id === sc.video_id) || null; }
-  let best = null, bestLen = 0;
-  (libreria || []).forEach((e) => {
-    // voci ancora vuote (senza video né testo) non si mostrano alle clienti
-    if (!(e.video_url || e.posizionamento || e.movimento || e.errori || e.senza_video)) return;
-    (e.parole_chiave || "").split(",").map((k) => normVideoNome(k)).filter(Boolean).forEach((k) => {
-      if (n.includes(k) && k.length > bestLen) { best = e; bestLen = k.length; }
-    });
-  });
-  return best;
+  return trovaVideoPreciso(nome, libreria, SCELTE_VIDEO);
 }
 function ScegliVideo({ nome, libreria, onCambiato }) {
   const n = normVideoNome(nome);
@@ -3243,6 +3233,7 @@ function EsercizioInfoModal({ es, onClose }) {
           </div>
           <button onClick={onClose} className="text-slate-400 p-1 flex-shrink-0"><X size={20} /></button>
         </div>
+        {es.simile && <p className="text-xs text-sky-700 bg-sky-50 rounded-xl px-3 py-2 leading-relaxed">Esecuzione molto simile: nel tuo programma cambia l'attrezzo o la presa, il movimento resta lo stesso ✨</p>}
         {video.length > 1 && (
           <div className="flex gap-2">
             {video.map((v, i) => (
