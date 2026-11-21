@@ -187,7 +187,14 @@ function InputData({ value, defaultValue, onChange, onBlur, className = "" }) {
 }
 
 function Spinner() {
-  return <div className="flex justify-center pt-20"><div className="w-8 h-8 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /></div>;
+  return (
+    <div className="px-6 pt-8 max-w-3xl mx-auto" aria-busy="true" aria-label="Caricamento">
+      <div className="sk" style={{ height: 22, width: "55%", marginBottom: 16 }} />
+      <div className="sk" style={{ height: 84, marginBottom: 12 }} />
+      <div className="sk" style={{ height: 84, marginBottom: 12 }} />
+      <div className="sk" style={{ height: 84 }} />
+    </div>
+  );
 }
 const STATO_LABEL = {
   programmato: { t: "Programmato", c: "bg-sky-100 text-sky-700" },
