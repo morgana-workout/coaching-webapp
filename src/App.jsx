@@ -8113,7 +8113,51 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
 }
 
 // Esporta in un unico file di testo tutto ciò che serve a un'analisi esterna (chat AI): profilo, check, dieta, diario kcal, log, note, ciclo…
-async function esportaPerAnalisiEsterna(client, setInCorso) {
+const SEZIONI_AI = [
+  { k: "check", l: "Check, misure e foto-valutazioni" },
+  { k: "nutrizione", l: "Alimentazione e diario kcal" },
+  { k: "allenamento", l: "Programma, log carichi e feedback" },
+  { k: "scarichi", l: "Scarichi e altra palestra" },
+  { k: "commenti", l: "I tuoi commenti e note" },
+  { k: "ciclo", l: "Ciclo mestruale" },
+];
+
+function ModaleEsportaAI({ client, onClose, setInCorso, inCorso }) {
+  const [attive, setAttive] = useState(SEZIONI_AI.map((x) => x.k));
+  const [anonimo, setAnonimo] = useState(false);
+  const alterna = (k) => setAttive((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
+  const vai = async (azione) => { await esportaPerAnalisiEsterna(client, setInCorso, { sezioni: attive, anonimo, azione }); };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(39,70,109,0.45)" }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div>
+          <h3 className="text-base font-semibold" style={{ color: "#27466D" }}>🧠 Esporta per AI</h3>
+          <p className="text-xs text-slate-500 mt-1">Prepara un testo con i dati di {client.nome || "questa cliente"} da incollare nella chat del progetto Clienti. Scegli cosa includere.</p>
+        </div>
+        <div className="space-y-2">
+          {SEZIONI_AI.map((x) => (
+            <label key={x.k} className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={attive.includes(x.k)} onChange={() => alterna(x.k)} />
+              {x.l}
+            </label>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 rounded-xl px-3 py-2" style={{ background: "#EEF5FC" }}>
+          <input type="checkbox" checked={anonimo} onChange={() => setAnonimo(!anonimo)} />
+          Nascondi il cognome (solo nome)
+        </label>
+        <p className="text-[11px] text-slate-400">Il profilo e l'elenco dei dati mancanti sono sempre inclusi. Contatti e foto non vengono mai esportati.</p>
+        <div className="flex gap-2">
+          <button disabled={inCorso} onClick={() => vai("copia")} className="flex-1 rounded-xl py-2 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{inCorso ? "Preparo..." : "Copia per la chat"}</button>
+          <button disabled={inCorso} onClick={() => vai("scarica")} className="flex-1 rounded-xl py-2 text-sm font-semibold disabled:opacity-50" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Scarica file</button>
+        </div>
+        <button onClick={onClose} className="w-full text-xs text-slate-400">Chiudi</button>
+      </div>
+    </div>
+  );
+}
+
+async function esportaPerAnalisiEsterna(client, setInCorso, opz = {}) {
   let cons = null;
   try { const { data } = await supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle(); cons = data; } catch (e) { /* senza tabella: nessun blocco */ }
   if (cons?.analisi_esterna === false) { alert(`${client.nome || "La cliente"} ha scelto di NON far elaborare i suoi dati con strumenti esterni. Non esporto nulla 🫶🏻`); return; }
@@ -8122,11 +8166,11 @@ async function esportaPerAnalisiEsterna(client, setInCorso) {
   try {
     const cid = client.id;
     const q = async (tab, ord, asc = true) => { try { return await leggiTutto(() => supabase.from(tab).select("*").eq("client_id", cid).order(ord, { ascending: asc })); } catch (e) { return []; } };
-    const [checkins, notes, piani, kcal, giorni, esercizi, entries, nlog, scarichi, appunti, feedback, cicli, valEst, valBulb, calo, cambiPal] = await Promise.all([
+    const [checkins, notes, piani, kcal, giorni, esercizi, entries, nlog, scarichi, appunti, feedback, cicli, valEst, valBulb, calo, cambiPal, commenti] = await Promise.all([
       q("checkins", "data_check"), q("notes", "data"), q("nutrition_plans", "data_aggiornamento"), q("kcal_voci", "data"),
       q("training_days", "ordine"), q("training_exercises", "ordine"), q("training_entries", "data"), q("note_allenamento", "data"),
       q("scarichi", "dal"), q("appunti", "updated_at"), q("feedback_soggettivo", "data"), q("ciclo_mestruale", "data_inizio"),
-      q("valutazione_estetica", "data_check"), q("valutazioni_bulb", "data"), q("carichi_calo_log", "data"), q("cambi_palestra", "dal"),
+      q("valutazione_estetica", "data_check"), q("valutazioni_bulb", "data"), q("carichi_calo_log", "data"), q("cambi_palestra", "dal"), q("commenti_check", "created_at"),
     ]);
     const n = (v, u = "") => (v == null || v === "" ? "-" : `${String(v).replace(".", ",")}${u}`);
     const r = [];
@@ -8203,9 +8247,21 @@ async function esportaPerAnalisiEsterna(client, setInCorso) {
     if (feedback.length) { r.push("## Feedback soggettivo"); feedback.forEach((f) => r.push(`- ${f.data}: ${(f.tags || []).join(", ")}${f.nota_libera ? " — " + f.nota_libera : ""}`)); r.push(""); }
     if (cicli.length && cons?.ciclo !== false) { r.push("## Ciclo mestruale (inizio di ogni ciclo, giorni di flusso)"); cicli.forEach((c) => r.push(`- ${c.data_inizio} (flusso ${n(c.giorni_flusso)} giorni)`)); r.push(""); }
     if (notes.length) { r.push("## Note della coach"); notes.forEach((x) => r.push(`- [${x.data}] (${x.tipo || "nota"}) ${String(x.testo || "").replace(/\s+/g, " ")}`)); r.push(""); }
+    if (commenti.length) { r.push("## Commenti della coach ai check"); commenti.forEach((x) => { if (x.testo) r.push(`- [${String(x.updated_at || x.created_at || "").slice(0, 10)}] ${String(x.testo).replace(/\s+/g, " ")}`); }); r.push(""); }
     if (appunti.length && appunti[0].testo) { r.push("## Appunti condivisi coach/cliente"); r.push(String(appunti[0].testo)); r.push(""); }
     if (valBulb.length) { r.push("## Valutazioni funzionali (Bulb)"); valBulb.forEach((v) => r.push(`- ${v.data} ${v.titolo || ""}: anamnesi ${JSON.stringify(v.anamnesi || {})} · restrizioni ${JSON.stringify(v.restrizioni || [])} · da lavorare ${JSON.stringify(v.lavorare || [])}${v.note ? " · " + v.note : ""}`)); r.push(""); }
-    scaricaFile(`analisi-${(client.cognome || "").toLowerCase()}-${(client.nome || "").toLowerCase()}-${formatDataLocale(new Date())}.md`.replace(/\s+/g, "-"), r.join("\n"), "text/markdown");
+    const chiaveSez = (t) => /^## (Check|Valutazioni estetiche)/.test(t) ? "check" : /^## (Piani alimentari|Diario alimentare)/.test(t) ? "nutrizione" : /^## (Programma di allenamento|Log allenamento|Carichi scesi|Note finali|Feedback soggettivo|Valutazioni funzionali)/.test(t) ? "allenamento" : /^## (Allenamenti in altra|Settimane di scarico)/.test(t) ? "scarichi" : /^## (Note della coach|Commenti della coach|Appunti condivisi)/.test(t) ? "commenti" : /^## Ciclo/.test(t) ? "ciclo" : "base";
+    const attive = opz.sezioni || null;
+    let chiave = "base";
+    let righe = r.filter((riga) => { if (riga.startsWith("## ")) chiave = chiaveSez(riga); return !attive || chiave === "base" || attive.includes(chiave); });
+    if (opz.anonimo) righe = righe.map((riga, i) => i === 0 ? `# Dati di ${client.nome || "cliente"} per analisi` : riga);
+    const testoFinale = righe.join("\n");
+    if (opz.azione === "copia") {
+      try { await navigator.clipboard.writeText(testoFinale); alert("Copiato! Ora incolla nella chat del progetto Clienti 🫶🏻"); }
+      catch (e) { scaricaFile(`analisi-${formatDataLocale(new Date())}.md`, testoFinale, "text/markdown"); alert("Non riesco a copiare da qui: ho scaricato il file, caricalo nella chat."); }
+    } else {
+      scaricaFile(`analisi-${opz.anonimo ? "" : (client.cognome || "").toLowerCase() + "-"}${(client.nome || "").toLowerCase()}-${formatDataLocale(new Date())}.md`.replace(/\s+/g, "-"), testoFinale, "text/markdown");
+    }
   } catch (e) { alert("Non sono riuscita a preparare il file: " + (e?.message || "riprova tra poco")); }
   setInCorso(false);
 }
@@ -8324,6 +8380,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [chatAperta, setChatAperta] = useState(false);
   const [schedaRiass, setSchedaRiass] = useState(false);
   const [esportazioneInCorso, setEsportazioneInCorso] = useState(false);
+  const [modaleAI, setModaleAI] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
   const [checkInModifica, setCheckInModifica] = useState(null);
@@ -8384,6 +8441,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
 
   return (
     <div className="px-6 pt-6 pb-16 max-w-3xl lg:max-w-5xl mx-auto space-y-5 overflow-x-hidden">
+      {modaleAI && <ModaleEsportaAI client={client} onClose={() => setModaleAI(false)} setInCorso={setEsportazioneInCorso} inCorso={esportazioneInCorso} />}
       <button onClick={onBack} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti i clienti</button>
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
@@ -8391,7 +8449,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
             {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
           </button>
-          <button onClick={() => esportaPerAnalisiEsterna(client, setEsportazioneInCorso)} disabled={esportazioneInCorso} className="text-sky-700 text-xs font-medium disabled:opacity-50">🧠 Dati per analisi</button>
+          <button onClick={() => setModaleAI(true)} disabled={esportazioneInCorso} className="text-sky-700 text-xs font-medium disabled:opacity-50">🧠 Esporta per AI</button>
           <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Appunti</button>
           <StatoBadge stato={client.stato_check} />
         </div>
