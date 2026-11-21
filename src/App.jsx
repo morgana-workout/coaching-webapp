@@ -1,3 +1,4 @@
+import Ic from "./Ic";
 import { confermaApp } from "./Dialoghi";
 import AnalisiCarichi from "./AnalisiCarichi";
 import React, { useState, useEffect, useMemo } from "react";
@@ -129,7 +130,7 @@ function OraCoach({ value, onChange, className = "", vuoto = false }) {
     <select value={v} onChange={(e) => { if (e.target.value === "__manuale") { setManuale(true); return; } onChange(e); }} className={className}>
       {vuoto && <option value="">--:--</option>}
       {SLOT_ORARI_COACH.map((s) => <option key={s} value={s}>{s}</option>)}
-      <option value="__manuale">✏️ Altro orario...</option>
+      <option value="__manuale">Altro orario...</option>
     </select>
   );
 }
@@ -464,7 +465,7 @@ function ConsensiCliente({ client, posizione = "basso", forzaApri = false }) {
     return (
       <Card className="p-4 space-y-3">
         <div>
-          <p className="text-sm font-semibold text-slate-800">🔒 Privacy e consensi</p>
+          <p className="text-sm font-semibold text-slate-800"><Ic n="lock"/> Privacy e consensi</p>
           <p className="text-xs text-slate-500 mt-0.5">I tuoi dati sono tuoi: decidi tu cosa può vedere e usare Morgana. Ci metti un minuto e puoi cambiare idea quando vuoi 🫶🏻</p>
         </div>
         {voci}
@@ -476,11 +477,11 @@ function ConsensiCliente({ client, posizione = "basso", forzaApri = false }) {
   if (mancano) return null;
   const mostra = aperto || forzaApri;
   if (!mostra) return (
-    <button onClick={() => setAperto(true)} className="w-full text-center text-xs py-1" style={{ color: "#7a8da3" }}>🔒 Privacy e consensi</button>
+    <button onClick={() => setAperto(true)} className="w-full text-center text-xs py-1" style={{ color: "#7a8da3" }}><Ic n="lock"/> Privacy e consensi</button>
   );
   return (
     <Card className="p-4 space-y-3">
-      <div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700">🔒 Privacy e consensi</p>{!forzaApri && <button onClick={() => setAperto(false)} className="text-xs text-slate-400">Chiudi</button>}</div>
+      <div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700"><Ic n="lock"/> Privacy e consensi</p>{!forzaApri && <button onClick={() => setAperto(false)} className="text-xs text-slate-400">Chiudi</button>}</div>
       {voci}
     </Card>
   );
@@ -493,7 +494,7 @@ function ConsensiCoach({ clientId }) {
   if (riga === undefined) return null;
   return (
     <div className="flex flex-wrap gap-1.5 items-center">
-      <span className="text-[11px] text-slate-400">🔒 Consensi:</span>
+      <span className="text-[11px] text-slate-400"><Ic n="lock"/> Consensi:</span>
       {VOCI_CONSENSI.map(([k, titolo]) => { const v = riga?.[k]; return <span key={k} className="text-[11px] rounded-full px-2 py-0.5 font-medium" style={v === true ? { background: "#C9E0F7", color: "#27466D" } : v === false ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : { background: "#F5FAFE", color: "#7a8da3" }}>{titolo}: {v === true ? "sì" : v === false ? "no" : "da chiedere"}</span>; })}
     </div>
   );
@@ -703,7 +704,7 @@ function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
         ) : !apri ? (
           <div className="space-y-2">
             <button onClick={() => setApri(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-3">Richiedi un'altra data</button>
-            <button onClick={() => scaricaLezioneIcs(evento)} className="w-full border border-slate-200 text-sky-700 text-sm font-medium rounded-xl py-2.5">📅 Aggiungi al calendario del telefono</button>
+            <button onClick={() => scaricaLezioneIcs(evento)} className="w-full border border-slate-200 text-sky-700 text-sm font-medium rounded-xl py-2.5"><Ic n="calendar"/> Aggiungi al calendario del telefono</button>
             <button onClick={annullaLezione} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">Annulla la lezione</button>
             <p className="text-slate-400 text-[11px] text-center">{oreAlla >= 24 ? "Puoi annullarla senza penale (più di 24 ore prima)." : "Mancano meno di 24 ore: se la annulli viene conteggiata come lezione persa."}</p>
             {oreAlla < 24 && oreAlla > 0 && <p className="text-slate-400 text-xs text-center">Mancano meno di 24 ore: Morgana valuterà se è possibile spostarla.</p>}
@@ -1302,7 +1303,7 @@ function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
     if (!ios) return null;
     return (
       <Card className="p-4 space-y-1">
-        <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
+        <p className="text-sm font-medium text-slate-700"><Ic n="bell"/> Notifiche sul telefono</p>
         <p className="text-xs text-slate-500">Su iPhone: tocca il tasto Condividi di Safari, scegli "Aggiungi alla schermata Home", poi apri l'app dall'icona appena creata e torna qui per attivarle.</p>
       </Card>
     );
@@ -1310,14 +1311,14 @@ function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
   if (attive) {
     return (
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-sky-600">🔔 Notifiche attive su questo telefono</p>
+        <p className="text-xs text-sky-600"><Ic n="bell"/> Notifiche attive su questo telefono</p>
         <button onClick={disattiva} className="text-[11px] text-slate-400 underline">Disattiva</button>
       </div>
     );
   }
   return (
     <Card className="p-4 space-y-2">
-      <p className="text-sm font-medium text-slate-700">🔔 {ruolo === "coach" ? "Notifiche sul telefono" : "Non perderti nulla ✨"}</p>
+      <p className="text-sm font-medium text-slate-700"><Ic n="bell"/> {ruolo === "coach" ? "Notifiche sul telefono" : "Non perderti nulla ✨"}</p>
       <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check, richieste di lezione, record e carichi in calo." : "Attiva le notifiche: ti avviso io quando ti scrivo, quando fai un record e prima delle tue lezioni 🫶🏻"}</p>
       <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
       {errore && <p className="text-slate-800 text-xs">{errore}</p>}
@@ -2666,7 +2667,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                 <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
                 <button onClick={() => setPerCheck((p) => ({ ...p, [a?.id]: VISTA0, [b?.id]: VISTA0 }))} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione di queste due foto</button>
                 <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Zoom e posizione restano legati a ogni check: se cambi data e poi ci ritorni li ritrovi. Ricorda di premere Salva. Tocca una foto per aprirla a schermo intero.</p>
-                <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
+                <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2"><Ic n="save"/> Salva questo confronto per la cliente</button>
                 {salvaMsg && <p className="text-sky-600 text-[11px] text-center">{salvaMsg}</p>}
                 <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
               </div>
@@ -2938,7 +2939,7 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
                     return <span className="text-slate-500 text-xs text-right">P{r.proteine_g ?? "—"}<Freccia d={pr ? delta(num(r.proteine_g), num(pr.proteine_g)) : null} /> C{r.carboidrati_g ?? "—"}<Freccia d={pr ? delta(num(r.carboidrati_g), num(pr.carboidrati_g)) : null} /> G{r.grassi_g ?? "—"}<Freccia d={pr ? delta(num(r.grassi_g), num(pr.grassi_g)) : null} /></span>;
                   })()}
                 </Riga>
-                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-slate-800 px-1.5 flex-shrink-0">🗑</button>}
+                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-slate-800 px-1.5 flex-shrink-0"><Ic n="trash" bare/></button>}
               </li>
             );
           })}
@@ -4138,18 +4139,18 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       {isAdmin && (
         <div className="space-y-2">
           <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-            {importando ? "Importo..." : "📥 Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)"}
+            {importando ? "Importo..." : <><Ic n="download"/> Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)</>}
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
           </label>
           <label className={`w-full border border-slate-200 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-            🔄 Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
+            <Ic n="sync"/> Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) sostituisciConNuovaScheda(e.target.files[0]); e.target.value = ""; }} />
           </label>
         </div>
       )}
 
       {isAdmin && giorni.length > 0 && (
-        <button onClick={() => eliminaProgramma(giorni, `Eliminare TUTTO il programma attuale (${giorni.length} giorno/i, con esercizi e carichi registrati)? Non si può annullare.`)} className="text-xs text-slate-400 underline">🗑 Elimina tutto il programma attuale</button>
+        <button onClick={() => eliminaProgramma(giorni, `Eliminare TUTTO il programma attuale (${giorni.length} giorno/i, con esercizi e carichi registrati)? Non si può annullare.`)} className="text-xs text-slate-400 underline"><Ic n="trash"/> Elimina tutto il programma attuale</button>
       )}
 
       {giorni.length === 0 && (
@@ -4178,7 +4179,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                 </button>
                 {schedaAperta === et && (
                   <div className="mt-3 space-y-3">
-                    {isAdmin && <button onClick={() => eliminaProgramma(gruppi[et], `Eliminare per sempre la scheda archiviata ${et} (${gruppi[et].length} giorno/i, con esercizi e carichi)? Non si può annullare.`)} className="text-xs text-slate-400 underline">🗑 Elimina questa scheda archiviata</button>}
+                    {isAdmin && <button onClick={() => eliminaProgramma(gruppi[et], `Eliminare per sempre la scheda archiviata ${et} (${gruppi[et].length} giorno/i, con esercizi e carichi)? Non si può annullare.`)} className="text-xs text-slate-400 underline"><Ic n="trash"/> Elimina questa scheda archiviata</button>}
                     <div className="flex gap-2 overflow-x-auto pb-1">
                       {gruppi[et].map((g) => (
                         <button key={g.id} onClick={() => setGiornoArchAttivo(g.id)}
@@ -4742,7 +4743,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
         isAdmin ? (
           <Card className="p-6 text-center space-y-3">
             <p className="text-sm text-slate-500">Questa cliente non ha ancora un programma 🫶🏻</p>
-            <button onClick={onStorico} className="w-full text-white text-sm font-semibold rounded-xl py-2.5" style={{ background: "#27466D" }}>📥 Importa il programma da CSV (o crealo a mano)</button>
+            <button onClick={onStorico} className="w-full text-white text-sm font-semibold rounded-xl py-2.5" style={{ background: "#27466D" }}><Ic n="download"/> Importa il programma da CSV (o crealo a mano)</button>
           </Card>
         ) : (
           <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
@@ -4783,7 +4784,7 @@ function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico",
                 </button>
                 {aperta && (
                   <div className="mt-2 space-y-1">
-                    <p className="text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "#E1EEFB", color: "#27466D" }}>⏱ Fai 30/60 secondi per ogni esercizio</p>
+                    <p className="text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "#E1EEFB", color: "#27466D" }}><Ic n="timer"/> Fai 30/60 secondi per ogni esercizio</p>
                     {prep.map((p) => {
                       const ok = prepFatta(p); const info = trovaEsercizioVideo(p.nome, libreria);
                       return (
@@ -5749,7 +5750,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
       <p className="text-sm font-medium text-slate-700">Importa da file CSV</p>
       <p className="text-[11px] text-slate-400">Cicli alimentari (colonne: settimana, inizio, fine, pasto, kcal, proteine, carboidrati, grassi, note; le date sono facoltative e se mancano ogni ciclo parte il lunedì dopo) oppure lista alimenti della cliente (nome, marca, unita, nome_pezzo, per, kcal, proteine, carboidrati, grassi, quantita_abituale). Capisco da sola quale dei due è.</p>
       <label className="block w-full text-center border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2 cursor-pointer">
-        {lavoro ? "Importo..." : "📥 Scegli file CSV"}
+        {lavoro ? "Importo..." : <><Ic n="download"/> Scegli file CSV</>}
         <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importa(e.target.files[0]); e.target.value = ""; }} />
       </label>
       {msg && <p className="text-xs text-slate-600">{msg}</p>}
@@ -5762,11 +5763,11 @@ function AnteprimaCliente({ client }) {
   const [aperta, setAperta] = useState(false);
   return (
     <>
-      <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">👁 Vedi l’app come la vede {client.nome}</button>
+      <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5"><Ic n="eye"/> Vedi l’app come la vede {client.nome}</button>
       {aperta && createPortal(
         <div className="fixed inset-0 z-[90] bg-slate-200 flex flex-col">
           <div className="flex-shrink-0 bg-slate-100 text-slate-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
-            <span>👁 Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
+            <span><Ic n="eye"/> Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
             <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-slate-300 rounded-lg px-3 py-1 font-medium">Esci</button>
           </div>
           <div className="flex-1 min-h-0 [&>div]:!h-full"><ClientApp session={null} anteprima={client} /></div>
@@ -5842,7 +5843,7 @@ function NotificheDellaCliente({ client }) {
           {azioni.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna azione registrata finora.</Card>}
           {azioni.map((r, i) => (
             <Card key={i} className="p-3 flex items-center justify-between gap-3">
-              <p className="text-slate-600 text-sm">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+              <p className="text-slate-600 text-sm">{r.tipo === "nutrizione" ? <><Ic n="meal"/> Ha aggiornato il diario alimentare</> : "💪🏻 Ha registrato l'allenamento"}</p>
               <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
             </Card>
           ))}
@@ -5931,7 +5932,7 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
             <div key={i} className="space-y-1">
               <div className="flex gap-1.5">
                 <input value={r.nome} onChange={set("nome")} placeholder="Pasto (es. Colazione)" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
-                <button onClick={() => setF({ ...f, pasti: f.pasti.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-slate-600 px-2">✕</button>
+                <button onClick={() => setF({ ...f, pasti: f.pasti.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-slate-600 px-2"><Ic n="x" bare/></button>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 <input type="number" value={r.kcal} onChange={set("kcal")} placeholder="kcal" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
@@ -6298,7 +6299,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                       {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                     </button>
                   )}
-                  <button onClick={() => setModificaPer(p)} className="flex-shrink-0 text-slate-400 hover:text-slate-600 px-0.5 text-[13px] leading-none" title="Modifica pagamento">✏️</button>
+                  <button onClick={() => setModificaPer(p)} className="flex-shrink-0 text-slate-400 hover:text-slate-600 px-0.5 text-[13px] leading-none" title="Modifica pagamento"><Ic n="edit" bare/></button>
                   {p.importo != null && p.stato !== "spesa" && (
                     <button onClick={() => setRicevutaPer(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-500 px-0.5"><FileText size={13} /></button>
                   )}
@@ -6598,7 +6599,7 @@ function SchedaRiassuntiva({ client, onClose }) {
 
         {principale && (
           <div className="scheda-blocco">
-            <p className="text-[10px] uppercase tracking-wide text-sky-700 font-semibold mb-0.5">🍽️ Nutrizione · {inCorso ? "ciclo in corso" : principale === ultimo && !prossimi.length ? "ultimo ciclo" : "prossimo ciclo"}{principale.data_inizio ? ` · ${fmtC(principale.data_inizio)}${principale.data_fine ? `–${fmtC(principale.data_fine)}` : ""}` : ""}</p>
+            <p className="text-[10px] uppercase tracking-wide text-sky-700 font-semibold mb-0.5"><Ic n="meal"/> Nutrizione · {inCorso ? "ciclo in corso" : principale === ultimo && !prossimi.length ? "ultimo ciclo" : "prossimo ciclo"}{principale.data_inizio ? ` · ${fmtC(principale.data_inizio)}${principale.data_fine ? `–${fmtC(principale.data_fine)}` : ""}` : ""}</p>
             <table className="w-full text-[11px]">
               <thead><tr><th className={th}>Pasto</th><th className={`${th} text-right`}>kcal</th><th className={`${th} text-right`}>P</th><th className={`${th} text-right`}>C</th><th className={`${th} text-right`}>G</th></tr></thead>
               <tbody>
@@ -7970,7 +7971,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
             </div>
             <button onClick={() => setGiorniGenerator(generaSplitAutomatica(numeroGiorniSettimana, client.focus_crescita))}
               className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
-              🧠 Elabora la split migliore per questa cliente
+              <Ic n="brain"/> Elabora la split migliore per questa cliente
             </button>
             <p className="text-slate-400 text-[11px]">Genera una proposta di split scientificamente sensata; puoi comunque modificarla liberamente qui sotto prima di generare la scheda.</p>
           </div>
@@ -8139,7 +8140,7 @@ function ModaleEsportaAI({ client, onClose, setInCorso, inCorso }) {
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(39,70,109,0.45)" }} onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
         <div>
-          <h3 className="text-base font-semibold" style={{ color: "#27466D" }}>🧠 Esporta per AI</h3>
+          <h3 className="text-base font-semibold" style={{ color: "#27466D" }}><Ic n="brain"/> Esporta per AI</h3>
           <p className="text-xs text-slate-500 mt-1">Prepara un testo con i dati di {client.nome || "questa cliente"} da incollare nella chat del progetto Clienti. Scegli cosa includere.</p>
         </div>
         <div className="space-y-2">
@@ -8455,10 +8456,10 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
         <div className="flex items-center gap-2">
           <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
-            {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
+            {esportazioneInCorso ? "Esporto..." : <><Ic n="file"/> Esporta dati</>}
           </button>
-          <button onClick={() => setModaleAI(true)} disabled={esportazioneInCorso} className="text-sky-700 text-xs font-medium disabled:opacity-50">🧠 Esporta per AI</button>
-          <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5">💬 Appunti</button>
+          <button onClick={() => setModaleAI(true)} disabled={esportazioneInCorso} className="text-sky-700 text-xs font-medium disabled:opacity-50"><Ic n="brain"/> Esporta per AI</button>
+          <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5"><Ic n="chat"/> Appunti</button>
           <StatoBadge stato={client.stato_check} />
         </div>
       </div>
@@ -8744,7 +8745,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {chatAperta && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={() => setChatAperta(false)}>
           <div className="w-full max-w-md bg-white h-full overflow-y-auto p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-800">Appunti con {client.nome}</p><button onClick={() => setChatAperta(false)} className="text-slate-500 text-lg px-2" aria-label="Chiudi">✕</button></div>
+            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-800">Appunti con {client.nome}</p><button onClick={() => setChatAperta(false)} className="text-slate-500 text-lg px-2" aria-label="Chiudi"><Ic n="x" bare/></button></div>
             <AppuntiPagina clientId={clientId} ruolo="coach" nomeCliente={client.nome} onLetti={() => onChanged?.()} />
           </div>
         </div>
@@ -8800,10 +8801,10 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       )}
 
       {tab === "progressi" && (
-        <button onClick={() => setDossier(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📎 Dossier per la chat (PDF con tutti i check, foto, misure e note)</button>
+        <button onClick={() => setDossier(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5"><Ic n="clip"/> Dossier per la chat (PDF con tutti i check, foto, misure e note)</button>
       )}
       {dossier && <DossierCheck client={client} onClose={() => setDossier(false)} />}
-      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta tutto lo storico di questa cliente (Excel con foto)" />}
+      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label={<><Ic n="download"/> Esporta tutto lo storico di questa cliente (Excel con foto)</>} />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
 
       {tab === "valutazione" && <ValutazioniBulb client={client} />}
@@ -8813,7 +8814,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           {isBulb && <RestrizioniCliente clientId={client.id} />}
           <ScarichiCliente clientId={client.id} />
           <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
-          <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
+          <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5"><Ic n="file"/> Vedi la scheda riassuntiva (si crea da sola)</button>
           {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
           {isBulb
             ? <DiarioClienteHost clientId={clientId} isAdmin />
@@ -8843,7 +8844,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
               if (error) { alert("Non sono riuscita a eliminarlo."); return; }
               setNutrizioneModifica(null);
               carica();
-            }} className="w-full border border-slate-200 bg-slate-100 text-slate-800 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
+            }} className="w-full border border-slate-200 bg-slate-100 text-slate-800 text-xs font-medium rounded-lg py-2"><Ic n="trash"/> Elimina tutto lo storico nutrizione</button>
           )}
         </div>
           } />
@@ -9437,7 +9438,7 @@ function CalendarioAgenda({ clients, onSelect }) {
                 <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
                 {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-700 ">👥 {e.nome}</p>
+                  <p className="font-medium text-slate-700 "><Ic n="users"/> {e.nome}</p>
                   <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
                 </div>
               </button>
@@ -9461,7 +9462,7 @@ function CalendarioAgenda({ clients, onSelect }) {
               </div>
             )}
             {e.id && (
-              <button onClick={() => setEventoInModifica(e.tutti ? { ...e.raw, tutti: e.tutti } : e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
+              <button onClick={() => setEventoInModifica(e.tutti ? { ...e.raw, tutti: e.tutti } : e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1"><Ic n="edit" bare/></button>
             )}
             {(e.clientId || e.gruppoId) && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
             
@@ -10278,7 +10279,7 @@ function CommentoCoach({ n, onSalvato }) {
         <button onClick={() => { setTesto(n.commento_coach || ""); setAperto(true); }} className="text-[11px] text-sky-600 font-medium mt-1">Modifica</button>
       </div>
     ) : (
-      <button onClick={() => setAperto(true)} className="text-xs text-sky-600 font-medium bg-white border border-sky-100 rounded-lg px-3 py-1.5">💬 Commenta</button>
+      <button onClick={() => setAperto(true)} className="text-xs text-sky-600 font-medium bg-white border border-sky-100 rounded-lg px-3 py-1.5"><Ic n="chat"/> Commenta</button>
     );
   }
   return (
@@ -10431,7 +10432,7 @@ function StoricoAzioniClienti({ clients }) {
           <Card key={r.client_id + r.tipo + r.giorno} className="p-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="font-medium text-slate-700 text-sm"><NomeCl c={clients.find((x) => x.id === r.client_id)} /></p>
-              <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+              <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? <><Ic n="meal"/> Ha aggiornato il diario alimentare</> : "💪🏻 Ha registrato l'allenamento"}</p>
             </div>
             <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
           </Card>
@@ -10623,7 +10624,7 @@ function RichiestePacchettoCoach({ onChanged }) {
       {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
       {righe.map((r) => (
         <Card key={r.id} className="p-3 space-y-2">
-          <p className="font-medium text-slate-700 text-sm">{r.gruppo_id ? "👥 Gruppo · " : ""}{r.clients?.nome} {r.clients?.cognome} · pacchetto da {r.numero_lezioni} lezioni</p>
+          <p className="font-medium text-slate-700 text-sm">{r.gruppo_id ? <><Ic n="users"/> Gruppo · </> : ""}{r.clients?.nome} {r.clients?.cognome} · pacchetto da {r.numero_lezioni} lezioni</p>
           {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
           <p className="text-[11px] text-slate-400">Confermando, il pacchetto parte {r.gruppo_id ? "per tutte le clienti del gruppo" : "per la cliente"}. Resta "da saldare" finché non segni il pagamento{r.gruppo_id && PREZZI_GRUPPO[r.numero_lezioni] ? ` (${fmtEuro(PREZZI_GRUPPO[r.numero_lezioni])} totali, ${fmtEuro(PREZZI_GRUPPO[r.numero_lezioni] / 4)} a persona)` : ""}.</p>
           <div className="flex gap-2">
@@ -10929,7 +10930,7 @@ function ListaAttesaCoach({ onChanged, aperta = false }) {
             </div>
             <div className="flex flex-wrap gap-1.5 items-center">
               <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#E1EEFB", color: "#27466D" }}>{r.client_id ? "Avviata" : "Posto riservato"}</span>
-              {r.promo_mese_gratis && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>🎁 1 mese gratuito</span>}
+              {r.promo_mese_gratis && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}><Ic n="gift"/> 1 mese gratuito</span>}
               <span className="text-xs text-slate-500">{[servTxt[r.servizio], r.pacchetto].filter(Boolean).join(" · ")}</span>
             </div>
             <p className="text-xs">{r.email && <a href={`mailto:${r.email}`} className="text-sky-600">{r.email}</a>}{r.whatsapp ? <>{r.email ? " · " : ""}<span className="text-slate-500">{r.whatsapp}</span></> : null}</p>
@@ -11502,8 +11503,8 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
           {richieste.map((r) => (
             <Card key={r.id} className="p-3 space-y-2">
               <button onClick={() => !r.tutti && onSelect(r.client_id)} className="w-full text-left">
-                <p className="font-medium text-slate-700 text-sm">{r.tutti ? `👥 Gruppo · ${r.nomi.join(", ")}` : `${r.clients?.nome || ""} ${r.clients?.cognome || ""}`}</p>
-                {r.sostituisce_id && <p className="text-slate-600 text-xs font-medium">🔁 Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
+                <p className="font-medium text-slate-700 text-sm">{r.tutti ? <><Ic n="users"/> Gruppo · {r.nomi.join(", ")}</> : `${r.clients?.nome || ""} ${r.clients?.cognome || ""}`}</p>
+                {r.sostituisce_id && <p className="text-slate-600 text-xs font-medium"><Ic n="repeat"/> Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
                 <p className="text-slate-500 text-xs">{r.sostituisce_id ? "Nuova data: " : ""}{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
                 {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
               </button>
@@ -11857,7 +11858,7 @@ function BottoneCartelleClienti({ clients, className = "" }) {
   };
   return (
     <div className={className}>
-      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : "⬇ Cartelle di tutte le clienti (ZIP con storico e foto)"}</button>
+      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : <><Ic n="download"/> Cartelle di tutte le clienti (ZIP con storico e foto)</>}</button>
       {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
       {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
     </div>
@@ -11917,7 +11918,7 @@ function BottoneSoloFoto({ clients, className = "" }) {
   };
   return (
     <div className={className}>
-      <button onClick={vai} disabled={inCorso} className="w-full border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le foto..." : "⬇ Solo foto delle clienti (ZIP, una cartella per cliente)"}</button>
+      <button onClick={vai} disabled={inCorso} className="w-full border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le foto..." : <><Ic n="download"/> Solo foto delle clienti (ZIP, una cartella per cliente)</>}</button>
       {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
       {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
     </div>
@@ -12403,7 +12404,7 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
         )}
 
         {!modifica && (
-          <button onClick={apriModifica} className="w-full border border-slate-200 text-slate-600 rounded-xl py-2 text-sm font-medium">✏️ Modifica pagamento</button>
+          <button onClick={apriModifica} className="w-full border border-slate-200 text-slate-600 rounded-xl py-2 text-sm font-medium"><Ic n="edit"/> Modifica pagamento</button>
         )}
 
         {!modifica && pag.stato === "da_saldare" && pag.importo != null && (
@@ -12808,7 +12809,7 @@ function StatisticheCoach({ clients }) {
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
         <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, più un foglio con i pagamenti raggruppati per cliente (rinnovi vicini). Senza i pagamenti in contanti.</p>
-        <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : `⬇ Scarica riepilogo ${labelMese(mese)}`}</button>
+        <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : <><Ic n="download"/> Scarica riepilogo {labelMese(mese)}</>}</button>
         {msg && <p className="text-xs text-slate-500">{msg}</p>}
       </Card>
     </div>
@@ -13115,7 +13116,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
       <button
         onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese: guadagnoMeseSC, totaleNetto: totaleNettoSC, totaleIncassato: totaleIncassatoSC, totaleSpese, totaleDaSaldare: totaleDaSaldareSC + totalePrevisti, mesi: mesiSC, metodiOrdinati: metodiOrdinatiSC })}
         className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
-        ⬇ Scarica prospetto guadagni (CSV, senza contanti)
+        <Ic n="download"/> Scarica prospetto guadagni (CSV, senza contanti)
       </button>
 
       <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} onClientiCambiati={onClientiCambiati} />
@@ -13452,7 +13453,7 @@ function CandidatureCoach({ onClientiCambiati }) {
             {c.citta && <p>Città: {c.citta}</p>}
             {c.tipo_lavoro && <p>Lavoro: {c.tipo_lavoro}</p>}
             {c.problematiche_salute?.length > 0 && (
-              <p className="text-slate-700">⚠ {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
+              <p className="text-slate-700"><Ic n="warn"/> {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
             )}
             {c.note && <p className="italic text-slate-500">"{c.note}"</p>}
             <p className="text-[11px] text-slate-400">Candidatura del {new Date(c.created_at).toLocaleDateString("it-IT")}</p>
@@ -13615,7 +13616,7 @@ function CercaClienti({ clienti, onSelect }) {
         <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
           {gruppiTrovati.map((g) => (
             <button key={g.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { setGruppoAperto(g); setQ(""); setAperta(false); }} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0" style={{ background: "#F5FAFE" }}>
-              <span className="text-sm font-medium" style={{ color: "#27466D" }}>👥 {g.nome}</span>
+              <span className="text-sm font-medium" style={{ color: "#27466D" }}><Ic n="users"/> {g.nome}</span>
               <span className="text-[11px] text-slate-500 truncate ml-2">{nomiGruppo(g).join(", ")}</span>
             </button>
           ))}
@@ -13742,7 +13743,7 @@ function ModificaValutazione({ client, val, nPrecedenti, onFatto, onAnnulla }) {
       <Box titolo="Restrizioni">
         <p className="text-xs text-slate-500">Cose da evitare o limitare: le vedrai sempre nella scheda del gruppo e nell'allenamento della cliente.</p>
         <div className="flex flex-wrap gap-1.5">
-          {restr.map((r, i) => <button key={i} onClick={() => setRestr(restr.filter((_, j) => j !== i))} className="px-3 py-1 rounded-full text-xs font-semibold text-white" style={{ background: "#27466D" }}>{r} ✕</button>)}
+          {restr.map((r, i) => <button key={i} onClick={() => setRestr(restr.filter((_, j) => j !== i))} className="px-3 py-1 rounded-full text-xs font-semibold text-white" style={{ background: "#27466D" }}>{r} <Ic n="x" bare size={11} /></button>)}
         </div>
         <div className="flex gap-2">
           <input value={nuovaRestr} onChange={(e) => setNuovaRestr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && nuovaRestr.trim()) { setRestr([...restr, nuovaRestr.trim()]); setNuovaRestr(""); } }} placeholder="Es. Spalla dx: no overhead" className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
@@ -13846,7 +13847,7 @@ function ValutazioniBulb({ client }) {
               <button onClick={() => setVista(v.id)} className="text-left flex-1 min-w-0">
                 <p className="font-semibold text-slate-800">{v.titolo || "Valutazione"} <span className="text-xs font-medium text-slate-500">· {fmtDataIt(v.data)}</span></p>
                 <p className="text-xs text-slate-500 mt-0.5">{[`${(v.restrizioni || []).length} restrizioni`, `${nTest} test compilati`, `${Object.keys(v.foto || {}).length} foto`].join(" · ")}</p>
-                {(v.restrizioni || []).length > 0 && <p className="text-xs mt-1" style={{ color: "#27466D" }}>⚠ {(v.restrizioni || []).join(" · ")}</p>}
+                {(v.restrizioni || []).length > 0 && <p className="text-xs mt-1" style={{ color: "#27466D" }}><Ic n="warn"/> {(v.restrizioni || []).join(" · ")}</p>}
               </button>
               <button onClick={() => elimina(v)} className="text-xs text-slate-400 underline">elimina</button>
             </div>
@@ -13876,7 +13877,7 @@ function RestrizioniCliente({ clientId }) {
   if (!v || (!(v.restrizioni || []).length && !v.lavorare)) return null;
   return (
     <div className="rounded-xl px-3 py-2 text-xs space-y-1" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
-      {(v.restrizioni || []).length > 0 && <p className="font-semibold">⚠ {(v.restrizioni || []).join(" · ")}</p>}
+      {(v.restrizioni || []).length > 0 && <p className="font-semibold"><Ic n="warn"/> {(v.restrizioni || []).join(" · ")}</p>}
       {v.lavorare && <p><span className="font-semibold">Da lavorare:</span> {v.lavorare}</p>}
     </div>
   );
@@ -14095,7 +14096,7 @@ function CircuitoGruppo({ gruppo, membri, onChanged, inline = false }) {
         <div className="flex items-center gap-1">
           <p className="flex-1 text-sm font-bold truncate" style={{ color: "#27466D" }}>{nome || "—"}</p>
           <select value="" onChange={(e) => { const val = e.target.value; const nv = { ...varianti }; if (val === "__reset") delete nv[`${m.id}|${g}`]; else nv[`${m.id}|${g}`] = val; salvaVarianti(nv); }} className="text-[11px] w-6 bg-transparent" style={{ color: "#3F78B3" }} title="Cambia esercizio solo per lei">
-            <option value="">✎</option>
+            <option value="">Cambia…</option>
             {post.map((p) => <option key={p} value={p}>{p}</option>)}
             {varianti[`${m.id}|${g}`] && <option value="__reset">Torna al giro normale</option>}
           </select>
@@ -14232,7 +14233,7 @@ function RigaEsercizioEditor({ es, primo, ultimo, libreriaV, onSalva, onElimina,
         <input list="lib-esercizi-sessione" value={nome} onChange={(e) => setNome(e.target.value)} onBlur={() => nome.trim() && nome !== es.nome && salva({ nome: nome.trim() })} placeholder="Esercizio" className={`${inp} flex-1 min-w-0 font-medium`} />
         <button onClick={() => onSposta(es.id, -1)} disabled={primo} className="px-2 text-slate-400 disabled:opacity-20">↑</button>
         <button onClick={() => onSposta(es.id, 1)} disabled={ultimo} className="px-2 text-slate-400 disabled:opacity-20">↓</button>
-        <button onClick={() => onElimina(es)} className="px-2 text-slate-400">✕</button>
+        <button onClick={() => onElimina(es)} className="px-2 text-slate-400"><Ic n="x" bare/></button>
       </div>
       <div className="flex gap-1.5">
         <input value={serie} onChange={(e) => setSerie(e.target.value.replace(/\D/g, ""))} onBlur={() => String(serie) !== String(es.serie ?? "") && salva({ serie: serie === "" ? null : Number(serie) })} inputMode="numeric" placeholder="Serie" className={`${inp} w-16`} />
@@ -14336,7 +14337,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
         <>
           <div className="flex gap-1.5">
             <input value={nomeG} onChange={(e) => setNomeG(e.target.value)} onBlur={rinominaGiorno} className={`${inp} flex-1 min-w-0 font-semibold`} />
-            <button onClick={eliminaGiorno} className="px-3 rounded-lg text-xs text-slate-500" style={{ border: "1px solid #C9E0F7", background: "#fff" }}>🗑 Elimina sessione</button>
+            <button onClick={eliminaGiorno} className="px-3 rounded-lg text-xs text-slate-500" style={{ border: "1px solid #C9E0F7", background: "#fff" }}><Ic n="trash"/> Elimina sessione</button>
           </div>
           {esercizi.length === 0 && <p className="text-xs text-slate-400 px-1">Nessun esercizio: aggiungine uno qui sotto.</p>}
           {esercizi.map((e, i) => <RigaEsercizioEditor key={e.id} es={e} primo={i === 0} ultimo={i === esercizi.length - 1} libreriaV={libreriaV} onSalva={salvaEs} onElimina={eliminaEs} onSposta={sposta} />)}
@@ -14465,7 +14466,7 @@ function VistaClienteSessione({ cl, oggi, membri = [] }) {
     <div className="space-y-3 pb-24">
       {(cl.note_particolari || (cl.problematiche_salute || []).filter(Boolean).length > 0) && (
         <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "#FFFBEF", border: "1px solid #F0E2B0", color: "#6B5416" }}>
-          📝 {[cl.note_particolari, ...(cl.problematiche_salute || []).filter(Boolean)].filter(Boolean).join(" · ")}
+          <Ic n="note"/> {[cl.note_particolari, ...(cl.problematiche_salute || []).filter(Boolean)].filter(Boolean).join(" · ")}
         </div>
       )}
       {giorni.length > 1 && (
@@ -14482,7 +14483,7 @@ function VistaClienteSessione({ cl, oggi, membri = [] }) {
           </button>
           {prepAperta && (
             <div className="px-3 pb-2.5">
-              <p className="text-[11px] font-semibold rounded-lg px-2.5 py-1.5 mb-1" style={{ background: "#E1EEFB", color: "#27466D" }}>⏱ 30/60 secondi per esercizio</p>
+              <p className="text-[11px] font-semibold rounded-lg px-2.5 py-1.5 mb-1" style={{ background: "#E1EEFB", color: "#27466D" }}><Ic n="timer"/> 30/60 secondi per esercizio</p>
               {prep.map((p) => {
                 const ok = !!prepFatte[p.id]; const info = trovaEsercizioVideo(p.nome, libreriaV);
                 return (
@@ -14505,7 +14506,7 @@ function VistaClienteSessione({ cl, oggi, membri = [] }) {
         </div>
       )}
       {infoEsV && <EsercizioInfoModal es={infoEsV} onClose={() => setInfoEsV(null)} />}
-      <div className="flex justify-end"><button onClick={() => setModifica((v) => !v)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: modifica ? "#27466D" : "#fff", color: modifica ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{modifica ? "Chiudi modifica" : "✏️ Modifica programma"}</button></div>
+      <div className="flex justify-end"><button onClick={() => setModifica((v) => !v)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: modifica ? "#27466D" : "#fff", color: modifica ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{modifica ? "Chiudi modifica" : <><Ic n="edit"/> Modifica programma</>}</button></div>
       {modifica && editor(() => setModifica(false))}
       {esercizi.map((es) => {
         const tot = parseInt(es.serie, 10) || 3;
@@ -14539,7 +14540,7 @@ function VistaClienteSessione({ cl, oggi, membri = [] }) {
       <button onClick={() => setNotaAperta(!notaAperta)} className="w-full py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>{notaAperta ? "Chiudi la nota finale" : "Nota finale dell'allenamento"}</button>
       {notaAperta && <NotaFinaleAllenamento clientId={cl.id} data={oggi} />}
       <div className="fixed bottom-0 left-0 right-0 px-3 py-2.5 flex gap-2" style={{ background: "#fff", borderTop: "1px solid #C9E0F7", zIndex: 70 }}>
-        <button onClick={() => setTimer(timer > 0 ? 0 : 60)} className="flex-1 py-3 rounded-2xl text-sm font-bold" style={{ background: timer > 0 ? "#27466D" : "#E1EEFB", color: timer > 0 ? "#fff" : "#27466D" }}>{timer > 0 ? `⏱ Recupero ${timer}s ■` : "⏱ Recupero 60s"}</button>
+        <button onClick={() => setTimer(timer > 0 ? 0 : 60)} className="flex-1 py-3 rounded-2xl text-sm font-bold" style={{ background: timer > 0 ? "#27466D" : "#E1EEFB", color: timer > 0 ? "#fff" : "#27466D" }}>{timer > 0 ? <><Ic n="timer"/> Recupero {timer}s ■</> : <><Ic n="timer"/> Recupero 60s</>}</button>
       </div>
       {msg && <p className="text-xs">{msg}</p>}
     </div>
@@ -14978,7 +14979,7 @@ function ProgrammaGruppo({ membri }) {
                       </div>
                       {e.note && <p className="text-[11px] text-slate-400 truncate">{e.note}</p>}
                     </div>
-                    <button onClick={() => eliminaEsercizio(nome, e.nome)} className="text-slate-300 text-sm px-1">✕</button>
+                    <button onClick={() => eliminaEsercizio(nome, e.nome)} className="text-slate-300 text-sm px-1"><Ic n="x" bare/></button>
                   </div>
                 ))}
                 <div className="rounded-lg p-2.5 space-y-2" style={{ background: "#F5FAFE" }}>
@@ -15178,14 +15179,14 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               <button onClick={() => { setCompleta(true); setModoVal(true); }} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazioni</button>
               <button onClick={() => setProgAperto(!progAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: progAperto ? "#27466D" : "#fff", color: progAperto ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Sessioni e programma</button>
               <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Importa CSV</button>
-              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}>🗑 Svuota allenamenti di tutte</button>
+              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}><Ic n="trash"/> Svuota allenamenti di tutte</button>
               <button onClick={() => setCompleta(true)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Gestione completa</button>
             </div>
             {!completa && msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
             {completa && <button onClick={() => { setCompleta(false); setModoVal(false); }} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>← Torna alla vista semplice</button>}
             <div className={completa ? "flex flex-wrap gap-2 items-center" : "hidden"}>
               <button onClick={() => setMenu(!menu)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Copia programma tra le clienti</button>
-              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}>🗑 Svuota allenamenti di tutte</button>
+              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}><Ic n="trash"/> Svuota allenamenti di tutte</button>
               <button onClick={nuovoProfilo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo profilo vuoto</button>
               {candidate.length > 0 && (
                 <select value="" onChange={(e) => e.target.value && aggiungi(e.target.value)} className="px-3 py-2 rounded-xl text-xs border border-slate-200 bg-white text-slate-700">
@@ -15438,7 +15439,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         return (
           <div className="relative z-20">
             <button onClick={() => setMenuAperto((x) => !x)} className="w-full bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2 text-left">
-              <span className="text-sky-500 text-lg leading-none">☰</span>
+              <span className="text-sky-500 text-lg leading-none"><Ic n="menu" bare/></span>
               <span className="font-semibold text-slate-800 text-sm">{corrente ? corrente.l : "Menu"}</span>
               <span className="ml-auto flex items-center gap-2">
                 {totale > 0 && !menuAperto && <span className="bg-slate-800 text-white text-[10px] font-bold rounded-full px-1.5 min-w-[20px] h-5 flex items-center justify-center">{totale}</span>}
@@ -15495,7 +15496,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       )}
       {clientiGratuiti.length > 0 && (
         <button onClick={() => setFiltro(filtro === "gratuiti" ? "tutti" : "gratuiti")} className="text-slate-500 text-xs font-medium block">
-          {filtro === "gratuiti" ? "← Torna ai clienti" : `🎁 Clienti gratuiti (${clientiGratuiti.length}) · non contati nei totali`}
+          {filtro === "gratuiti" ? "← Torna ai clienti" : <><Ic n="gift"/> Clienti gratuiti ({clientiGratuiti.length}) · non contati nei totali</>}
         </button>
       )}
       {clientiArchiviati.length > 0 && (
@@ -15566,10 +15567,10 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <div className="grid grid-cols-2 gap-2">
           <BottoneCartelleClienti clients={clients} className="col-span-2" />
           <BottoneSoloFoto clients={clients} className="col-span-2" />
-          <BottoneEsportaExcel label="⬇ Esporta tutto in Excel (carichi, progressi, check)" className="col-span-2" />
-          <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
-          <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
-          <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
+          <BottoneEsportaExcel label={<><Ic n="download"/> Esporta tutto in Excel (carichi, progressi, check)</>} className="col-span-2" />
+          <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2"><Ic n="download"/> Esporta clienti (CSV)</button>
+          <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2"><Ic n="download"/> Esporta check (CSV)</button>
+          <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2"><Ic n="download"/> Esporta carichi allenamento (CSV)</button>
           <button onClick={onBackup} disabled={backupInCorso} className="col-span-2 border border-slate-200 bg-white text-slate-500 text-xs font-medium rounded-lg py-2 disabled:opacity-50">
             {backupInCorso ? "Esporto..." : "📦 Backup completo"}
           </button>
@@ -15691,7 +15692,7 @@ function FeedCoach({ onSelect, aperto = true, setAperto }) {
     <div className="hidden lg:block fixed top-4 right-4 w-64 z-30">
       <style>{"@keyframes feedEntra{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}"}</style>
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
-        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche<button onClick={() => setAperto?.(false)} className="ml-auto text-slate-400 text-sm px-1" aria-label="Chiudi notifiche">✕</button></p>
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche<button onClick={() => setAperto?.(false)} className="ml-auto text-slate-400 text-sm px-1" aria-label="Chiudi notifiche"><Ic n="x" bare/></button></p>
         {righe.length === 0 && <p className="text-xs text-slate-400 px-1 py-2">Ancora nessuna attività dalle clienti.</p>}
         <div className="space-y-1">
           {righe.map((r) => {

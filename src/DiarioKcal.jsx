@@ -1,3 +1,4 @@
+import Ic from "./Ic";
 import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
@@ -185,7 +186,7 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
           <div className="rounded-3xl p-4 space-y-3" style={{ background: "#fff", border: "1.5px solid #C9E0F7" }}>
             <p className="text-sm font-bold" style={{ color: "#27466D" }}>Altri strumenti</p>
             <div className="grid grid-cols-2 gap-2">
-              {[["ricette", "Ricette", "Idee con i macro già calcolati"], ["pasti", "Pasti standard", "I tuoi pasti ricorrenti"], ["libreria", "I miei alimenti", "Aggiungi anche col barcode 📷"], ["spesa", "Lista della spesa", "Dalle ricette che scegli"]].map(([k, t, d]) => (
+              {[["ricette", "Ricette", "Idee con i macro già calcolati"], ["pasti", "Pasti standard", "I tuoi pasti ricorrenti"], ["libreria", "I miei alimenti", "Aggiungi anche col barcode"], ["spesa", "Lista della spesa", "Dalle ricette che scegli"]].map(([k, t, d]) => (
                 <button key={k} onClick={() => setSez(k)} className="text-left rounded-2xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
                   <span className="block text-sm font-bold" style={{ color: "#27466D" }}>{t}</span><span className="block text-[11px] mt-0.5" style={{ color: "#7a8da3" }}>{d}</span>
                 </button>
@@ -763,7 +764,7 @@ function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvat
         </div>
         {!alimento?.id && (
           <div>
-            <button type="button" onClick={() => setScanner(true)} className="w-full py-2.5 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>📷 Scansiona il codice a barre</button>
+            <button type="button" onClick={() => setScanner(true)} className="w-full py-2.5 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}><Ic n="scan"/> Scansiona il codice a barre</button>
             {cerca && <p className="text-xs text-slate-500 mt-1.5">{cerca}</p>}
           </div>
         )}
@@ -859,7 +860,7 @@ function ListaSpesa({ clientId, ricette, pasti }) {
           <label key={"x" + i} className="flex items-center gap-2 py-1 border-b border-slate-100 last:border-0">
             <input type="checkbox" checked={!!spunte["x" + i]} onChange={() => salva({ ...st, s: { ...spunte, ["x" + i]: !spunte["x" + i] } })} />
             <span className={`flex-1 text-sm ${spunte["x" + i] ? "line-through text-slate-300" : "text-slate-700"}`}>{x}</span>
-            <button onClick={(e) => { e.preventDefault(); salva({ ...st, x: extra.filter((_, k) => k !== i), s: { ...spunte, ["x" + i]: false } }); }} className="text-slate-300 text-xs">✕</button>
+            <button onClick={(e) => { e.preventDefault(); salva({ ...st, x: extra.filter((_, k) => k !== i), s: { ...spunte, ["x" + i]: false } }); }} className="text-slate-300 text-xs"><Ic n="x" bare/></button>
           </label>
         ))}
         <div className="flex gap-2 pt-1">

@@ -1,3 +1,4 @@
+import Ic from "./Ic";
 import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
@@ -280,7 +281,7 @@ export default function CicloCliente({ client, isAdmin = false }) {
               className="w-24 border border-slate-200 rounded-lg px-3 py-2 text-sm text-center" />
           </div>
           <p className="text-slate-400 text-xs">Se lasci vuoto, l'app usa la media dei cicli registrati (28 giorni se ce n'è uno solo).</p>
-          <button onClick={() => setModificaConsigli(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">✏️ Modifica i consigli per fase</button>
+          <button onClick={() => setModificaConsigli(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5"><Ic n="edit"/> Modifica i consigli per fase</button>
         </Card>
       )}
 

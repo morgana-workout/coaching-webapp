@@ -1,3 +1,4 @@
+import Ic from "./Ic";
 import { confermaApp } from "./Dialoghi";
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
@@ -459,7 +460,7 @@ function ProssimoLog({ r, onApplicato }) {
   const conTec = r.prossimo.filter((x) => x.tecnica);
   return (
     <div className="mt-3 border-t border-sky-100 pt-3">
-      <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700">📈 Per il prossimo log {conTec.length ? `· ${conTec.length} con tecnica` : ""} {aperto ? "▲" : "▼"}</button>
+      <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700"><Ic n="trend"/> Per il prossimo log {conTec.length ? `· ${conTec.length} con tecnica` : ""} {aperto ? "▲" : "▼"}</button>
       {aperto && (
         <div className="mt-2 space-y-2">
           <p className="text-[11.5px] text-slate-500">Dall'ultima sessione registrata: cosa provare la prossima volta (doppia progressione) ed eventuali tecniche di intensità da inserire o modificare. Sono proposte: decidi tu.</p>
@@ -553,7 +554,7 @@ function Simulatore({ r, sesso, leve, onApplicato }) {
 
   return (
     <div className="mt-3 border-t border-sky-100 pt-3">
-      <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700">🧪 {aperto ? "Chiudi la bozza" : "Prova una modifica al programma (bozza provvisoria)"}</button>
+      <button onClick={() => setAperto(!aperto)} className="text-[12.5px] font-semibold text-sky-700"><Ic n="flask"/> {aperto ? "Chiudi la bozza" : "Prova una modifica al programma (bozza provvisoria)"}</button>
       {aperto && (
         <div className="mt-2 space-y-3">
           <p className="text-[11.5px] text-slate-500">Cambia le serie, l'ordine, le tecniche (es. top set + back-off), togli un esercizio o aggiungine uno per provare: sotto vedi come cambia il confronto con i riferimenti. Il programma vero cambia solo se premi "Applica".</p>
@@ -586,7 +587,7 @@ function Simulatore({ r, sesso, leve, onApplicato }) {
                           </span>
                           <span className="flex-1 min-w-0 truncate">{e.nome}</span>
                           {!tb && <input inputMode="numeric" value={mod[id] === "x" ? "" : (mod[id] ?? (e.serieEff > 0 ? e.serieEff : ""))} placeholder="serie" onChange={(ev) => setMod({ ...mod, [id]: ev.target.value.replace(/\D/g, "") })} className="w-12 border border-slate-200 rounded px-1 py-1 text-center" />}
-                          <button onClick={() => setMod({ ...mod, [id]: mod[id] === "x" ? "" : "x" })} className="text-slate-400 px-1" title="Togli/rimetti">{mod[id] === "x" ? "↺" : "✕"}</button>
+                          <button onClick={() => setMod({ ...mod, [id]: mod[id] === "x" ? "" : "x" })} className="text-slate-400 px-1" title="Togli/rimetti">{mod[id] === "x" ? <Ic n="undo" bare/> : <Ic n="x" bare/>}</button>
                         </div>
                         <div className="flex items-center gap-1.5 mt-1 text-[11.5px] text-slate-500 flex-wrap">
                           <select value={T.t} onChange={(ev) => setTec({ ...tec, [id]: { ...T, t: ev.target.value, top: ev.target.value === "top_back" && !T.top ? "1" : T.top, back: ev.target.value === "top_back" && !T.back ? String(Math.max(1, (serieDi(e) || 3) - 1)) : T.back } })} className="border border-slate-200 rounded px-1 py-0.5 bg-white">
@@ -606,7 +607,7 @@ function Simulatore({ r, sesso, leve, onApplicato }) {
             {nuovi.map((e, i) => (
               <div key={i} className="flex items-center gap-2 text-[12px] text-sky-700">
                 <span className="flex-1 min-w-0 truncate">+ {e.nome} <span className="text-slate-400">· {nomeGiorno(e.training_day_id)} · {e.serie} serie · solo simulazione</span></span>
-                <button onClick={() => setNuovi(nuovi.filter((_, j) => j !== i))} className="text-slate-400 px-1">✕</button>
+                <button onClick={() => setNuovi(nuovi.filter((_, j) => j !== i))} className="text-slate-400 px-1"><Ic n="x" bare/></button>
               </div>
             ))}
           </div>
