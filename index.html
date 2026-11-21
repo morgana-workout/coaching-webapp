@@ -22,9 +22,11 @@ input:focus, textarea:focus, select:focus { outline: none; box-shadow: 0 0 0 3px
 .sk { border-radius: 12px; background: linear-gradient(90deg, #E6EFF8 25%, #F4F8FC 50%, #E6EFF8 75%); background-size: 200% 100%; animation: appShimmer 1.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 #splash { position: fixed; inset: 0; z-index: 2147483000; background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-#splash img { display: block; width: 190px; max-width: none; height: auto; }
-#splash.esce { opacity: 0; transition: opacity 1100ms cubic-bezier(.4,0,.2,1); pointer-events: none; }
-#splash.esce img { transform: scale(8); opacity: 0; transition: transform 1100ms cubic-bezier(.3,0,.2,1), opacity 880ms ease-out; }
+#splash img { display: block; width: 190px; max-width: none; height: auto; will-change: transform, opacity; transform: translateZ(0); backface-visibility: hidden; }
+#splash.esce { animation: spVia 1100ms cubic-bezier(.4,0,.2,1) forwards; pointer-events: none; }
+@keyframes spVia { 0% { opacity: 1; } 35% { opacity: 1; } 100% { opacity: 0; } }
+#splash.esce img { animation: spZoom 1100ms cubic-bezier(.3,0,.2,1) forwards; }
+@keyframes spZoom { 0% { transform: translateZ(0) scale(1); opacity: 1; } 100% { transform: translateZ(0) scale(8); opacity: 0; } }
     </style>
   </head>
   <body>
@@ -38,9 +40,10 @@ input:focus, textarea:focus, select:focus { outline: none; box-shadow: 0 0 0 3px
           var el = document.getElementById("splash");
           if (!el || el.className === "esce") return;
           el.className = "esce";
-          setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1200);
+          el.addEventListener("animationend", function (e) { if (e.target === el && el.parentNode) el.parentNode.removeChild(el); });
+          setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 2500);
         }
-        window.splashEsci = function () { var resto = Math.max(0, 1500 - (Date.now() - inizio)); setTimeout(esci, resto); };
+        window.splashEsci = function () { var resto = Math.max(0, 1800 - (Date.now() - inizio)); setTimeout(function () { requestAnimationFrame(function () { requestAnimationFrame(esci); }); }, resto); };
         window.addEventListener("load", function () { window.splashEsci(); }); // pagina pronta
         setTimeout(esci, 9000); // sicurezza: non resta mai bloccata
       })();
