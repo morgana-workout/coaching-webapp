@@ -1,15 +1,25 @@
+import Ic from "./Ic";
+import { confermaApp } from "./Dialoghi";
+import AnalisiCarichi from "./AnalisiCarichi";
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "./supabaseClient";
 import DiarioKcal from "./DiarioKcal";
+import { AcquaCliente, AcquaCoach } from "./Acqua";
+import CicloCliente, { cicloAttivoPer, fasePerData } from "./Ciclo";
+import AnalisiCibo from "./AnalisiCibo";
+import MessaggioPronto from "./MessaggioPronto";
+import AndamentoCliente from "./AndamentoCliente";
+import { ConsigliProgramma, ValutazioneEstetica, MOTIVI_CALO, MOTIVI_SOLO_COACH, etichettaMotivo, gruppoCarico } from "./ConsigliEstetica";
+import { QuadroGenerale, NoteRapide, TraguardiENotifiche, ElencoLaterale, PrimoEUltimoCheck } from "./QuadroCliente";
 import { SfideCliente, CodiceAmicaCliente, SfideCoach, contaSfideCoach } from "./Sfide";
 import {
   Home, ClipboardList, TrendingUp, Dumbbell, Phone, BookOpen,
   LogOut, ChevronRight, CheckCircle2, Clock, ArrowLeft, Camera,
-  ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy,
+  Star, Sprout, ChefHat, Flame, Droplets, ExternalLink, FileText, Apple, AlertCircle, X, CreditCard, Bell, Check, Plus, MessageCircle, Send, Trophy, User as UserIcon, Search,
 } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
+  LineChart, Line, ReferenceArea, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
 } from "recharts";
 
 /* ------------------------------------------------------------------ */
@@ -88,8 +98,45 @@ function giornoDisponibile(dataStr) {
 /* ------------------------------------------------------------------ */
 /* UI helpers                                                          */
 /* ------------------------------------------------------------------ */
-function Card({ children, className = "" }) {
-  return <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`}>{children}</div>;
+const ApriClienteCtx = React.createContext(null);
+// Nome cliente toccabile (solo coach): apre il profilo della cliente
+function NomeCl({ c, className = "" }) {
+  const apri = React.useContext(ApriClienteCtx);
+  if (!c) return null;
+  const testo = `${c.nome || ""} ${c.cognome || ""}`.trim();
+  if (!apri || !c.id) return <>{testo}</>;
+  return (
+    <span role="link" onClick={(e) => { e.stopPropagation(); e.preventDefault(); apri(c.id); }}
+      className={`text-sky-700 underline decoration-sky-200 underline-offset-2 cursor-pointer ${className}`}>{testo}</span>
+  );
+}
+
+const SLOT_ORARI_COACH = (() => { const s = []; for (let h = 7; h <= 21; h++) { s.push(`${String(h).padStart(2, "0")}:00`); if (h < 21) s.push(`${String(h).padStart(2, "0")}:30`); } return s; })();
+// Orario per la coach: fasce ogni 30 minuti dalle 7 alle 21 oppure orario a mano (es. 08:05)
+function OraCoach({ value, onChange, className = "", vuoto = false }) {
+  const v = (value || "").slice(0, 5);
+  const fuori = !!v && !SLOT_ORARI_COACH.includes(v);
+  const [manuale, setManuale] = useState(fuori);
+  useEffect(() => { if (fuori) setManuale(true); }, [fuori]);
+  if (manuale) {
+    return (
+      <div className="flex items-center gap-1">
+        <input type="time" value={v} onChange={(e) => onChange({ target: { value: e.target.value } })} className={className} />
+        <button type="button" onClick={() => { setManuale(false); if (fuori) onChange({ target: { value: vuoto ? "" : SLOT_ORARI_COACH[0] } }); }} className="text-sky-600 text-xs px-1 flex-shrink-0">Fasce</button>
+      </div>
+    );
+  }
+  return (
+    <select value={v} onChange={(e) => { if (e.target.value === "__manuale") { setManuale(true); return; } onChange(e); }} className={className}>
+      {vuoto && <option value="">--:--</option>}
+      {SLOT_ORARI_COACH.map((s) => <option key={s} value={s}>{s}</option>)}
+      <option value="__manuale">Altro orario...</option>
+    </select>
+  );
+}
+
+function Card({ children, className = "", style }) {
+  return <div className={`bg-white rounded-2xl border border-slate-200 shadow-sm ${className}`} style={style}>{children}</div>;
 }
 function Badge({ children, className = "" }) {
   return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${className}`}>{children}</span>;
@@ -141,13 +188,20 @@ function InputData({ value, defaultValue, onChange, onBlur, className = "" }) {
 }
 
 function Spinner() {
-  return <div className="flex justify-center pt-20"><div className="w-8 h-8 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" /></div>;
+  return (
+    <div className="px-6 pt-8 max-w-3xl mx-auto" aria-busy="true" aria-label="Caricamento">
+      <div className="sk" style={{ height: 22, width: "55%", marginBottom: 16 }} />
+      <div className="sk" style={{ height: 84, marginBottom: 12 }} />
+      <div className="sk" style={{ height: 84, marginBottom: 12 }} />
+      <div className="sk" style={{ height: 84 }} />
+    </div>
+  );
 }
 const STATO_LABEL = {
   programmato: { t: "Programmato", c: "bg-sky-100 text-sky-700" },
-  da_compilare: { t: "Da compilare", c: "bg-amber-100 text-amber-700" },
+  da_compilare: { t: "Da compilare", c: "bg-slate-100 text-slate-700" },
   ricevuto: { t: "In revisione", c: "bg-violet-100 text-violet-700" },
-  revisionato: { t: "Revisionato", c: "bg-emerald-100 text-emerald-700" },
+  revisionato: { t: "Revisionato", c: "bg-sky-100 text-sky-700" },
 };
 function StatoBadge({ stato }) {
   const s = STATO_LABEL[stato] || { t: stato || "—", c: "bg-slate-100 text-slate-500" };
@@ -177,7 +231,7 @@ function Login({ erroreLink }) {
     <div className="min-h-screen bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm">
         {erroreLink && (
-          <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-xl px-4 py-3 mb-5">
+          <div className="bg-slate-800/10 border border-slate-800/30 text-slate-400 text-sm rounded-xl px-4 py-3 mb-5">
             Il link che hai usato non è più valido o è scaduto ({erroreLink}). Chiedi a Morgana di inviartene uno nuovo, poi accedi qui sotto con la password che avevi già impostato.
           </div>
         )}
@@ -202,7 +256,7 @@ function Login({ erroreLink }) {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
               />
-              {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+              {errore && <p className="text-slate-600 text-xs">{errore}</p>}
               <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
                 {caricando ? "Accesso in corso..." : "Accedi"}
               </button>
@@ -317,7 +371,7 @@ function Registrazione({ onTornaAlLogin }) {
         <input type="password" placeholder="Conferma password" value={confermaPassword} required onChange={(e) => setConfermaPassword(e.target.value)} className={campoClass} />
       </div>
 
-      {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-600 text-xs">{errore}</p>}
       <button disabled={caricando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
         {caricando ? "Creo l'account..." : "Crea account"}
       </button>
@@ -346,6 +400,105 @@ const LIVELLI_ATTIVITA = [
   { value: "intermedio", label: "Intermedio", descrizione: "circa 8.000 passi/giorno" },
   { value: "attivo", label: "Attivo", descrizione: "oltre 10.000 passi/giorno" },
 ];
+
+const VOCI_CONSENSI = [
+  ["analisi_esterna", "Analisi con strumenti esterni", "I tuoi dati possono essere elaborati con strumenti di analisi esterni per preparare il tuo programma. Non vengono mai condivisi con altre persone."],
+  ["ciclo", "Dati del ciclo", "Morgana può tenere conto del tuo ciclo nelle analisi e nell'organizzazione del programma."],
+  ["social", "Condividere foto e risultati", "Le foto dei check fanno parte del percorso e le vede solo Morgana. Qui scegli se può anche condividere le tue foto e i tuoi risultati nei suoi contenuti (sempre con il tuo ok caso per caso). Se dici no, non succede mai."],
+];
+
+// Cliente: interruttori sì/no per i consensi privacy (si salvano subito).
+// posizione="alto": in cima alla home finché non ha risposto a tutte le voci, poi sparisce.
+// posizione="basso": solo il lucchetto in fondo alla home, per modificare le scelte in futuro.
+function ConsensiCliente({ client, posizione = "basso", forzaApri = false }) {
+  const [riga, setRiga] = useState(undefined);
+  const [aperto, setAperto] = useState(false);
+  const [errore, setErrore] = useState("");
+  const [grazie, setGrazie] = useState(false);
+  const carica = () => supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle().then(({ data }) => setRiga(data || null), () => setRiga(null));
+  useEffect(() => { carica(); }, [client.id]);
+  useEffect(() => {
+    const h = () => carica();
+    window.addEventListener("consensi-aggiornati", h);
+    return () => window.removeEventListener("consensi-aggiornati", h);
+  }, [client.id]);
+  if (riga === undefined) return null;
+  const mancano = VOCI_CONSENSI.some(([k]) => riga?.[k] == null);
+  const imposta = async (k, v) => {
+    setErrore("");
+    const nuova = { ...(riga || {}), client_id: client.id, [k]: v, aggiornato_il: new Date().toISOString() };
+    const eraCompleto = !mancano;
+    setRiga(nuova);
+    const { error } = await supabase.from("consensi_cliente").upsert({ client_id: client.id, foto_coach: nuova.foto_coach ?? null, analisi_esterna: nuova.analisi_esterna ?? null, social: nuova.social ?? null, ciclo: nuova.ciclo ?? null, aggiornato_il: nuova.aggiornato_il });
+    if (error) { setErrore("Non siamo riusciti a salvare, riprova tra un attimo 🫶🏻"); return; }
+    const completo = !VOCI_CONSENSI.some(([kk]) => nuova[kk] == null);
+    if (posizione === "alto" && completo && !eraCompleto) {
+      setGrazie(true);
+      setTimeout(() => { setGrazie(false); window.dispatchEvent(new Event("consensi-aggiornati")); }, 2600);
+    } else if (posizione === "basso") {
+      window.dispatchEvent(new Event("consensi-aggiornati"));
+    }
+  };
+  const voci = (
+    <>
+      {VOCI_CONSENSI.map(([k, titolo, testo]) => (
+        <div key={k} className="space-y-1.5 border-b border-slate-100 last:border-0 pb-2.5 last:pb-0">
+          <p className="text-sm font-medium text-slate-700">{titolo}</p>
+          <p className="text-xs text-slate-500">{testo}</p>
+          <div className="flex gap-2">
+            {[[true, "Sì"], [false, "No"]].map(([v, l]) => (
+              <button key={l} onClick={() => imposta(k, v)} className="px-5 py-1.5 rounded-full text-xs font-semibold" style={riga?.[k] === v ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{l}</button>
+            ))}
+            {riga?.[k] == null && <span className="text-[11px] text-slate-400 self-center">non ancora scelto</span>}
+          </div>
+        </div>
+      ))}
+      {errore && <p className="text-xs text-slate-600">{errore}</p>}
+    </>
+  );
+
+  if (posizione === "alto") {
+    if (grazie) return (
+      <Card className="p-4"><p className="text-sm text-slate-700">Grazie, è tutto salvato ✨ Puoi cambiare idea quando vuoi dal 🔒 in fondo a questa pagina.</p></Card>
+    );
+    if (!mancano) return null;
+    return (
+      <Card className="p-4 space-y-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800"><Ic n="lock"/> Privacy e consensi</p>
+          <p className="text-xs text-slate-500 mt-0.5">I tuoi dati sono tuoi: decidi tu cosa può vedere e usare Morgana. Ci metti un minuto e puoi cambiare idea quando vuoi 🫶🏻</p>
+        </div>
+        {voci}
+      </Card>
+    );
+  }
+
+  // posizione "basso": solo a scelte completate (prima, il riquadro sta in alto)
+  if (mancano) return null;
+  const mostra = aperto || forzaApri;
+  if (!mostra) return (
+    <button onClick={() => setAperto(true)} className="w-full text-center text-xs py-1" style={{ color: "#7a8da3" }}><Ic n="lock"/> Privacy e consensi</button>
+  );
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between"><p className="text-sm font-medium text-slate-700"><Ic n="lock"/> Privacy e consensi</p>{!forzaApri && <button onClick={() => setAperto(false)} className="text-xs text-slate-400">Chiudi</button>}</div>
+      {voci}
+    </Card>
+  );
+}
+
+// Coach: riepilogo dei consensi della cliente
+function ConsensiCoach({ clientId }) {
+  const [riga, setRiga] = useState(undefined);
+  useEffect(() => { supabase.from("consensi_cliente").select("*").eq("client_id", clientId).maybeSingle().then(({ data }) => setRiga(data || null), () => setRiga(null)); }, [clientId]);
+  if (riga === undefined) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 items-center">
+      <span className="text-[11px] text-slate-400"><Ic n="lock"/> Consensi:</span>
+      {VOCI_CONSENSI.map(([k, titolo]) => { const v = riga?.[k]; return <span key={k} className="text-[11px] rounded-full px-2 py-0.5 font-medium" style={v === true ? { background: "#C9E0F7", color: "#27466D" } : v === false ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : { background: "#F5FAFE", color: "#7a8da3" }}>{titolo}: {v === true ? "sì" : v === false ? "no" : "da chiedere"}</span>; })}
+    </div>
+  );
+}
 
 function ProfiloCliente({ client, onAggiornato }) {
   const profiloGiaCompilato = !!(client.data_nascita || client.altezza_cm || client.livello_attivita || client.note_particolari || client.citta || client.peso_kg || client.tipo_lavoro);
@@ -446,58 +599,246 @@ function ProfiloCliente({ client, onAggiornato }) {
   );
 }
 
-function PrenotaLezioneForm({ client, extra = false, onFatto }) {
+/* Scheda "La tua lezione": la cliente può chiedere un'altra data. Morgana approva, modifica o rifiuta. */
+// File .ics: la lezione si aggiunge al calendario del telefono (ora locale, promemoria 1 ora prima)
+function scaricaLezioneIcs(ev) {
+  const d = (ev.data || "").replace(/-/g, "");
+  const hh = (ev.ora || "09:00").slice(0, 5).split(":");
+  const inizio = `${d}T${hh[0]}${hh[1]}00`;
+  const fineD = new Date(`${ev.data}T${hh[0]}:${hh[1]}:00`); fineD.setHours(fineD.getHours() + 1);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const fine = `${fineD.getFullYear()}${p2(fineD.getMonth() + 1)}${p2(fineD.getDate())}T${p2(fineD.getHours())}${p2(fineD.getMinutes())}00`;
+  const righe = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Coaching Morgana//IT", "BEGIN:VEVENT", `UID:lezione-${ev.id || d}@coaching-morgana`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`, `DTSTART:${inizio}`, `DTEND:${fine}`, "SUMMARY:Lezione con Morgana", ...(ev.luogo ? [`LOCATION:${String(ev.luogo).replace(/[,;\n]/g, " ")}`] : []), "BEGIN:VALARM", "TRIGGER:-PT60M", "ACTION:DISPLAY", "DESCRIPTION:Lezione con Morgana tra un'ora", "END:VALARM", "END:VEVENT", "END:VCALENDAR"];
+  scaricaFile(`lezione-${ev.data}.ics`, righe.join("\r\n"), "text/calendar");
+}
+
+function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
+  const [richiesta, setRichiesta] = useState(undefined); // richiesta di spostamento in attesa (o null)
+  const [proposta, setProposta] = useState(null);
+  const [apri, setApri] = useState(false);
   const [data, setData] = useState("");
-  const [ora, setOra] = useState(SLOT_ORARI[6]);
-  const [luogo, setLuogo] = useState(client.sede_abituale || LUOGHI[0]);
+  const [ora, setOra] = useState(evento.ora && SLOT_ORARI.includes(evento.ora.slice(0, 5)) ? evento.ora.slice(0, 5) : SLOT_ORARI[6]);
+  const [luogo, setLuogo] = useState(evento.luogo || client.sede_abituale || LUOGHI[0]);
   const [nota, setNota] = useState("");
   const [inviando, setInviando] = useState(false);
-
+  const fmt = (d) => d.split("-").reverse().join("/");
   const disponibile = giornoDisponibile(data);
+  const oreAlla = (new Date(`${evento.data}T${evento.ora || "00:00"}`) - new Date()) / 3600000;
+
+  const carica = async () => {
+    const { data: r } = await supabase.from("calendar_events").select("*").eq("sostituisce_id", evento.id).eq("stato", "richiesta").limit(1).maybeSingle();
+    setRichiesta(r || null);
+    if (r) {
+      const { data: pr } = await supabase.from("notifiche").select("*").eq("calendar_event_id", r.id).eq("tipo", "proposta_lezione").eq("stato", "inviata").limit(1).maybeSingle();
+      setProposta(pr || null);
+    } else setProposta(null);
+  };
+  useEffect(() => { carica(); }, [evento.id]);
+
+  const annullaLezione = async () => {
+    const inTempo = oreAlla >= 24;
+    const testo = inTempo
+      ? "Vuoi annullare questa lezione? Nessuna penale: l'annullamento è più di 24 ore prima."
+      : "Mancano meno di 24 ore alla lezione: se la annulli verrà conteggiata come lezione persa. Vuoi annullarla comunque?";
+    if (!await confermaApp(testo)) return;
+    await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa", ...(inTempo && client.gruppo_id ? { recupero_entro: fineMeseSuccessivo(evento.data), recuperata: false } : {}) }).eq("id", evento.id);
+    if (inTempo) await scollegaLezionePacchetto(evento.id);
+    // se c'era una richiesta di spostamento in attesa, decade
+    await supabase.from("calendar_events").update({ stato: "annullata" }).eq("sostituisce_id", evento.id).eq("stato", "richiesta");
+    onFatto?.();
+    onChiudi?.();
+  };
 
   const invia = async () => {
     if (!data) return;
     setInviando(true);
-    const { data: creato } = await supabase.from("calendar_events").insert({
-      client_id: client.id, tipo: "lezione", data, ora, luogo, nota,
-      stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: !disponibile,
+    const { data: creato, error } = await supabase.from("calendar_events").insert({
+      client_id: client.id, tipo: "lezione", data, ora, luogo, nota: nota || null,
+      stato: "richiesta", sostituisce_id: evento.id, fuori_disponibilita: !disponibile,
     }).select().single();
-    // il collegamento al pacchetto avviene solo quando Morgana approva la richiesta
+    setInviando(false);
+    if (error) { alert("Non siamo riusciti a inviare la richiesta. Controlla la connessione e riprova tra un attimo 🫶🏻"); return; }
     if (creato?.id) inviaPush({ evento: "richiesta", event_id: creato.id });
+    setApri(false);
+    await carica();
+    onFatto?.();
+  };
+  const annullaRichiesta = async () => {
+    if (!richiesta) return;
+    await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", richiesta.id);
+    await carica();
+    onFatto?.();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) onChiudi(); }}>
+      <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-800">La tua lezione</h3>
+          <button onClick={onChiudi} className="text-slate-400"><X size={20} /></button>
+        </div>
+        <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-3.5 py-3">
+          <Clock size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold text-slate-800">{fmt(evento.data)}{evento.ora ? ` · ${evento.ora.slice(0, 5)}` : ""}</p>
+            {evento.luogo && <p className="text-slate-500 text-xs">{evento.luogo}</p>}
+          </div>
+        </div>
+
+        {richiesta === undefined ? (
+          <p className="text-slate-400 text-sm">Caricamento...</p>
+        ) : richiesta ? (
+          <div className="space-y-3">
+            <div className="bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-3 text-sm text-slate-800 space-y-1">
+              <p className="font-medium">Hai chiesto di spostarla a {fmt(richiesta.data)} · {richiesta.ora?.slice(0, 5)}</p>
+              {richiesta.luogo && <p className="text-xs">{richiesta.luogo}</p>}
+              <p className="text-xs">In attesa di Morgana 🫶🏻 Fino alla sua risposta resta valida la lezione di prima.</p>
+            </div>
+            {proposta && (
+              <div className="bg-sky-50 border border-sky-200 rounded-xl px-3.5 py-3 text-sm text-sky-800">
+                Morgana ti ha proposto un altro orario: {fmt(proposta.proposta_data)} · {proposta.proposta_ora?.slice(0, 5)}. Aprilo nelle Notifiche per rispondere ✨
+              </div>
+            )}
+            <button onClick={annullaRichiesta} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">Annulla la richiesta di spostamento</button>
+          </div>
+        ) : !apri ? (
+          <div className="space-y-2">
+            <button onClick={() => setApri(true)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-3">Richiedi un'altra data</button>
+            <button onClick={() => scaricaLezioneIcs(evento)} className="w-full border border-slate-200 text-sky-700 text-sm font-medium rounded-xl py-2.5"><Ic n="calendar"/> Aggiungi al calendario del telefono</button>
+            <button onClick={annullaLezione} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">Annulla la lezione</button>
+            <p className="text-slate-400 text-[11px] text-center">{oreAlla >= 24 ? "Puoi annullarla senza penale (più di 24 ore prima)." : "Mancano meno di 24 ore: se la annulli viene conteggiata come lezione persa."}</p>
+            {oreAlla < 24 && oreAlla > 0 && <p className="text-slate-400 text-xs text-center">Mancano meno di 24 ore: Morgana valuterà se è possibile spostarla.</p>}
+            <p className="text-slate-400 text-xs text-center">Morgana riceve la richiesta e poi la approva o ti propone un altro orario.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-slate-700">Quando preferiresti?</p>
+            <InputData value={data} onChange={(e) => setData(e.target.value)} />
+            {data && !disponibile && (
+              <div className="bg-slate-50 border border-slate-200 text-slate-600 rounded-lg px-3 py-2 text-xs">
+                Questo giorno è normalmente non disponibile (weekend o festivo). Puoi inviare la richiesta come eccezione: Morgana valuterà.
+              </div>
+            )}
+            <div>
+              <label className="text-xs text-slate-500">Orario (durata 60 minuti)</label>
+              <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+                {SLOT_ORARI.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Sede</label>
+              <SelezionaLuogo value={luogo} onChange={setLuogo} />
+            </div>
+            <textarea placeholder="Vuoi dirmi il motivo? (facoltativo)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <div className="flex gap-2">
+              <button onClick={invia} disabled={inviando || !data} className="flex-1 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-40">{inviando ? "Invio..." : "Invia richiesta"}</button>
+              <button onClick={() => setApri(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Indietro</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PrenotaLezioneForm({ client, extra = false, onFatto }) {
+  const nuovaRiga = () => ({ data: "", ora: SLOT_ORARI[6], luogo: client.sede_abituale || LUOGHI[0] });
+  const [righe, setRighe] = useState([nuovaRiga()]);
+  const [nota, setNota] = useState("");
+  const [inviando, setInviando] = useState(false);
+  const [libere, setLibere] = useState(1); // lezioni del pacchetto non ancora prenotate
+  useEffect(() => {
+    if (extra) return;
+    (async () => {
+      try {
+        const { data: pk } = await supabase.from("pacchetti_lezioni").select("id, numero_lezioni").eq("client_id", client.id).eq("stato", "attivo").order("creato_il", { ascending: true }).limit(1).maybeSingle();
+        if (!pk) return;
+        const { data: ls } = await supabase.from("lezioni_svolte").select("fatta, calendar_event_id").eq("pacchetto_id", pk.id);
+        const usate = (ls || []).filter((l) => l.fatta || l.calendar_event_id).length;
+        const { count: inAttesa } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("client_id", client.id).eq("tipo", "lezione").eq("stato", "richiesta");
+        setLibere(Math.max(1, pk.numero_lezioni - usate - (inAttesa || 0)));
+      } catch (e) { /* resta 1 */ }
+    })();
+  }, [client.id, extra]);
+  const aggiorna = (i, campi) => setRighe((l) => l.map((x, k) => (k === i ? { ...x, ...campi } : x)));
+  const pronte = righe.filter((x) => x.data);
+
+  const invia = async () => {
+    if (!pronte.length) return;
+    setInviando(true);
+    let primo = null;
+    for (const x of pronte) {
+      const fuori = !giornoDisponibile(x.data);
+      let creato = null;
+      if (client.gruppo_id) {
+        // cliente di un gruppo: la richiesta vale per tutte le clienti del gruppo
+        const { data: idMio } = await supabase.rpc("richiedi_lezione_gruppo", { p_data: x.data, p_ora: x.ora, p_luogo: x.luogo, p_nota: nota || null, p_fuori: fuori, p_extra: extra ? 30 : null });
+        creato = idMio ? { id: idMio } : null;
+      } else {
+        const r = await supabase.from("calendar_events").insert({
+          client_id: client.id, tipo: "lezione", data: x.data, ora: x.ora, luogo: x.luogo, nota,
+          stato: "richiesta", extra_euro: extra ? 30 : null, fuori_disponibilita: fuori,
+        }).select().single();
+        creato = r.data;
+      }
+      if (!primo && creato?.id) primo = creato.id;
+    }
+    // il collegamento al pacchetto avviene solo quando Morgana approva la richiesta
+    if (primo) inviaPush({ evento: "richiesta", event_id: primo });
     setInviando(false);
     onFatto();
   };
 
   return (
     <Card className="p-4 space-y-3">
-      <p className="text-sm font-medium text-slate-700">Richiedi una lezione (60 min)</p>
-      <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.</p>
+      <p className="text-sm font-medium text-slate-700">{libere > 1 ? "Richiedi le tue lezioni (60 min l'una)" : "Richiedi una lezione (60 min)"}</p>
+      <p className="text-slate-500 text-xs">Morgana confermerà la disponibilità appena possibile.{libere > 1 ? ` Puoi prenotare in una volta tutte le lezioni che ti restano (${libere}).` : ""}{client.gruppo_id ? " La richiesta vale per tutte le clienti del tuo gruppo 🫶🏻" : ""}</p>
       {extra && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-lg px-3 py-2 text-xs">
+        <div className="bg-slate-100 border border-slate-200 text-slate-700 rounded-lg px-3 py-2 text-xs">
           Questa lezione in presenza ha un costo aggiuntivo se non hai acquistato in precedenza un pacchetto lezioni.
         </div>
       )}
-      <InputData value={data} onChange={(e) => setData(e.target.value)} />
-      {data && !disponibile && (
-        <div className="bg-slate-50 border border-slate-200 text-slate-600 rounded-lg px-3 py-2 text-xs">
-          Questo giorno è normalmente non disponibile (weekend o festivo). Puoi comunque inviare la richiesta come eccezione: Morgana valuterà se può confermarla.
+      {righe.map((x, i) => (
+        <div key={i} className="space-y-2 rounded-xl p-3" style={{ background: righe.length > 1 ? "#F5FAFE" : "transparent", border: righe.length > 1 ? "1px solid #C9E0F7" : "none" }}>
+          {righe.length > 1 && (
+            <div className="flex items-center justify-between"><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Lezione {i + 1}</p><button onClick={() => setRighe(righe.filter((_, k) => k !== i))} className="text-xs text-slate-400">Togli</button></div>
+          )}
+          <InputData value={x.data} onChange={(e) => aggiorna(i, { data: e.target.value })} />
+          {x.data && !giornoDisponibile(x.data) && (
+            <div className="bg-slate-50 border border-slate-200 text-slate-600 rounded-lg px-3 py-2 text-xs">
+              Questo giorno è normalmente non disponibile (weekend o festivo). Puoi comunque inviare la richiesta come eccezione: Morgana valuterà se può confermarla.
+            </div>
+          )}
+          <div>
+            <label className="text-xs text-slate-500">Orario (durata 60 minuti)</label>
+            <select value={x.ora} onChange={(e) => aggiorna(i, { ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+              {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Sede</label>
+            <SelezionaLuogo value={x.luogo} onChange={(v) => aggiorna(i, { luogo: v })} />
+          </div>
         </div>
+      ))}
+      {righe.length < libere && (
+        <button onClick={() => setRighe([...righe, { ...nuovaRiga(), luogo: righe[righe.length - 1].luogo, ora: righe[righe.length - 1].ora }])} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>+ Aggiungi un'altra lezione</button>
       )}
-      <div>
-        <label className="text-xs text-slate-500">Orario (durata 60 minuti)</label>
-        <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="text-xs text-slate-500">Sede</label>
-        <SelezionaLuogo value={luogo} onChange={setLuogo} />
-      </div>
       <textarea placeholder="Nota (facoltativa)" value={nota} onChange={(e) => setNota(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-      <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{inviando ? "Invio..." : "Invia richiesta"}</button>
+      <button onClick={invia} disabled={inviando || !pronte.length} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium disabled:opacity-40">{inviando ? "Invio..." : pronte.length > 1 ? `Invia ${pronte.length} richieste` : "Invia richiesta"}</button>
     </Card>
   );
 }
+
+const MESSAGGI_GIORNO = [
+  "Domenica di relax, te la sei guadagnata 🫶🏻 Goditi la giornata senza esagerare, bevi tanta acqua e fatti una bella camminata ✨", // domenica
+  "Si riparte! Nessuna scusa, ma neanche pressione: facciamo una settimana alla volta, e questa la facciamo bene 💪🏻✨", // lunedì
+  "Siamo all'inizio, non ti chiedo di essere perfetta: ti chiedo di esserci. La costanza vince sempre 🫶🏻", // martedì
+  "Metà settimana! Se sei qui, stai già facendo più di quello che pensi. Avanti così, con calma e testa ✨", // mercoledì
+  "Ultimo sprint, dai che ci siamo quasi! Un allenamento alla volta e la settimana è tua 🔥💪🏻", // giovedì
+  "Settimana quasi in archivio, brava! Chiudila bene e poi pensa anche al riposo: anche quello fa parte del programma 🧘🏻‍♀️✨", // venerdì
+  "Weekend! Staccare fa bene: goditelo senza esagerare, idratati e fai due passi all'aria aperta 🚶🏻‍♀️💧✨", // sabato
+];
 
 function RiepilogoSettimana({ client }) {
   const [r, setR] = useState(null);
@@ -509,25 +850,36 @@ function RiepilogoSettimana({ client }) {
     const lun = new Date(oggi); lun.setDate(oggi.getDate() - ((oggi.getDay() + 6) % 7));
     const da = formatDataLocale(lun);
     (async () => {
-      const [t, k] = await Promise.all([
+      const [t, k, g] = await Promise.all([
         mostraLog ? supabase.from("training_entries").select("data").eq("client_id", client.id).gte("data", da).limit(500) : { data: [] },
         mostraKcal ? supabase.from("kcal_voci").select("data").eq("client_id", client.id).gte("data", da).limit(2000) : { data: [] },
+        mostraLog ? supabase.from("training_days").select("id, scheda_archiviata").eq("client_id", client.id) : { data: [] },
       ]);
-      setR({ all: new Set((t.data || []).map((x) => x.data)).size, diario: new Set((k.data || []).map((x) => x.data)).size });
+      setR({ all: new Set((t.data || []).map((x) => x.data)).size, diario: new Set((k.data || []).map((x) => x.data)).size, previsti: (g.data || []).filter((d) => !d.scheda_archiviata).length });
     })();
   }, [client.id, mostraLog, mostraKcal]);
   if (!r || (!mostraLog && !mostraKcal)) return null;
-  const parti = [];
-  // Se un valore è 0 non si scrive niente: compare solo ciò che c'è davvero
-  if (mostraLog && r.all > 0) parti.push(`${r.all} allenament${r.all === 1 ? "o" : "i"}`);
-  if (mostraKcal && r.diario > 0) parti.push(`diario compilato ${r.diario} giorn${r.diario === 1 ? "o" : "i"}`);
-  const vuoto = (mostraLog ? r.all : 0) + (mostraKcal ? r.diario : 0) === 0;
+  // Solo il numero degli allenamenti fatti; se mancano, quanti ne restano per completare la settimana
+  const fatti = mostraLog ? r.all : 0;
+  const previsti = mostraLog ? r.previsti || 0 : 0;
+  const mancano = Math.max(0, previsti - fatti);
+  let titolo = "";
+  if (mostraLog && fatti > 0) titolo = `${fatti} allenament${fatti === 1 ? "o è andato" : "i sono andati"} 💪🏻`;
+  else if (mostraLog && mancano > 0) titolo = `${mancano === 1 ? "Manca 1 allenamento" : `Mancano ${mancano} allenamenti`} per completare la settimana 💪🏻`;
+  else if (mostraLog) titolo = "Si riparte da qui: anche un solo passo conta 💪🏻";
+  const sotto = [];
+  if (mostraLog && fatti > 0 && previsti > 0) sotto.push(mancano > 0 ? `${mancano === 1 ? "Ne manca 1" : `Ne mancano ${mancano}`} per completare la settimana` : "Settimana completata, brava! 🔥");
+  if (mostraKcal && r.diario > 0) sotto.push(`Diario compilato ${r.diario} giorn${r.diario === 1 ? "o" : "i"}`);
+  if (!titolo && sotto.length) titolo = sotto.shift();
+  if (!titolo) titolo = "Si riparte da qui: anche un solo passo conta 💪🏻";
+  const vuoto = fatti === 0 && (mostraKcal ? r.diario : 0) === 0;
   return (
-    <Card className="p-4 flex items-center gap-3 border-emerald-100 bg-emerald-50/50">
-      <span className="text-2xl">{vuoto ? "🌱" : "🌟"}</span>
+    <Card className="px-3.5 py-2.5 flex items-center gap-2.5 border-sky-200 bg-sky-50">
+      {vuoto ? <Sprout size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" /> : <Star size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />}
       <div className="min-w-0">
-        <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">La tua settimana</p>
-        <p className="font-semibold text-slate-800 text-sm">{vuoto ? "Si riparte da qui: anche un solo passo conta 💪🏻" : `Questa settimana: ${parti.join(", ")} 💪🏻`}</p>
+        <p className="font-semibold text-slate-800 text-[13px] leading-snug">{titolo}</p>
+        {sotto.length > 0 && <p className="text-slate-500 text-[11px] leading-snug mt-0.5">{sotto.join(" · ")}</p>}
+        <p className="text-slate-400 text-[11px] leading-snug mt-0.5 line-clamp-2">{MESSAGGI_GIORNO[new Date().getDay()]}</p>
       </div>
     </Card>
   );
@@ -535,6 +887,7 @@ function RiepilogoSettimana({ client }) {
 
 function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima = null }) {
   const [prenotaAperto, setPrenotaAperto] = useState(false);
+  const [profiloAperto, setProfiloAperto] = useState(false);
   const [inviata, setInviata] = useState(false);
   const [schedaAperta, setSchedaAperta] = useState(false);
   const richiestaRef = React.useRef(null);
@@ -546,6 +899,14 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
   const [lezioniSvolte, setLezioniSvolte] = useState(null);
   const [prossimaLezione, setProssimaLezione] = useState(undefined);
   const [infoPacchetto, setInfoPacchetto] = useState(null);
+  const [prossimoEv, setProssimoEv] = useState(null);
+  const [sheetLezione, setSheetLezione] = useState(null);
+  const caricaProssimoEv = async () => {
+    const oggi = formatDataLocale(new Date());
+    const { data } = await supabase.from("calendar_events").select("id, data, ora, luogo, stato").eq("client_id", client.id).eq("tipo", "lezione").eq("stato", "confermato").gte("data", oggi).order("data").order("ora").limit(1).maybeSingle();
+    setProssimoEv(data || null);
+  };
+  useEffect(() => { caricaProssimoEv(); }, [client.id]);
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
   const isSoloOnline = client.tipo_servizio === "online";
@@ -574,72 +935,100 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
   }, [client.id, isBulb, pacchettoSingolo]);
 
   return (
-    <div className="px-5 pt-6 pb-24 space-y-5">
+    <div className="px-5 pt-4 pb-24 space-y-4">
+      <div className="flex flex-col gap-4" style={{ minHeight: "calc(100dvh - 6.5rem - env(safe-area-inset-bottom))" }}>
       <div>
-        <h1 className="text-2xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
-        <p className="text-slate-500 text-sm mt-1">Costanza batte perfezione, sempre.</p>
+        <h1 className="text-xl font-semibold text-slate-800">Ciao {client.nome} 👋</h1>
+        <p className="text-slate-500 text-xs mt-0.5">Costanza batte perfezione, sempre.</p>
       </div>
 
+      <ConsensiCliente client={client} posizione="alto" />
+
       {!isBulb && lezioneProssima && (
-        <button onClick={() => onApri?.("lezioni")} className="w-full text-left">
-          <Card className="p-4 flex items-center gap-3 border-sky-200 bg-sky-50/50">
-            <span className="text-2xl">📅</span>
+        <button onClick={() => (lezioneProssima.stato === "confermato" ? setSheetLezione(lezioneProssima) : onApri?.("lezioni"))} className="w-full text-left">
+          <Card className="px-3.5 py-3 flex items-center gap-3 border-sky-200 bg-sky-50/50">
+            <Clock size={18} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione{lezioneProssima.stato === "richiesta" ? " (da confermare)" : ""}</p>
               <p className="font-semibold text-slate-800">{lezioneProssima.data.split("-").reverse().join("/")}{lezioneProssima.ora ? ` · ${lezioneProssima.ora.slice(0, 5)}` : ""}</p>
               {lezioneProssima.luogo && <p className="text-slate-500 text-xs">{lezioneProssima.luogo}</p>}
+              {lezioneProssima.stato === "confermato" && <p className="text-sky-600 text-[11px] mt-0.5">Tocca per chiedere di spostarla</p>}
             </div>
             <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
           </Card>
         </button>
       )}
 
-      <RiepilogoSettimana client={client} />
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="invito" />
 
       {isOnline && (
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossimo check</span>
-            <StatoBadge stato={client.stato_check} />
+        <Card className="px-3.5 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500 text-[11px] uppercase tracking-wide font-medium">Prossimo check</span>
+          <StatoBadge stato={client.stato_check} />
           </div>
-          <div className="flex items-end justify-between">
-            <div>
-              <p className="text-3xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
-              {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
-                <p className="text-rose-500 text-sm font-medium mt-1">Scaduto: invia il tuo check</p>
-              )}
-              <p className="text-slate-500 text-sm mt-1">Ultimo check: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
-            </div>
-            <Clock className="text-sky-500" size={32} />
+          <div className="flex items-baseline justify-between mt-0.5">
+            <p className="text-xl font-semibold text-slate-800">{client.prossimo_check ? client.prossimo_check.split("-").reverse().join("/") : "—"}</p>
+            <p className="text-slate-400 text-[11px]">Ultimo: {client.ultimo_check ? client.ultimo_check.split("-").reverse().join("/") : "—"}</p>
           </div>
+          {client.prossimo_check && client.prossimo_check < new Date().toISOString().slice(0, 10) && (
+            <p className="text-slate-800 text-xs font-medium mt-0.5">Scaduto: invia il tuo check</p>
+          )}
         </Card>
       )}
 
-      {isOnline && (
-        <button onClick={() => setSchedaAperta(true)} className="w-full bg-slate-800 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Dumbbell size={22} /><span className="font-medium text-sm">Il mio programma</span>
-        </button>
-      )}
+      {(() => {
+        // Avviso di rinnovo: compare quando il pacchetto è alle porte e resta finché non viene saldato il nuovo
+        if (client.stato_pacchetto === "gratuito") return null;
+        let testo = null, scaduto = false;
+        if (isOnline && client.data_scadenza) {
+          const oggiS = formatDataLocale(new Date());
+          const g = Math.round((new Date(`${client.data_scadenza}T12:00:00`) - new Date(`${oggiS}T12:00:00`)) / 86400000);
+          const dd = client.data_scadenza.split("-").reverse().slice(0, 2).join("/");
+          if (g < 0) { scaduto = true; testo = `Il tuo pacchetto è scaduto il ${dd} 🫶🏻 Appena puoi procedi con il saldo del nuovo così continuiamo il percorso senza interruzioni. Nel frattempo puoi continuare ad allenarti ✨`; }
+          else if (g === 0) testo = "Oggi si chiude il tuo pacchetto 🫶🏻 Quando riesci procedi con il saldo del nuovo, così proseguiamo senza pause ✨";
+          else if (g <= 7) testo = `Il tuo pacchetto scade il ${dd} (${g === 1 ? "domani" : `tra ${g} giorni`}) 🫶🏻 Quando riesci procedi con il saldo del rinnovo, così continuiamo senza pause ✨`;
+        } else if (isBulb && !pacchettoSingolo) {
+          const totale = infoPacchetto?.totale ?? lezioniIncluse;
+          const rimaste = totale ? Math.max(0, totale - (lezioniSvolte ?? 0)) : null;
+          if (totale && rimaste !== null && rimaste <= 2) testo = rimaste === 0
+            ? "Hai completato il pacchetto, che brava! 💪🏻 Per prenotare le prossime lezioni procedi con il saldo del nuovo pacchetto 🫶🏻"
+            : `Ti ${rimaste === 1 ? "resta una lezione" : "restano 2 lezioni"} nel pacchetto 🫶🏻 Quando riesci procedi con il saldo del rinnovo, così continuiamo senza pause ✨`;
+        }
+        if (!testo) return null;
+        return (
+          <div className="rounded-2xl px-3.5 py-3 text-sm" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
+            <p className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#3F78B3" }}>{scaduto ? "Pacchetto scaduto" : "Rinnovo del pacchetto"}</p>
+            <p className="mt-1">{testo}</p>
+            <p className="text-[11px] mt-1.5" style={{ color: "#7a8da3" }}>Quest'avviso sparisce da solo appena il nuovo pacchetto è registrato.</p>
+          </div>
+        );
+      })()}
+
       {schedaAperta && <SchedaRiassuntiva client={client} onClose={() => setSchedaAperta(false)} />}
+      {sheetLezione && <ModificaLezioneSheet client={client} evento={sheetLezione} onChiudi={() => setSheetLezione(null)} onFatto={() => { caricaProssimoEv(); }} />}
 
       {isBulb && pacchettoSingolo && (
-        <Card className="p-5">
+        <Card className="px-3.5 py-3">
+          <div onClick={() => prossimaLezione?.stato === "confermato" && setSheetLezione(prossimaLezione)}>
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Prossima lezione</span>
           {prossimaLezione === undefined ? (
             <p className="text-slate-400 text-sm mt-2">Caricamento...</p>
           ) : prossimaLezione ? (
             <p className="text-2xl font-semibold text-slate-800 mt-2">
               {prossimaLezione.data.split("-").reverse().join("/")}{prossimaLezione.ora ? ` · ${prossimaLezione.ora.slice(0, 5)}` : ""}
-              {prossimaLezione.stato === "richiesta" && <span className="block text-amber-600 text-sm font-normal mt-1">Da confermare</span>}
+              {prossimaLezione.stato === "richiesta" && <span className="block text-slate-600 text-sm font-normal mt-1">Da confermare</span>}
             </p>
           ) : (
             <p className="text-slate-500 text-sm mt-2">Nessuna lezione ancora programmata.</p>
           )}
+          {prossimaLezione?.stato === "confermato" && <p className="text-sky-600 text-[11px] mt-1">Tocca per chiedere di spostarla</p>}
+          </div>
         </Card>
       )}
 
       {isBulb && !pacchettoSingolo && (
-        <Card className="p-5">
+        <Card className="px-3.5 py-3">
           <span className="text-slate-500 text-xs uppercase tracking-wide font-medium">Il tuo pacchetto</span>
           {(() => {
             const totale = infoPacchetto?.totale ?? lezioniIncluse;
@@ -651,6 +1040,10 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                 <p className="text-3xl font-semibold text-slate-800 mt-2">
                   {fatte}{totale ? ` / ${totale}` : ""} <span className="text-lg font-normal text-slate-400">lezioni</span>
                 </p>
+                {!(totale > 0) && <p className="text-slate-500 text-sm mt-1">Non hai ancora un pacchetto attivo: puoi richiederlo qui sotto 🫶🏻</p>}
+                {totale > 0 && rimaste > 1
+                  ? <p className="text-slate-400 text-[11px] mt-2">Potrai richiedere il prossimo pacchetto quando ti resta 1 sola lezione 🫶🏻</p>
+                  : <RichiediPacchetto client={client} totaleAttuale={totale} />}
                 {totale > 0 && (
                   <>
                     <div className="h-2 bg-slate-100 rounded-full mt-3 overflow-hidden">
@@ -660,7 +1053,13 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
                       {rimaste > 0 ? `${rimaste} ${rimaste === 1 ? "lezione rimasta" : "lezioni rimaste"}` : "Pacchetto completato"}
                       {prossima ? ` · prossima il ${prossima.data.split("-").reverse().slice(0, 2).join("/")}${prossima.ora ? ` alle ${prossima.ora.slice(0, 5)}` : ""}` : ""}
                     </p>
-                    {rimaste <= 2 && <p className="text-amber-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
+                    {prossimoEv && (
+                      <button onClick={() => setSheetLezione(prossimoEv)} className="w-full mt-2 flex items-center justify-between bg-sky-50 text-sky-700 rounded-lg px-3 py-2 text-xs font-medium">
+                        <span>Prossima lezione: {prossimoEv.data.split("-").reverse().slice(0, 2).join("/")}{prossimoEv.ora ? ` · ${prossimoEv.ora.slice(0, 5)}` : ""}</span>
+                        <span>Modifica ›</span>
+                      </button>
+                    )}
+                    {rimaste <= 2 && <p className="text-slate-600 text-xs mt-1.5">{rimaste === 0 ? "Hai completato il pacchetto, che brava! 💪🏻 Scrivimi in chat quando vuoi rinnovarlo ✨" : "Il pacchetto sta per finire 🫶🏻 Scrivimi in chat per rinnovarlo e continuare senza pause ✨"}</p>}
                   </>
                 )}
               </>
@@ -670,7 +1069,7 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
       )}
 
       {client.stato_pacchetto === "in scadenza" && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 text-sm">
+        <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 text-sm">
           <AlertCircle size={18} />
           Il tuo coaching scade il {client.data_scadenza}
         </div>
@@ -680,49 +1079,60 @@ function ClientHome({ client, onAggiornato, menu = [], onApri, lezioneProssima =
         <div className="grid grid-cols-2 gap-3">
           {menu.map((m) => (
             <button key={m.key} onClick={() => onApri(m.key)}
-              className="relative bg-white border border-slate-200 shadow-sm rounded-2xl min-h-[104px] p-4 flex flex-col items-start justify-between text-left active:bg-slate-50">
+              className="relative bg-white border border-slate-200 shadow-sm rounded-xl px-3 py-3 flex items-center gap-2.5 text-left active:bg-slate-50">
               <span className="relative text-sky-500">
-                <m.icon size={28} />
-                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
+                <m.icon size={18} strokeWidth={1.6} />
+                {!!m.badge && <span className="absolute -top-1.5 -right-2.5 bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{m.badge}</span>}
               </span>
-              <span className="font-medium text-slate-800 text-sm leading-tight">{m.label}</span>
+              <span className="font-medium text-slate-800 text-[13px] leading-tight">{m.label}</span>
             </button>
           ))}
         </div>
       )}
 
-      {isBulb && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione</span>
+      <div className="grid grid-cols-2 gap-3 mt-auto pb-4">
+        {isOnline && (
+          <button onClick={() => setSchedaAperta(true)} className="bg-slate-800 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Dumbbell size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Il mio programma</span>
+          </button>
+        )}
+        {isSoloOnline ? (
+          <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="bg-sky-500 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Prenota call</span>
+          </a>
+        ) : (
+          <button onClick={() => { setInviata(false); setPrenotaAperto(true); }} className="bg-sky-500 text-white rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">{isBulb ? "Prenota lezione" : "Prenota in presenza"}</span>
+          </button>
+        )}
+        {isSoloOnline && !prenotaAperto && !inviata && (
+          <button onClick={() => setPrenotaAperto(true)} className="bg-sky-100 text-sky-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+            <Phone size={16} strokeWidth={1.75} className="flex-shrink-0" /><span className="font-medium text-sm leading-tight">Prenota lezione in presenza</span>
+          </button>
+        )}
+        <button onClick={() => setProfiloAperto((v) => !v)} className="bg-white border border-slate-200 text-slate-700 rounded-2xl px-3 py-4 flex items-center justify-center gap-2 text-center">
+          <UserIcon size={16} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" /><span className="font-medium text-sm leading-tight">Il mio profilo</span>
         </button>
-      )}
+      </div>
+      </div>
 
-      {isSoloOnline && (
-        <a href={CALENDLY_URL} target="_blank" rel="noreferrer" className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota call</span>
-        </a>
-      )}
-
-      {!isBulb && (
-        <button onClick={() => setPrenotaAperto(true)} className="w-full bg-sky-500 text-white rounded-2xl p-4 flex items-center gap-3">
-          <Phone size={22} /><span className="font-medium text-sm">Prenota lezione in presenza</span>
-        </button>
-      )}
+      {profiloAperto && <ProfiloCliente client={client} onAggiornato={onAggiornato} />}
+      <ConsensiCliente client={client} posizione="basso" forzaApri={profiloAperto} />
 
       <div ref={richiestaRef}>
         {prenotaAperto && !inviata && (
           <PrenotaLezioneForm client={client} extra={!isBulb} onFatto={() => setInviata(true)} />
         )}
         {inviata && (
-          <p className="text-emerald-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
+          <p className="text-sky-600 text-sm px-1">Richiesta inviata! 🫶🏻 Ti confermo presto orario e data ✨</p>
         )}
       </div>
 
-      <AttivaNotifichePush ruolo="cliente" clientId={client.id} />
-
-      <ProfiloCliente client={client} onAggiornato={onAggiornato} />
+      <div className="pt-6" />
 
       <CodiceAmicaCliente client={client} onAggiornato={onAggiornato} />
+
+      <AttivaNotifichePush ruolo="cliente" clientId={client.id} modalita="gestione" />
     </div>
   );
 }
@@ -742,13 +1152,99 @@ function inviaPushCarichi() { // aspetta qualche secondo dall'ultimo carico salv
   timerPushCarichi = setTimeout(() => inviaPush({ evento: "carico" }), 8000);
 }
 
+/* ------------------------------------------------------------------ */
+/* CODA OFFLINE — i carichi segnati senza rete restano sul telefono    */
+/* e partono da soli appena torna la connessione                       */
+/* ------------------------------------------------------------------ */
+const CODA_KEY = "coda_log_v1";
+const leggiCoda = () => { try { return JSON.parse(localStorage.getItem(CODA_KEY) || "[]"); } catch (e) { return []; } };
+const scriviCoda = (c) => { try { localStorage.setItem(CODA_KEY, JSON.stringify(c)); } catch (e) { /* ignora */ } try { window.dispatchEvent(new Event("coda-log")); } catch (e) { /* ignora */ } };
+const chiaveOp = (o) => `${o.clientId}|${o.exerciseId}|${o.data}|${o.n}`;
+function accodaOp(op) {
+  const c = leggiCoda(); const k = chiaveOp(op);
+  const i = c.findIndex((x) => x.k === k);
+  if (i >= 0) c[i] = { ...c[i], payload: { ...c[i].payload, ...op.payload } };
+  else c.push({ ...op, k, tentativi: 0 });
+  scriviCoda(c);
+}
+async function scriviSerieRemoto(op) {
+  const { data: ex, error: e0 } = await supabase.from("training_entries").select("id").eq("client_id", op.clientId).eq("exercise_id", op.exerciseId).eq("data", op.data).eq("numero_serie", op.n).order("id").limit(1);
+  if (e0) throw e0;
+  if (ex && ex.length) {
+    const { error } = await supabase.from("training_entries").update(op.payload).eq("id", ex[0].id);
+    if (error) throw error;
+  } else {
+    const { error } = await supabase.from("training_entries").insert({ client_id: op.clientId, exercise_id: op.exerciseId, data: op.data, numero_serie: op.n, ...op.payload });
+    if (error) throw error;
+  }
+}
+let codaInInvio = false;
+async function inviaCoda() {
+  if (codaInInvio) return;
+  const iniziale = leggiCoda();
+  if (!iniziale.length) return;
+  codaInInvio = true;
+  let inviate = 0;
+  try {
+    for (const op of iniziale) {
+      try {
+        await scriviSerieRemoto(op);
+        // toglie dalla coda solo se nel frattempo non è stato aggiornato un valore più recente
+        const ora = leggiCoda();
+        const k = chiaveOp(op);
+        const att = ora.find((x) => x.k === k);
+        if (att && JSON.stringify(att.payload) === JSON.stringify(op.payload)) scriviCoda(ora.filter((x) => x.k !== k));
+        else if (att) { /* è arrivato altro nel frattempo: resta in coda, parte al prossimo giro */ }
+        inviate += 1;
+      } catch (e) {
+        if (typeof navigator !== "undefined" && navigator.onLine === false) break; // ancora senza rete
+        const ora = leggiCoda(); const k = chiaveOp(op);
+        const att = ora.find((x) => x.k === k);
+        if (att) { att.tentativi = (att.tentativi || 0) + 1; scriviCoda(att.tentativi > 40 ? ora.filter((x) => x.k !== k) : ora); }
+        break; // rete instabile: ci riprova al prossimo giro
+      }
+    }
+  } finally { codaInInvio = false; }
+  if (inviate > 0) { try { window.dispatchEvent(new Event("coda-sync")); } catch (e) { /* ignora */ } }
+}
+// aggiunge ai carichi scaricati quelli ancora in attesa di invio
+function sovrapponiCoda(entries, clientId) {
+  const coda = leggiCoda().filter((o) => o.clientId === clientId);
+  if (!coda.length) return entries;
+  const out = entries.map((e) => ({ ...e }));
+  coda.forEach((o) => {
+    const i = out.findIndex((e) => e.exercise_id === o.exerciseId && e.data === o.data && e.numero_serie === o.n);
+    if (i >= 0) out[i] = { ...out[i], ...o.payload, inAttesa: true };
+    else out.push({ id: `loc-${o.k}`, client_id: o.clientId, exercise_id: o.exerciseId, data: o.data, numero_serie: o.n, ...o.payload, inAttesa: true });
+  });
+  return out;
+}
+function StatoSyncLog() {
+  const [n, setN] = useState(() => leggiCoda().length);
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine !== false));
+  useEffect(() => {
+    const agg = () => setN(leggiCoda().length);
+    const on = () => { setOnline(true); inviaCoda(); }; const off = () => setOnline(false);
+    window.addEventListener("coda-log", agg); window.addEventListener("coda-sync", agg);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { window.removeEventListener("coda-log", agg); window.removeEventListener("coda-sync", agg); window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  if (n === 0 && online) return null;
+  return (
+    <div className="rounded-2xl px-3 py-2 text-xs flex items-center justify-between gap-2" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
+      <span>{n > 0 ? `📴 ${n} ${n === 1 ? "serie salvata" : "serie salvate"} sul telefono: partono da sole appena c'è connessione ✨` : "📴 Sei senza connessione: puoi continuare, i carichi restano salvati sul telefono ✨"}</span>
+      {n > 0 && online && <button onClick={() => inviaCoda()} className="font-semibold underline flex-shrink-0">Riprova ora</button>}
+    </div>
+  );
+}
+
 function chiaveVapidInBytes(b64) {
   const pad = "=".repeat((4 - (b64.length % 4)) % 4);
   const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 
-function AttivaNotifichePush({ ruolo, clientId = null }) {
+function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
   const supportato = typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
   const ios = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
   const [attive, setAttive] = useState(false);
@@ -757,7 +1253,8 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
 
   const salva = async (sub) => {
     const j = sub.toJSON();
-    await supabase.from("push_subscriptions").upsert({ client_id: clientId, ruolo, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+    const { error } = await supabase.from("push_subscriptions").upsert({ client_id: clientId, ruolo, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+    if (error) throw error;
   };
 
   useEffect(() => {
@@ -799,11 +1296,14 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
     setAttive(false);
   };
 
+  if (modalita === "invito" && attive) return null;
+  if (modalita === "gestione" && !attive) return null;
   if (!supportato) {
+    if (modalita === "gestione") return null;
     if (!ios) return null;
     return (
       <Card className="p-4 space-y-1">
-        <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
+        <p className="text-sm font-medium text-slate-700"><Ic n="bell"/> Notifiche sul telefono</p>
         <p className="text-xs text-slate-500">Su iPhone: tocca il tasto Condividi di Safari, scegli "Aggiungi alla schermata Home", poi apri l'app dall'icona appena creata e torna qui per attivarle.</p>
       </Card>
     );
@@ -811,28 +1311,48 @@ function AttivaNotifichePush({ ruolo, clientId = null }) {
   if (attive) {
     return (
       <div className="flex items-center justify-between px-1">
-        <p className="text-xs text-emerald-600">🔔 Notifiche attive su questo telefono</p>
+        <p className="text-xs text-sky-600"><Ic n="bell"/> Notifiche attive su questo telefono</p>
         <button onClick={disattiva} className="text-[11px] text-slate-400 underline">Disattiva</button>
       </div>
     );
   }
   return (
     <Card className="p-4 space-y-2">
-      <p className="text-sm font-medium text-slate-700">🔔 Notifiche sul telefono</p>
-      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check e richieste di lezione." : "Ricevi un avviso per i messaggi di Morgana, i promemoria e i tuoi traguardi."}</p>
+      <p className="text-sm font-medium text-slate-700"><Ic n="bell"/> {ruolo === "coach" ? "Notifiche sul telefono" : "Non perderti nulla ✨"}</p>
+      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check, richieste di lezione, record e carichi in calo." : "Attiva le notifiche: ti avviso io quando ti scrivo, quando fai un record e prima delle tue lezioni 🫶🏻"}</p>
       <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
     </Card>
   );
 }
 
+// Riduce la foto (max 1600 px, JPEG) prima del caricamento: molto più leggera e veloce da inviare, anche con poca rete
+async function riduciFoto(file) {
+  try {
+    if (!file || !file.type || !file.type.startsWith("image/") || file.size < 400 * 1024) return file;
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.85));
+    return blob && blob.size < file.size ? blob : file;
+  } catch (e) { return file; }
+}
 async function caricaFotoStorage(file, clientId, dataCheck, slot) {
   if (!file) return null;
-  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const pronta = await riduciFoto(file);
+  const comp = pronta !== file;
+  const ext = comp ? "jpg" : (file.name.split(".").pop() || "jpg").toLowerCase();
   const path = `${clientId}/${dataCheck}-${slot}-${Date.now()}.${ext}`;
-  const { error } = await supabase.storage.from("progress-photos").upload(path, file, { upsert: true });
-  if (error) throw error;
-  return path;
+  let ultimoErr = null;
+  for (let tentativo = 0; tentativo < 3; tentativo++) {
+    const { error } = await supabase.storage.from("progress-photos").upload(path, pronta, { upsert: false, contentType: comp ? "image/jpeg" : (file.type || undefined) });
+    if (!error || /already exists|Duplicate/i.test(error.message || "")) return path;
+    ultimoErr = error;
+    await new Promise((r) => setTimeout(r, 800 * (tentativo + 1)));
+  }
+  throw ultimoErr;
 }
 
 function FotoInputs({ files, setFiles }) {
@@ -860,6 +1380,12 @@ function ClientCheckin({ client, onInviato }) {
     fase_mestruale: "",
   });
   const [notaFinale, setNotaFinale] = useState("");
+  useEffect(() => {
+    if (client.sesso === "M") return;
+    let vivo = true;
+    fasePerData(client.id, new Date()).then((f) => { if (vivo && f) setForm((p) => (p.fase_mestruale ? p : { ...p, fase_mestruale: f })); });
+    return () => { vivo = false; };
+  }, [client.id]);
   const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [inviando, setInviando] = useState(false);
   const [inviato, setInviato] = useState(false);
@@ -936,7 +1462,7 @@ function ClientCheckin({ client, onInviato }) {
   if (inviato) {
     return (
       <div className="px-5 pt-16 flex flex-col items-center text-center">
-        <CheckCircle2 className="text-emerald-500 mb-4" size={48} />
+        <CheckCircle2 className="text-sky-500 mb-4" size={48} />
         <h2 className="text-lg font-semibold text-slate-800">Check inviato, grazie! 🫶🏻</h2>
         <p className="text-slate-500 text-sm mt-2">Guardo i tuoi dati con calma e ti scrivo presto ✨💪🏻</p>
       </div>
@@ -991,7 +1517,7 @@ function ClientCheckin({ client, onInviato }) {
         {slider("Aderenza all'allenamento", "aderenza_allenamento")}
       </Card>
       <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi <span className="text-rose-400 normal-case font-normal">(obbligatorie)</span></p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Foto progressi <span className="text-slate-600 normal-case font-normal">(obbligatorie)</span></p>
         <FotoInputs files={files} setFiles={setFiles} />
       </Card>
       <Card className="p-4 space-y-2">
@@ -1000,7 +1526,7 @@ function ClientCheckin({ client, onInviato }) {
           onChange={(e) => setNotaFinale(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300" rows={3} />
       </Card>
-      {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+      {errore && <p className="text-slate-800 text-sm">{errore}</p>}
       <button onClick={invia} disabled={inviando} className="w-full bg-slate-800 text-white font-medium rounded-xl py-3">
         {inviando ? "Invio in corso..." : "Invia check"}
       </button>
@@ -1238,10 +1764,21 @@ function analizzaAndamento(ordinati) {
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
-const LABEL_OBIETTIVO = { definizione: "Definizione", mantenimento: "Mantenimento", massa: "Massa", reverse: "Reverse" };
-function labelObiettivo(o) { return LABEL_OBIETTIVO[o] || o; }
+// Obiettivi della cliente: Dimagrimento, Aumento massa muscolare, Ricomposizione corporea, Programmazione, Forza.
+// I vecchi valori (definizione, massa, mantenimento, reverse) restano riconosciuti e vengono tradotti nei nuovi.
+const OBIETTIVI = [
+  { v: "dimagrimento", label: "Dimagrimento" },
+  { v: "aumento_massa", label: "Aumento massa muscolare" },
+  { v: "ricomposizione", label: "Ricomposizione corporea" },
+  { v: "programmazione", label: "Programmazione" },
+  { v: "forza", label: "Forza" },
+];
+const OBIETTIVO_LEGACY = { definizione: "dimagrimento", massa: "aumento_massa", mantenimento: "ricomposizione", reverse: "ricomposizione" };
+function normalizzaObiettivo(o) { return OBIETTIVO_LEGACY[o] || o || null; }
+function labelObiettivo(o) { const n = normalizzaObiettivo(o); return OBIETTIVI.find((x) => x.v === n)?.label || o || ""; }
 
-function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabel = "nelle ultime settimane") {
+function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivoGrezzo, finestraLabel = "nelle ultime settimane") {
+  const obiettivo = normalizzaObiettivo(obiettivoGrezzo);
   const frasi = [];
   if (tPeso.oscillante) {
     frasi.push(`Il peso ha avuto alti e bassi ${finestraLabel} — è normale, dipende da ritenzione idrica, ciclo, stress o digestione — ma guardando l'insieme dei dati:`);
@@ -1249,23 +1786,6 @@ function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabe
   const pesoTxt = tPeso.direzione === "calo" ? "il peso è sceso" : tPeso.direzione === "aumento" ? "il peso è salito" : tPeso.direzione === "stabile" ? "il peso è rimasto stabile" : null;
   const vitaTxt = tVita.direzione === "calo" ? "la circonferenza vita si è ridotta" : tVita.direzione === "aumento" ? "la circonferenza vita è aumentata" : tVita.direzione === "stabile" ? "la circonferenza vita è rimasta stabile" : null;
   const muscTxt = tMuscolo.direzione === "calo" ? "le circonferenze di braccio/coscia sono leggermente calate" : tMuscolo.direzione === "aumento" ? "le circonferenze di braccio/coscia sono aumentate" : tMuscolo.direzione === "stabile" ? "le circonferenze di braccio/coscia si sono mantenute" : null;
-
-  if (obiettivo === "reverse") {
-    // In reverse diet l'obiettivo è far risalire le calorie in modo controllato dopo una definizione
-    // (o una gara): un aumento graduale di peso/vita qui non è un problema, è il segnale che il
-    // metabolismo si sta riattivando — il messaggio va quindi capovolto rispetto a una definizione.
-    if (tPeso.direzione === "aumento" && (tVita.direzione === "aumento" || tVita.direzione === "stabile")) {
-      frasi.push(`${cap(pesoTxt)}${tVita.direzione === "aumento" ? " e " + vitaTxt : ""}: in una fase di reverse è proprio l'andamento atteso. Le calorie stanno risalendo e il corpo si sta riequilibrando dopo la definizione — non è "ripreso il grasso perso", è il metabolismo che si riattiva.`);
-    } else if (tPeso.direzione === "stabile") {
-      frasi.push("Il peso è rimasto stabile in questa fase di reverse: è normale, può volerci qualche settimana in più prima che si veda la risalita. L'importante è seguire l'aumento calorico programmato con la coach.");
-    } else if (tPeso.direzione === "calo") {
-      frasi.push("Il peso è ancora in calo nonostante la fase di reverse: capita nelle prime settimane, ma se continua parlane con la coach — potrebbe servire un aggiustamento delle calorie.");
-    } else {
-      frasi.push("Servono ancora un paio di check in questa fase di reverse per vedere un trend chiaro.");
-    }
-    if (tMuscolo.direzione === "aumento") frasi.push("Le circonferenze muscolari che crescono sono un ottimo segnale in questa fase.");
-    return frasi.join(" ");
-  }
 
   if (tVita.direzione === "calo" && (tMuscolo.direzione === "stabile" || tMuscolo.direzione === "aumento")) {
     frasi.push(`${cap(vitaTxt)}${muscTxt ? " mentre " + muscTxt : ""}: è il segno di una ricomposizione corporea in corso — il grasso cala e la massa muscolare tiene o cresce, anche se ${pesoTxt || "il peso da solo non racconta tutta la storia"}. La definizione che si vede nelle foto è proprio questo: meno grasso attorno al muscolo che c'è già.`);
@@ -1283,13 +1803,18 @@ function generaNotaAndamento({ tPeso, tVita, tMuscolo }, obiettivo, finestraLabe
     else frasi.push("Servono ancora un paio di check per vedere un trend chiaro.");
   }
 
-  if (obiettivo === "definizione") {
-    if (tVita.direzione === "calo") frasi.push("Il trend è coerente con l'obiettivo attuale di definizione.");
-    else if (tVita.direzione === "aumento") frasi.push("Rispetto all'obiettivo di definizione, la vita in aumento merita attenzione: parlane con la coach per eventuali aggiustamenti.");
-  } else if (obiettivo === "massa") {
-    if (tMuscolo.direzione === "aumento" || tPeso.direzione === "aumento") frasi.push("Il trend è coerente con l'obiettivo attuale di aumento massa.");
-  } else if (obiettivo === "mantenimento") {
-    if (tPeso.direzione === "stabile" && tVita.direzione === "stabile") frasi.push("In linea con l'obiettivo attuale di mantenimento.");
+  if (obiettivo === "dimagrimento") {
+    if (tVita.direzione === "calo") frasi.push("Il trend è coerente con l'obiettivo attuale di dimagrimento.");
+    else if (tVita.direzione === "aumento") frasi.push("Rispetto all'obiettivo di dimagrimento, la vita in aumento merita attenzione: parlane con la coach per eventuali aggiustamenti.");
+  } else if (obiettivo === "aumento_massa") {
+    if (tMuscolo.direzione === "aumento" || tPeso.direzione === "aumento") frasi.push("Il trend è coerente con l'obiettivo attuale di aumento della massa muscolare.");
+  } else if (obiettivo === "ricomposizione") {
+    if (tVita.direzione === "calo" && tMuscolo.direzione !== "calo") frasi.push("Il trend è coerente con l'obiettivo di ricomposizione corporea: riduzione della massa grassa con massa muscolare preservata.");
+    else if (tPeso.direzione === "stabile" && tVita.direzione === "stabile") frasi.push("Nella ricomposizione il peso può restare stabile anche con cambiamenti della composizione corporea: valuta anche circonferenze e foto.");
+  } else if (obiettivo === "forza") {
+    frasi.push("Con l'obiettivo di forza, il dato più importante è la progressione dei carichi nei fondamentali: il peso corporeo e le misure sono solo un contesto.");
+  } else if (obiettivo === "programmazione") {
+    frasi.push("In una fase di programmazione conta soprattutto la costanza nell'applicazione del programma: le misure vanno lette con calma, su più check.");
   }
 
   return frasi.join(" ");
@@ -1396,22 +1921,392 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
           <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => `${v}%`} width={40} />
           <Tooltip formatter={(v) => (v == null ? "—" : `${v}%`)} />
           <Line type="monotone" dataKey="pesoPct" name="Peso" stroke="#0ea5e9" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-          <Line type="monotone" dataKey="vitaPct" name="Vita" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
-          <Line type="monotone" dataKey="muscoloPct" name="Braccio/coscia" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+          <Line type="monotone" dataKey="vitaPct" name="Vita" stroke="#94a3b8" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
+          <Line type="monotone" dataKey="muscoloPct" name="Braccio/coscia" stroke="#27466D" strokeWidth={2.5} dot={{ r: 3 }} connectNulls />
         </LineChart>
       </ResponsiveContainer>
       <div className="flex flex-wrap gap-3 text-[11px] text-slate-500">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Peso</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Vita</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Braccio/coscia</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Vita</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Braccio/coscia</span>
       </div>
       <p className="text-slate-400 text-[11px]">Variazione % rispetto al primo valore disponibile di ogni misura{sottotitolo && !vediTutto ? " in questa finestra" : ""}, così puoi confrontare peso e circonferenze sullo stesso grafico.</p>
     </Card>
   );
 }
 
-function ProgressiCarichi({ clientId }) {
+async function salvaMotivoRiduzione(clientId, r, codici) {
+  const { data: righe } = await supabase.from("training_entries").select("id, numero_serie").eq("client_id", clientId).eq("exercise_id", r.exId).eq("data", r.data).order("numero_serie");
+  if (!righe || !righe.length) return false;
+  const prima = righe.find((x) => x.numero_serie === 1) || righe[0];
+  await supabase.from("training_entries").update({ motivo_calo: codici.join(",") || null }).eq("id", prima.id);
+  const altre = righe.filter((x) => x.id !== prima.id);
+  if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
+  return true;
+}
+
+// Elenco apribile dei carichi scesi: la coach vede il dettaglio e può indicare lei il motivo
+function RiduzioniCarico({ lista, clientId, onRicarica }) {
+  const [aperto, setAperto] = useState(false);
+  const [solo, setSolo] = useState("senza"); // "senza" | "tutte"
+  const [occupato, setOccupato] = useState(null);
+  const fmt = (n) => String(n).replace(".", ",");
+  const dd = (d) => d.split("-").reverse().slice(0, 2).join("/");
+  const visibili = (solo === "senza" ? lista.filter((r) => !r.motivi.length && !r.inScarico) : lista);
+  const scegli = async (r, codice) => {
+    const k = `${r.exId}|${r.data}`;
+    setOccupato(k);
+    const nuovi = r.motivi.includes(codice) ? r.motivi.filter((x) => x !== codice) : [...r.motivi, codice];
+    try { await salvaMotivoRiduzione(clientId, r, nuovi); onRicarica(); } catch (e) { /* ignora */ }
+    setOccupato(null);
+  };
+  return (
+    <div className="pt-1">
+      <button onClick={() => setAperto(!aperto)} className="text-xs font-semibold underline" style={{ color: "#3F78B3" }}>{aperto ? "Chiudi l'elenco dei carichi scesi" : `Apri i ${lista.length} carichi scesi e indica il motivo`}</button>
+      {aperto && (
+        <div className="mt-2 space-y-2">
+          <div className="flex gap-1.5">
+            {[["senza", `Senza motivo (${lista.filter((r) => !r.motivi.length && !r.inScarico).length})`], ["tutte", `Tutte (${lista.length})`]].map(([k, l]) => (
+              <button key={k} onClick={() => setSolo(k)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: solo === k ? "#27466D" : "#fff", color: solo === k ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
+            ))}
+          </div>
+          {visibili.length === 0 && <p className="text-xs text-slate-500">Tutte le riduzioni hanno già un motivo ✨</p>}
+          {visibili.map((r) => (
+            <div key={`${r.exId}|${r.data}`} className="rounded-xl p-2.5" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7", opacity: occupato === `${r.exId}|${r.data}` ? 0.5 : 1 }}>
+              <p className="text-sm font-semibold" style={{ color: "#27466D" }}>{r.nome} <span className="text-[11px] font-medium" style={{ color: "#7a8da3" }}>· {r.gr === "upper" ? "Upper" : "Lower"}</span></p>
+              <p className="text-xs text-slate-600">{fmt(r.prev)} kg ({dd(r.prevData)}) → <span className="font-semibold">{fmt(r.cur)} kg</span> ({dd(r.data)}) · {fmt(Math.round((r.cur - r.prev) * 10) / 10)} kg</p>
+              {r.inScarico ? (
+                <p className="text-[11px] mt-1" style={{ color: "#3F78B3" }}>Scarico programmato: calo voluto ✨</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {MOTIVI_CALO.filter((m) => m[0] !== "scarico").map(([k, l]) => {
+                    const on = r.motivi.includes(k);
+                    return <button key={k} onClick={() => scegli(r, k)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrendCarichi({ trend, isAdmin, clientId, onRicarica }) {
+  const { punti, motiviTot, caliTot, senzaTot } = trend;
+  const haScarico = (trend.bande || []).length > 0;
+  const ultimo = (k) => { for (let i = punti.length - 1; i >= 0; i--) if (punti[i][k] != null) return punti[i][k]; return null; };
+  const pct = (v) => (v == null ? null : Math.round((v - 100) * 10) / 10);
+  const fmtP = (v) => (v == null ? "—" : `${v > 0 ? "+" : ""}${String(v).replace(".", ",")}%`);
+  const pu = pct(ultimo("upper")), pl = pct(ultimo("lower"));
+  const motiviTxt = Object.entries(motiviTot).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${etichettaMotivo(k)} ×${n}`).join(" · ");
+  const conMotivo = caliTot - senzaTot;
+  const Punto = (colore) => (props) => {
+    const { cx, cy, payload, dataKey } = props;
+    if (cx == null || cy == null || payload[dataKey] == null) return null;
+    const cali = payload[dataKey + "Cali"] || 0;
+    return cali > 0
+      ? <g key={cx + "-" + dataKey}><circle cx={cx} cy={cy} r={7} fill="#fff" stroke={colore} strokeWidth={2} /><circle cx={cx} cy={cy} r={2.5} fill={colore} /></g>
+      : <circle key={cx + "-" + dataKey} cx={cx} cy={cy} r={3.5} fill={colore} />;
+  };
+  const Tip = ({ active, payload, label }) => {
+    if (!active || !payload || !payload.length) return null;
+    const p = payload[0].payload;
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs shadow">
+        <p className="font-semibold text-slate-700 mb-1">Settimana del {label}</p>
+        {[["upper", "Upper", "#27466D"], ["lower", "Lower", "#4F8FD0"]].map(([k, l, c]) => p[k] != null && (
+          <div key={k} className="mb-0.5">
+            <p style={{ color: c }}>{l}: {String(p[k]).replace(".", ",")}</p>
+            {p[k + "Cali"] > 0 && <p className="text-slate-500">carichi ridotti: {p[k + "Cali"]}{Object.keys(p[k + "Motivi"] || {}).length ? " · " + Object.keys(p[k + "Motivi"]).map(etichettaMotivo).join(", ") : ""}{p[k + "Senza"] > 0 ? ` · ${p[k + "Senza"]} senza motivo indicato` : ""}</p>}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div className="space-y-2">
+      <div className="px-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isAdmin ? "Trend dei carichi · upper e lower" : "Come vanno i tuoi carichi"}</p>
+        <p className="text-slate-400 text-xs mt-0.5">{isAdmin ? "Indice globale di forza dall'inizio del percorso (base 100): variazione settimanale del volume-carico (kg × ripetizioni × serie) di tutti gli esercizi upper e lower, ponderata per il volume di ciascun esercizio. I cerchi vuoti indicano settimane con carichi ridotti." : "Parte da 100 all'inizio del percorso e sale quando aumentano carichi, ripetizioni e serie, su tutti gli esercizi upper e lower. I cerchi vuoti sono settimane in cui qualche carico è sceso."}</p>
+      </div>
+      <Card className="p-3">
+        <ResponsiveContainer width="100%" height={210}>
+          <LineChart data={punti} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis dataKey="sett" tick={{ fontSize: 11, fill: "#64748b" }} />
+            <YAxis tick={{ fontSize: 11, fill: "#64748b" }} domain={["auto", "auto"]} />
+            <Tooltip content={<Tip />} />
+            {(trend.cambi || []).map((c, i) => <ReferenceLine key={"cp" + i} x={c.x} stroke="#3F78B3" strokeDasharray="4 3" label={{ value: "altra palestra", fontSize: 10, fill: "#3F78B3", position: "insideTopRight" }} />)}
+            {(trend.bande || []).map((b, i) => <ReferenceArea key={i} x1={b.x1} x2={b.x2} fill="#C9E0F7" fillOpacity={0.55} stroke="none" ifOverflow="visible" />)}
+            <Line type="monotone" dataKey="upper" name="Upper" stroke="#27466D" strokeWidth={2.5} dot={Punto("#27466D")} activeDot={{ r: 6 }} connectNulls />
+            <Line type="monotone" dataKey="lower" name="Lower" stroke="#4F8FD0" strokeWidth={2.5} dot={Punto("#4F8FD0")} activeDot={{ r: 6 }} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+        <div className="flex gap-4 justify-center text-xs mt-1">
+          <span className="flex items-center gap-1.5" style={{ color: "#27466D" }}><i className="w-3 h-1 rounded-full inline-block" style={{ background: "#27466D" }} /> Upper {fmtP(pu)}</span>
+          <span className="flex items-center gap-1.5" style={{ color: "#4F8FD0" }}><i className="w-3 h-1 rounded-full inline-block" style={{ background: "#4F8FD0" }} /> Lower {fmtP(pl)}</span>
+        </div>
+        {haScarico && <p className="text-xs text-center mt-1" style={{ color: "#3F78B3" }}>La fascia azzurra indica una settimana di scarico programmato: il calo è voluto, non una regressione ✨</p>}
+        {(trend.cambi || []).length > 0 && (
+          <p className="text-xs mt-1 text-center" style={{ color: "#3F78B3" }}>{isAdmin ? "Le linee tratteggiate indicano allenamenti svolti in un'altra palestra o con attrezzi diversi: quelle sedute sono escluse dal confronto dei carichi, quindi macchinari e tarature differenti non vengono letti come regressione di forza." : "Le linee tratteggiate sono allenamenti fatti in un'altra palestra: non contano nel confronto dei carichi, non è un passo indietro 🫶🏻"}</p>
+        )}
+        {caliTot > 0 && (
+          <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-600 space-y-0.5">
+            <p>{isAdmin ? `Riduzioni di carico: ${caliTot} (${conMotivo} con motivo dichiarato${senzaTot ? `, ${senzaTot} senza` : ""}).` : `Qualche carico è sceso (${caliTot} volte): capita, fa parte del percorso 🫶🏻`}</p>
+            {motiviTxt && <p className="text-slate-500">Motivi indicati: {motiviTxt}</p>}
+            {isAdmin
+              ? (senzaTot === 0 ? <p className="text-slate-500">Tutte le riduzioni hanno una causa dichiarata: l'andamento va letto come variazione contestuale, non come regressione.</p> : <p className="text-slate-500">{senzaTot} riduzioni senza causa indicata: da chiarire con la cliente prima di interpretarle.</p>)
+              : <p className="text-slate-500">Indicare il motivo aiuta Morgana a leggere meglio i tuoi progressi ✨</p>}
+            {isAdmin && clientId && trend.riduzioni && trend.riduzioni.length > 0 && <RiduzioniCarico lista={trend.riduzioni} clientId={clientId} onRicarica={onRicarica || (() => {})} />}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function ScarichiCoach({ clientId, scarichi, onChange }) {
+  const [aperto, setAperto] = useState(false);
+  const [dal, setDal] = useState("");
+  const [al, setAl] = useState("");
+  const [nota, setNota] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fmtD = (d) => d.split("-").reverse().join("/");
+  const aggiungi = async () => {
+    if (!dal || !al || al < dal) return;
+    setBusy(true);
+    await supabase.from("scarichi").insert({ client_id: clientId, dal, al, nota: nota.trim() || null });
+    setDal(""); setAl(""); setNota(""); setBusy(false); onChange();
+  };
+  const togli = async (id) => { await supabase.from("scarichi").delete().eq("id", id); onChange(); };
+  return (
+    <Card className="p-3">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Scarico programmato{scarichi.length ? ` · ${scarichi.length}` : ""}</span>
+        <span className="text-xs" style={{ color: "#3F78B3" }}>{aperto ? "chiudi" : "segna periodo"}</span>
+      </button>
+      {aperto && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-slate-500">In questi giorni i carichi più bassi vengono letti come scarico voluto: niente allarmi, nessun "motivo mancante", e alla ripresa il sistema riparte dai carichi di prima.</p>
+          {scarichi.map((x) => (
+            <div key={x.id} className="flex items-center justify-between text-sm text-slate-700 rounded-xl px-3 py-2" style={{ background: "#E1EEFB" }}>
+              <span>{fmtD(x.dal)} → {fmtD(x.al)}{x.nota ? ` · ${x.nota}` : ""}</span>
+              <button onClick={() => togli(x.id)} className="text-xs text-slate-500 underline">togli</button>
+            </div>
+          ))}
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-xs text-slate-500">Dal<input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
+            <label className="text-xs text-slate-500">Al<input type="date" value={al} onChange={(e) => setAl(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
+          </div>
+          <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nota (facoltativa), es. deload −30% volume" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
+          <button onClick={aggiungi} disabled={busy || !dal || !al || al < dal} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Aggiungi scarico</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const TIPI_CAMBIO = ["Altra palestra", "Attrezzi diversi", "Allenamento a casa", "Viaggio"];
+function CambiPalestraCoach({ clientId, cambi, onChange }) {
+  const [aperto, setAperto] = useState(false);
+  const [dal, setDal] = useState("");
+  const [tipo, setTipo] = useState(TIPI_CAMBIO[0]);
+  const [nota, setNota] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fmtD = (d) => d.split("-").reverse().join("/");
+  const aggiungi = async () => {
+    if (!dal) return;
+    setBusy(true);
+    await supabase.from("cambi_palestra").insert({ client_id: clientId, dal, tipo, nota: nota.trim() || null });
+    setDal(""); setNota(""); setBusy(false); onChange();
+  };
+  const togli = async (id) => { await supabase.from("cambi_palestra").delete().eq("id", id); onChange(); };
+  return (
+    <Card className="p-3">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Allenamenti in altra palestra o con attrezzi diversi{cambi.length ? ` · ${cambi.length}` : ""}</span>
+        <span className="text-xs" style={{ color: "#3F78B3" }}>{aperto ? "chiudi" : "segna allenamento"}</span>
+      </button>
+      {aperto && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs text-slate-500">Segna i singoli allenamenti svolti altrove (anche la cliente può farlo dal suo diario). Quelle sedute non entrano nel confronto dei carichi: niente regressioni per macchinari o tarature diversi.</p>
+          {cambi.map((x) => (
+            <div key={x.id} className="flex items-center justify-between text-sm text-slate-700 rounded-xl px-3 py-2" style={{ background: "#E1EEFB" }}>
+              <span>{fmtD(x.dal)} · {x.tipo}{x.nota ? ` · ${x.nota}` : ""}</span>
+              <button onClick={() => togli(x.id)} className="text-xs text-slate-500 underline">togli</button>
+            </div>
+          ))}
+          <label className="text-xs text-slate-500 block">Giorno dell'allenamento<input type="date" value={dal} onChange={(e) => setDal(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800" /></label>
+          <div className="flex flex-wrap gap-1.5">{TIPI_CAMBIO.map((t) => <button key={t} onClick={() => setTipo(t)} className="px-3 py-1.5 rounded-full text-xs font-medium" style={tipo === t ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>)}</div>
+          <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nota (facoltativa), es. macchinari diversi" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
+          <button onClick={aggiungi} disabled={busy || !dal} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Salva allenamento</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Scarico programmato segnabile ovunque (allenamento, scheda gruppo): carica da solo i periodi della cliente
+function ScarichiCliente({ clientId }) {
+  const [lista, setLista] = useState([]);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    (async () => { try { const { data } = await supabase.from("scarichi").select("id, dal, al, nota").eq("client_id", clientId).order("dal"); if (vivo) setLista(data || []); } catch (e) { /* ignora */ } })();
+    return () => { vivo = false; };
+  }, [clientId, n]);
+  return <ScarichiCoach clientId={clientId} scarichi={lista} onChange={() => setN((x) => x + 1)} />;
+}
+
+/* ------------------------------------------------------------------ */
+/* ADERENZA — allenamenti fatti e saltati, settimana per settimana     */
+/* ------------------------------------------------------------------ */
+function AderenzaAllenamenti({ clientId }) {
+  const [dati, setDati] = useState(null);
+  const [tutte, setTutte] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data: giorni } = await supabase.from("training_days").select("id, nome, created_at, scheda_archiviata").eq("client_id", clientId);
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, ripetizioni, completata, training_exercises(training_day_id)").eq("client_id", clientId).order("data").order("id"));
+        if (!vivo) return;
+        const lun = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
+        const oggi = formatDataLocale(new Date());
+        const giornoInfo = {}; (giorni || []).forEach((g) => { giornoInfo[g.id] = g; });
+        // sessioni svolte: coppie (data, giorno di allenamento) con almeno una serie segnata
+        const sess = new Set();
+        const primaData = {}; const ultimaData = {};
+        righe.forEach((r) => {
+          const gid = r.training_exercises?.training_day_id;
+          if (!gid || !giornoInfo[gid] || !r.data) return;
+          if (!(r.kg != null || r.completata || r.ripetizioni)) return;
+          sess.add(`${r.data}|${gid}`);
+          const lab = giornoInfo[gid].scheda_archiviata || "";
+          if (!primaData[lab] || r.data < primaData[lab]) primaData[lab] = r.data;
+          if (!ultimaData[lab] || r.data > ultimaData[lab]) ultimaData[lab] = r.data;
+        });
+        // programmi (attuale + archiviati): giorni a settimana e periodo
+        const prog = {};
+        (giorni || []).filter((g) => g.nome !== "Circuito").forEach((g) => {
+          const lab = g.scheda_archiviata || "";
+          const p = (prog[lab] = prog[lab] || { lab, giorni: 0, inizio: null });
+          p.giorni += 1;
+          const c = g.created_at ? g.created_at.slice(0, 10) : null;
+          if (c && (!p.inizio || c < p.inizio)) p.inizio = c;
+        });
+        const lista = Object.values(prog).map((p) => ({ ...p, inizio: [p.inizio, primaData[p.lab]].filter(Boolean).sort()[0] || null })).filter((p) => p.inizio).sort((a, b) => a.inizio.localeCompare(b.inizio));
+        if (!lista.length) { setDati({ vuoto: true }); return; }
+        lista.forEach((p, i) => {
+          const prossimo = lista[i + 1];
+          p.fine = prossimo ? prossimo.inizio : (p.lab === "" ? oggi : (ultimaData[p.lab] || p.inizio));
+        });
+        const weeks = [];
+        for (let w = lun(lista[0].inizio); w <= lun(oggi); w = addGiorni(w, 7)) weeks.push(w);
+        const corrente = lun(oggi);
+        const sett = weeks.map((w) => {
+          const fineSett = addGiorni(w, 6);
+          const cov = lista.filter((p) => p.inizio <= fineSett && p.fine >= w).sort((a, b) => b.inizio.localeCompare(a.inizio))[0];
+          const fatti = [...sess].filter((k) => { const d = k.split("|")[0]; return d >= w && d <= fineSett; }).length;
+          const previsti = cov ? cov.giorni : 0;
+          return { w, label: w.split("-").reverse().slice(0, 2).join("/"), previsti, fatti, corrente: w === corrente, prog: cov ? cov.lab : null };
+        }).filter((x) => x.previsti > 0 || x.fatti > 0);
+        setDati({ sett, lista });
+      } catch (e) { if (vivo) setDati({ vuoto: true }); }
+    })();
+    return () => { vivo = false; };
+  }, [clientId]);
+  if (!dati || dati.vuoto) return dati?.vuoto ? null : null;
+  const concluse = dati.sett.filter((x) => !x.corrente);
+  const prev = concluse.reduce((t, x) => t + x.previsti, 0);
+  const fatti = concluse.reduce((t, x) => t + Math.min(x.fatti, x.previsti), 0);
+  const extra = concluse.reduce((t, x) => t + Math.max(0, x.fatti - x.previsti), 0);
+  const saltati = Math.max(0, prev - fatti);
+  const perc = prev ? Math.round((fatti / prev) * 100) : null;
+  const complete = concluse.filter((x) => x.previsti > 0 && x.fatti >= x.previsti).length;
+  const zero = concluse.filter((x) => x.previsti > 0 && x.fatti === 0).length;
+  const ultime4 = concluse.slice(-4);
+  const p4 = ultime4.reduce((t, x) => t + x.previsti, 0);
+  const perc4 = p4 ? Math.round((ultime4.reduce((t, x) => t + Math.min(x.fatti, x.previsti), 0) / p4) * 100) : null;
+  const grafico = dati.sett.map((x) => ({ sett: x.label, Fatti: Math.min(x.fatti, x.previsti || x.fatti), Saltati: x.corrente ? 0 : Math.max(0, x.previsti - x.fatti) }));
+  const perProg = dati.lista.map((p) => {
+    const ss = concluse.filter((x) => x.prog === p.lab);
+    const pv = ss.reduce((t, x) => t + x.previsti, 0), fa = ss.reduce((t, x) => t + Math.min(x.fatti, x.previsti), 0);
+    return { lab: p.lab, nome: p.lab ? `Programma ${p.lab}` : "Programma attuale", sett: ss.length, pv, fa, perc: pv ? Math.round((fa / pv) * 100) : null, inizio: p.inizio };
+  }).filter((p) => p.sett > 0);
+  const mostrate = tutte ? dati.sett : dati.sett.slice(-12);
+  return (
+    <div className="space-y-2">
+      <div className="px-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Aderenza all'allenamento · dall'inizio del programma</p>
+        <p className="text-slate-400 text-xs mt-0.5">Sessioni svolte rispetto a quelle previste dal programma, settimana per settimana (la settimana in corso non conta come saltata).</p>
+      </div>
+      <Card className="p-3 space-y-3">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-slate-50 rounded-xl py-2"><p className="text-lg font-semibold text-slate-800">{perc == null ? "—" : `${perc}%`}</p><p className="text-[11px] text-slate-500">aderenza totale</p></div>
+          <div className="bg-slate-50 rounded-xl py-2"><p className="text-lg font-semibold text-slate-800">{fatti}<span className="text-slate-400 text-sm"> / {prev}</span></p><p className="text-[11px] text-slate-500">sessioni fatte</p></div>
+          <div className="bg-slate-50 rounded-xl py-2"><p className="text-lg font-semibold text-slate-800">{saltati}</p><p className="text-[11px] text-slate-500">saltate</p></div>
+        </div>
+        <p className="text-xs text-slate-600">{complete} settimane complete su {concluse.length}{zero ? ` · ${zero} senza nessun allenamento` : ""}{perc4 != null ? ` · ultime 4 settimane: ${perc4}%` : ""}{extra ? ` · ${extra} sessioni extra` : ""}</p>
+        <div style={{ width: "100%", height: 170 }}>
+          <ResponsiveContainer>
+            <BarChart data={grafico} margin={{ top: 5, right: 8, left: -22, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+              <XAxis dataKey="sett" tick={{ fontSize: 10, fill: "#64748b" }} interval="preserveStartEnd" />
+              <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#64748b" }} />
+              <Tooltip />
+              <Bar dataKey="Fatti" stackId="a" fill="#27466D" />
+              <Bar dataKey="Saltati" stackId="a" fill="#C9E0F7" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="flex gap-4 justify-center text-xs">
+          <span className="flex items-center gap-1.5 text-slate-600"><i className="w-3 h-3 rounded inline-block" style={{ background: "#27466D" }} /> Fatti</span>
+          <span className="flex items-center gap-1.5 text-slate-600"><i className="w-3 h-3 rounded inline-block" style={{ background: "#C9E0F7" }} /> Saltati</span>
+        </div>
+        {perProg.length > 1 && (
+          <div className="pt-1 border-t border-slate-100">
+            {perProg.map((p) => <p key={p.lab || "att"} className="text-xs text-slate-600 py-0.5">{p.nome}: <span className="font-medium text-slate-800">{p.fa} su {p.pv}</span> sessioni{p.perc != null ? ` (${p.perc}%)` : ""} · {p.sett} settimane</p>)}
+          </div>
+        )}
+        <div className="pt-1 border-t border-slate-100">
+          <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium pb-1">Storico settimanale</p>
+          <div className="flex flex-wrap gap-1.5">
+            {mostrate.map((x) => {
+              const piena = x.previsti > 0 && x.fatti >= x.previsti;
+              const bg = x.corrente ? "#fff" : piena ? "#27466D" : x.fatti > 0 ? "#C9E0F7" : "#F1F5F9";
+              const col = x.corrente ? "#3F78B3" : piena ? "#fff" : x.fatti > 0 ? "#27466D" : "#94a3b8";
+              return <span key={x.w} className="rounded-lg px-2 py-1 text-[11px] font-medium" style={{ background: bg, color: col, border: x.corrente ? "1.5px dashed #C9E0F7" : "none" }} title={x.corrente ? "settimana in corso" : undefined}>{x.label} · {x.fatti}/{x.previsti}</span>;
+            })}
+          </div>
+          {dati.sett.length > 12 && <button onClick={() => setTutte(!tutte)} className="text-xs underline mt-2" style={{ color: "#3F78B3" }}>{tutte ? "Mostra solo le ultime 12" : `Mostra tutte le ${dati.sett.length} settimane`}</button>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// Per ogni sessione di un esercizio: serie (kg×rip), volume-carico e massimale stimato (formula di Epley, solo serie fino a 12 rip)
+function costruisciSessioni(g) {
+  const date = Object.keys(g.sets).sort();
+  const out = date.map((d) => {
+    const sets = g.sets[d];
+    const vol = sets.reduce((a, x) => a + (x.rip > 0 ? x.kg * x.rip : 0), 0);
+    const stime = sets.filter((x) => x.rip > 0 && x.rip <= 12).map((x) => (x.rip === 1 ? x.kg : x.kg * (1 + x.rip / 30)));
+    return { data: d, sets, vol: vol > 0 ? Math.round(vol) : null, e1rm: stime.length ? Math.round(Math.max(...stime) * 10) / 10 : null };
+  });
+  out.forEach((x, i) => { const pv = i > 0 ? out[i - 1].vol : null; x.dVol = pv && x.vol ? Math.round((x.vol / pv - 1) * 100) : null; });
+  return out;
+}
+
+function ProgressiCarichi({ clientId, isAdmin = false, parte = "tutto" }) {
   const [esercizi, setEsercizi] = useState(null);
+  const [trend, setTrend] = useState(null);
+  const [scarichi, setScarichi] = useState([]);
+  const [cambiPal, setCambiPal] = useState([]);
+  const [ricarica, setRicarica] = useState(0);
   const [aperto, setAperto] = useState(null);
   const [traguardi, setTraguardi] = useState({ streak: 0 });
 
@@ -1419,15 +2314,63 @@ function ProgressiCarichi({ clientId }) {
     let vivo = true;
     (async () => {
       try {
-        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        const righe = await leggiTutto(() => supabase.from("training_entries").select("data, kg, ripetizioni, motivo_calo, exercise_id, training_exercises(nome)").eq("client_id", clientId).order("data").order("id"));
+        let scar = [];
+        try { const { data: sc } = await supabase.from("scarichi").select("id, dal, al, nota").eq("client_id", clientId).order("dal"); scar = sc || []; } catch (e) { /* ignora */ }
+        if (vivo) setScarichi(scar);
+        let cambi = [];
+        try { const { data: cp } = await supabase.from("cambi_palestra").select("id, dal, tipo, nota").eq("client_id", clientId).order("dal"); cambi = cp || []; } catch (e) { /* ignora */ }
+        if (vivo) setCambiPal(cambi);
+        const dateAltra = new Set(cambi.map((x) => x.dal)); // sedute in un'altra palestra o con attrezzi diversi: fuori dal confronto dei carichi
+        const inScar = (d) => scar.some((x) => d >= x.dal && d <= x.al);
         const mappa = {};
         righe.forEach((r) => {
           const kg = Number(r.kg);
           const nome = r.training_exercises?.nome;
           if (!nome || !r.data || !(kg > 0)) return;
-          const g = (mappa[nome] = mappa[nome] || { nome, date: {} });
+          const g = (mappa[nome] = mappa[nome] || { nome, date: {}, mot: {}, ton: {}, rep: {}, sets: {}, exId: r.exercise_id });
+          (g.sets[r.data] = g.sets[r.data] || []).push({ kg, rip: parseFloat(String(r.ripetizioni ?? "").replace(",", ".")) });
           g.date[r.data] = Math.max(g.date[r.data] ?? 0, kg);
+          const rip = parseFloat(String(r.ripetizioni ?? "").replace(",", "."));
+          if (rip > 0) { g.ton[r.data] = (g.ton[r.data] || 0) + kg * rip; g.rep[r.data] = true; }
+          if (dateAltra.has(r.data)) { const ma = (g.mot[r.data] = g.mot[r.data] || new Set()); ma.add("attrezzo"); }
+          if (inScar(r.data)) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); m.add("scarico"); }
+          if (r.motivo_calo) { const m = (g.mot[r.data] = g.mot[r.data] || new Set()); String(r.motivo_calo).split(",").filter(Boolean).forEach((x) => m.add(x)); }
         });
+        // Trend dei carichi upper / lower: variazione settimanale mediana dei carichi, concatenata a partire da 100
+        const lun = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
+        const perSett = { upper: {}, lower: {} };
+        const ridLista = [];
+        Object.values(mappa).forEach((g) => {
+          const gr = gruppoCarico(g.nome); if (!gr) return;
+          const dd = Object.keys(g.date).sort().filter((d) => !dateAltra.has(d));
+          // misura per sessione: volume-carico (kg × ripetizioni × serie) se le ripetizioni sono sempre segnate, altrimenti il carico massimo
+          const conVolume = dd.every((d) => g.rep[d] && g.ton[d] > 0);
+          const misura = (d) => (conVolume ? g.ton[d] : g.date[d]);
+          for (let i = 1; i < dd.length; i++) {
+            const prev = g.date[dd[i - 1]], cur = g.date[dd[i]]; const w = lun(dd[i]);
+            const o = (perSett[gr][w] = perSett[gr][w] || { rel: [], pesi: [], cali: 0, senza: 0, motivi: {} });
+            o.rel.push(misura(dd[i]) / misura(dd[i - 1]) - 1); o.pesi.push(misura(dd[i - 1]));
+            if (cur < prev) { const mm = g.mot[dd[i]]; ridLista.push({ nome: g.nome, exId: g.exId, data: dd[i], prevData: dd[i - 1], prev, cur, gr, motivi: mm ? [...mm].filter((x) => x !== "scarico") : [], inScarico: !!(mm && mm.has("scarico")) }); o.cali += 1; const m = g.mot[dd[i]]; if (m && m.size) m.forEach((x) => { o.motivi[x] = (o.motivi[x] || 0) + 1; }); else o.senza += 1; }
+          }
+        });
+        const settTrend = [...new Set([...Object.keys(perSett.upper), ...Object.keys(perSett.lower)])].sort();
+        const mediana = (a) => { const b = [...a].sort((x, y) => x - y); const m = Math.floor(b.length / 2); return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+        const idx = { upper: null, lower: null };
+        const punti = settTrend.map((w) => {
+          const riga = { w, sett: w.split("-").reverse().slice(0, 2).join("/") };
+          ["upper", "lower"].forEach((gr) => {
+            const o = perSett[gr][w];
+            if (o) { if (o.rel.length) { const pTot = o.pesi.reduce((a, b) => a + b, 0); const variazione = pTot > 0 ? o.rel.reduce((a, r, k) => a + r * o.pesi[k], 0) / pTot : mediana(o.rel); idx[gr] = (idx[gr] == null ? 100 : idx[gr]) * (1 + variazione); } riga[gr + "Cali"] = o.cali; riga[gr + "Senza"] = o.senza; riga[gr + "Motivi"] = o.motivi; }
+            riga[gr] = idx[gr] == null ? null : Math.round(idx[gr] * 10) / 10;
+          });
+          return riga;
+        });
+        const motiviTot = {}; let caliTot = 0, senzaTot = 0;
+        ["upper", "lower"].forEach((gr) => Object.values(perSett[gr]).forEach((o) => { caliTot += o.cali; senzaTot += o.senza; Object.entries(o.motivi).forEach(([k, n]) => { motiviTot[k] = (motiviTot[k] || 0) + n; }); }));
+        const bande = scar.map((x) => { const ws = punti.filter((q) => q.w >= lun(x.dal) && q.w <= lun(x.al)); return ws.length ? { x1: ws[0].sett, x2: ws[ws.length - 1].sett } : null; }).filter(Boolean);
+        const lineeCambio = [...new Map(cambi.map((x) => { const w0 = lun(x.dal); const pt = punti.find((q) => q.w === w0); return pt ? [pt.sett, { x: pt.sett, dal: x.dal, tipo: x.tipo }] : null; }).filter(Boolean)).values()];
+        if (vivo) setTrend(punti.length >= 2 ? { punti, motiviTot, caliTot, senzaTot, bande, cambi: lineeCambio, riduzioni: ridLista.sort((x, y) => y.data.localeCompare(x.data)) } : null);
         const lista = Object.values(mappa).map((g) => {
           const date = Object.keys(g.date).sort();
           const serie = date.map((d) => ({ dataLabel: d.split("-").reverse().slice(0, 2).join("/"), kg: g.date[d] }));
@@ -1435,7 +2378,9 @@ function ProgressiCarichi({ clientId }) {
           const precedenti = date.slice(0, -1).map((d) => g.date[d]);
           const maxPrec = precedenti.length ? Math.max(...precedenti) : 0;
           const record = date.length >= 2 && ultimo > maxPrec;
-          return { nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
+          const scorsa = date.length >= 2 ? g.date[date[date.length - 2]] : null;
+          const diffScorsa = scorsa == null ? null : Math.round((ultimo - scorsa) * 10) / 10;
+          const motUlt = g.mot[date[date.length - 1]] ? [...g.mot[date[date.length - 1]]] : []; return { sess: costruisciSessioni(g), scorsa, diffScorsa, motUlt, nome: g.nome, serie, sessioni: date.length, primo, ultimo, max: Math.max(...Object.values(g.date)), diff: Math.round((ultimo - primo) * 10) / 10, ultimaData: date[date.length - 1], recordRecente: record && date[date.length - 1] >= addGiorni(formatDataLocale(new Date()), -21), maxPrec };
         }).sort((a, b) => a.nome.localeCompare(b.nome));
         // Costanza: settimane consecutive (lunedì-domenica) con almeno un allenamento registrato
         const lunedi = (ds) => { const d = new Date(`${ds}T12:00:00`); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return formatDataLocale(d); };
@@ -1449,14 +2394,20 @@ function ProgressiCarichi({ clientId }) {
       } catch (e) { if (vivo) setEsercizi([]); }
     })();
     return () => { vivo = false; };
-  }, [clientId]);
+  }, [clientId, ricarica]);
 
   if (!esercizi || esercizi.length === 0) return null;
   const inAumento = esercizi.filter((e) => e.diff > 0).length;
   const fmt = (n) => String(n).replace(".", ",");
+  const oggiStr = formatDataLocale(new Date());
+  const inCalo = esercizi.filter((e) => e.diffScorsa != null && e.diffScorsa < 0 && e.ultimaData >= addGiorni(oggiStr, -21) && !e.motUlt.includes("scarico") && !e.motUlt.includes("attrezzo"));
 
   return (
     <div className="space-y-2">
+      {parte !== "resto" && isAdmin && <ScarichiCoach clientId={clientId} scarichi={scarichi} onChange={() => setRicarica((n) => n + 1)} />}
+      {parte !== "resto" && isAdmin && <CambiPalestraCoach clientId={clientId} cambi={cambiPal} onChange={() => setRicarica((n) => n + 1)} />}
+      {parte !== "resto" && trend && <TrendCarichi trend={trend} isAdmin={isAdmin} clientId={clientId} onRicarica={() => setRicarica((n) => n + 1)} />}
+      {parte !== "trend" && (<>
       {(traguardi.streak >= 2 || esercizi.some((e) => e.recordRecente)) && (
         <Card className="p-4 bg-sky-50 border-sky-100 space-y-1.5">
           <p className="text-xs uppercase tracking-wide text-sky-700 font-medium">I tuoi traguardi</p>
@@ -1464,6 +2415,15 @@ function ProgressiCarichi({ clientId }) {
           {esercizi.filter((e) => e.recordRecente).map((e) => (
             <p key={e.nome} className="text-sm text-slate-700">🏆 Nuovo record: <span className="font-semibold">{e.nome}</span> {fmt(e.maxPrec)} → {fmt(e.ultimo)} kg</p>
           ))}
+        </Card>
+      )}
+      {inCalo.length > 0 && (
+        <Card className="p-4 bg-slate-100 border-slate-100 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-slate-700 font-medium">Da tenere d'occhio 👀</p>
+          {inCalo.map((e) => (
+            <p key={e.nome} className="text-sm text-slate-700"><span className="font-semibold">{e.nome}</span>: {fmt(e.scorsa)} → {fmt(e.ultimo)} kg ({fmt(e.diffScorsa)} kg rispetto alla volta scorsa){e.motUlt.length > 0 && <span className="text-slate-500"> · motivo: {e.motUlt.map(etichettaMotivo).join(", ")}</span>}</p>
+          ))}
+          <p className="text-xs text-slate-500">Capita, è normale: è solo un'informazione utile per regolare recupero, sonno e programma 🫶🏻</p>
         </Card>
       )}
       <div className="px-1">
@@ -1475,12 +2435,30 @@ function ProgressiCarichi({ clientId }) {
           <button onClick={() => setAperto(aperto === e.nome ? null : e.nome)} className="w-full text-left">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium text-slate-700 text-sm">{e.nome}{e.recordRecente ? " 🏆" : ""}</p>
-              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-emerald-100 text-emerald-700" : e.diff < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-500"}`}>
+              <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 ${e.diff > 0 ? "bg-sky-100 text-sky-700" : e.diff < 0 ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500"}`}>
                 {e.sessioni < 2 ? "1ª sessione" : `${e.diff > 0 ? "+" : ""}${fmt(e.diff)} kg`}
               </span>
             </div>
             <p className="text-slate-500 text-xs mt-1">{fmt(e.primo)} kg → {fmt(e.ultimo)} kg · massimo {fmt(e.max)} kg · {e.sessioni} {e.sessioni === 1 ? "sessione" : "sessioni"}</p>
+            {e.diffScorsa != null && <p className={`text-xs mt-0.5 ${e.diffScorsa > 0 ? "text-sky-600" : e.diffScorsa < 0 ? "text-slate-600" : "text-slate-400"}`}>Rispetto alla volta scorsa: {e.diffScorsa > 0 ? "+" : ""}{fmt(e.diffScorsa)} kg</p>}
+            {e.sess?.length > 1 && e.sess[e.sess.length - 1].dVol != null && (
+              <p className={`text-xs mt-0.5 ${e.sess[e.sess.length - 1].dVol > 0 ? "text-sky-600" : e.sess[e.sess.length - 1].dVol < 0 ? "text-slate-600" : "text-slate-400"}`}>Volume (kg × rip): {e.sess[e.sess.length - 1].dVol > 0 ? "▲ +" : e.sess[e.sess.length - 1].dVol < 0 ? "▼ " : ""}{e.sess[e.sess.length - 1].dVol}% rispetto alla volta scorsa</p>
+            )}
           </button>
+          {aperto === e.nome && e.sess?.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {e.sess.some((x) => x.e1rm) && <p className="text-xs text-slate-500">Massimale stimato (Epley): <span className="font-semibold text-slate-700">{fmt(Math.max(...e.sess.map((x) => x.e1rm || 0)))} kg</span> · ultima volta {fmt(e.sess[e.sess.length - 1].e1rm ?? "–")} kg</p>}
+              <div className="rounded-lg border border-slate-100 divide-y divide-slate-100">
+                {[...e.sess].reverse().slice(0, 8).map((x) => (
+                  <div key={x.data} className="px-2.5 py-1.5 flex items-start justify-between gap-2">
+                    <p className="text-[11px] text-slate-400 w-10 flex-shrink-0">{x.data.split("-").reverse().slice(0, 2).join("/")}</p>
+                    <p className="text-xs text-slate-600 flex-1">{x.sets.map((q) => `${fmt(q.kg)}${q.rip > 0 ? `×${fmt(q.rip)}` : ""}`).join(" · ")}</p>
+                    {x.dVol != null && <span className={`text-[10px] font-semibold flex-shrink-0 ${x.dVol > 0 ? "text-sky-600" : x.dVol < 0 ? "text-slate-500" : "text-slate-400"}`}>{x.dVol > 0 ? "▲" : x.dVol < 0 ? "▼" : "="} {Math.abs(x.dVol)}%</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {aperto === e.nome && e.serie.length > 1 && (
             <div style={{ width: "100%", height: 150 }} className="mt-2">
               <ResponsiveContainer>
@@ -1496,6 +2474,7 @@ function ProgressiCarichi({ clientId }) {
           )}
         </Card>
       ))}
+      </>)}
     </div>
   );
 }
@@ -1598,7 +2577,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
     const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista: { Prima: vistaDi(a), Dopo: vistaDi(b), perCheck }, insieme, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("confronto_foto_coach").upsert(riga, { onConflict: "client_id,angolo" });
     if (!error) { setSalvati((m) => ({ ...m, [angolo]: riga })); setSalvaMsg("Salvato: la cliente vede questo confronto ✓"); setTimeout(() => setSalvaMsg(""), 3000); }
-    else setSalvaMsg("Non sono riuscita a salvare");
+    else setSalvaMsg("Non siamo riusciti a salvare");
   };
   const invertiLaterali = async (c) => {
     const nuovo = { foto_laterale_path: c.foto_extra_path || null, foto_extra_path: c.foto_laterale_path || null };
@@ -1672,7 +2651,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                     <div>
                       <textarea value={note[c?.id] || ""} onChange={(e) => setNote((n) => ({ ...n, [c.id]: e.target.value }))} onBlur={() => c && salvaNota(c)} rows={3}
                         placeholder="Nota per la cliente su questo check..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
-                      {salvata === c?.id && <p className="text-emerald-600 text-[11px]">Nota salvata ✓</p>}
+                      {salvata === c?.id && <p className="text-sky-600 text-[11px]">Nota salvata ✓</p>}
                     </div>
                   ) : (c?.nota_foto_coach && (
                     <div className="bg-sky-50 border border-sky-100 rounded-lg px-2 py-1.5">
@@ -1688,8 +2667,8 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
                 <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={insieme} onChange={(e) => setInsieme(e.target.checked)} /> Muovi le due foto insieme</label>
                 <button onClick={() => setPerCheck((p) => ({ ...p, [a?.id]: VISTA0, [b?.id]: VISTA0 }))} className="text-[11px] text-slate-400 underline">Azzera zoom e posizione di queste due foto</button>
                 <p className="text-[11px] text-slate-400">Pizzica una foto con due dita per ingrandirla e trascinala per spostarla. Zoom e posizione restano legati a ogni check: se cambi data e poi ci ritorni li ritrovi. Ricorda di premere Salva. Tocca una foto per aprirla a schermo intero.</p>
-                <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">💾 Salva questo confronto per la cliente</button>
-                {salvaMsg && <p className="text-emerald-600 text-[11px] text-center">{salvaMsg}</p>}
+                <button onClick={() => salvaImpostazione(a?.id, b?.id)} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2"><Ic n="save"/> Salva questo confronto per la cliente</button>
+                {salvaMsg && <p className="text-sky-600 text-[11px] text-center">{salvaMsg}</p>}
                 <p className="text-[11px] text-slate-400">{salvati[angolo] ? "Per la cliente è salvata una versione di questo angolo." : "Per questo angolo la cliente vede ancora la versione standard (primo e ultimo check)."}</p>
               </div>
             ) : <p className="text-[11px] text-slate-400 text-center">Scegli le due date che vuoi confrontare. Tocca una foto per aprirla a schermo intero.</p>}
@@ -1708,6 +2687,73 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
   );
 }
 
+// Card dei progressi da condividere (solo numeri, senza foto): la cliente sceglie cosa mostrare
+function CardProgressi({ dati, opzioni }) {
+  const disponibili = opzioni.filter((o) => dati.filter((d) => d[o.key] != null && d[o.key] !== "").length >= 2);
+  const [scelte, setScelte] = useState(() => disponibili.some((o) => o.key === "peso_kg") ? ["peso_kg"] : disponibili.slice(0, 1).map((o) => o.key));
+  const [aperto, setAperto] = useState(false);
+  const [lavoro, setLavoro] = useState(false);
+  if (disponibili.length === 0) return null;
+  const vals = (k) => dati.filter((d) => d[k] != null && d[k] !== "").map((d) => ({ v: Number(d[k]), data: d.data_check }));
+  const f1 = (n) => String(Math.round(n * 10) / 10).replace(".", ",");
+  const crea = async (condividi) => {
+    setLavoro(true);
+    const W = 1080, H = 1350;
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.fillStyle = "#27466D"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#E1EEFB"; g.beginPath(); g.arc(W - 120, 140, 260, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#C9E0F7"; g.beginPath(); g.arc(80, H - 60, 220, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#FFFBEF"; g.beginPath(); g.roundRect(70, 230, W - 140, H - 400, 48); g.fill();
+    g.textAlign = "left"; g.fillStyle = "#27466D"; g.font = "700 64px system-ui, sans-serif";
+    g.fillText("il mio percorso", 90, 150);
+    const prima = dati.find((d) => d.data_check)?.data_check, ultima = [...dati].reverse().find((d) => d.data_check)?.data_check;
+    const sett = prima && ultima ? Math.max(1, Math.round((new Date(ultima) - new Date(prima)) / 604800000)) : null;
+    g.fillStyle = "#3F78B3"; g.font = "500 36px system-ui, sans-serif";
+    if (sett) g.fillText(sett >= 9 ? `${Math.round(sett / 4.35)} mesi di percorso` : `${sett} settimane di percorso`, 90, 205);
+    const lista = opzioni.filter((o) => scelte.includes(o.key));
+    const passo = Math.min(260, (H - 400 - 60) / Math.max(1, lista.length));
+    lista.forEach((o, i) => {
+      const v = vals(o.key); const a = v[0].v, b = v[v.length - 1].v; const d = b - a;
+      const y = 230 + 50 + i * passo;
+      g.fillStyle = "#7a8da3"; g.font = "600 34px system-ui, sans-serif"; g.fillText(o.label.toUpperCase(), 120, y + 40);
+      g.fillStyle = "#27466D"; g.font = "800 110px system-ui, sans-serif"; g.fillText(`${d > 0 ? "+" : d < 0 ? "−" : ""}${f1(Math.abs(d))}`, 120, y + 150);
+      const w = g.measureText(`${d > 0 ? "+" : d < 0 ? "−" : ""}${f1(Math.abs(d))}`).width;
+      g.fillStyle = "#4F8FD0"; g.font = "600 44px system-ui, sans-serif"; g.fillText(o.key === "peso_kg" ? "kg" : "cm", 120 + w + 16, y + 150);
+      g.fillStyle = "#7a8da3"; g.font = "500 34px system-ui, sans-serif"; g.fillText(`da ${f1(a)} a ${f1(b)}`, 120, y + 200);
+    });
+    g.fillStyle = "#FFFBEF"; g.font = "600 40px system-ui, sans-serif"; g.textAlign = "center";
+    g.fillText("Coaching by Morgana ✨", W / 2, H - 100);
+    const blob = await new Promise((ok) => cv.toBlob(ok, "image/png"));
+    const file = new File([blob], "i-miei-progressi.png", { type: "image/png" });
+    try {
+      if (condividi && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] });
+      else { const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = "i-miei-progressi.png"; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(u), 2000); }
+    } catch (e) { /* condivisione annullata */ }
+    setLavoro(false);
+  };
+  return (
+    <Card className="p-4 space-y-2">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex items-center justify-between text-left">
+        <div><p className="text-sm font-medium text-slate-700">Crea la tua card dei progressi ✨</p><p className="text-xs text-slate-400">Un'immagine da condividere, senza foto: scegli tu cosa mostrare.</p></div>
+        <span className="text-slate-400 text-xs">{aperto ? "Chiudi" : "Apri"}</span>
+      </button>
+      {aperto && (
+        <div className="space-y-2 pt-1">
+          <div className="flex flex-wrap gap-1.5">
+            {disponibili.map((o) => { const on = scelte.includes(o.key); return <button key={o.key} onClick={() => setScelte(on ? scelte.filter((x) => x !== o.key) : [...scelte, o.key].slice(-4))} className="text-xs rounded-full px-3 py-1.5 font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{o.label}</button>; })}
+          </div>
+          <p className="text-[11px] text-slate-400">Puoi scegliere fino a 4 voci. Tutto resta sul tuo telefono finché non decidi tu di condividerla.</p>
+          <div className="flex gap-2">
+            <button disabled={lavoro || scelte.length === 0} onClick={() => crea(true)} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white disabled:opacity-40" style={{ background: "#27466D" }}>{lavoro ? "Creo..." : "Condividi"}</button>
+            <button disabled={lavoro || scelte.length === 0} onClick={() => crea(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium disabled:opacity-40" style={{ background: "#E1EEFB", color: "#27466D" }}>Salva immagine</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal, titolo = "I tuoi progressi", clientId, isAdmin = false }) {
   const [metrica, setMetrica] = useState("peso_kg");
   const opzioni = getCampiMisura(sesso).map((c) => ({ key: c.key, label: c.label }));
@@ -1719,7 +2765,8 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
     return (
       <div className="px-5 pt-16 pb-24 space-y-6">
         <p className="text-center text-slate-400 text-sm">Non ci sono ancora check registrati.</p>
-        {clientId && <ProgressiCarichi clientId={clientId} />}
+        {isAdmin && clientId && <AderenzaAllenamenti clientId={clientId} />}
+        {clientId && (isAdmin ? <AnalisiCarichi clientId={clientId} renderGestione={(g) => (<><ScarichiCoach clientId={clientId} scarichi={g.scarichi} onChange={g.ricarica} /><CambiPalestraCoach clientId={clientId} cambi={g.cambi} onChange={g.ricarica} /></>)} /> : <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} />)}
       </div>
     );
   }
@@ -1727,6 +2774,9 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <h1 className="text-xl font-semibold text-slate-800">{titolo}</h1>
+      {isAdmin && clientId && <AderenzaAllenamenti clientId={clientId} />}
+      {clientId && (isAdmin ? <AnalisiCarichi clientId={clientId} renderGestione={(g) => (<><ScarichiCoach clientId={clientId} scarichi={g.scarichi} onChange={g.ricarica} /><CambiPalestraCoach clientId={clientId} cambi={g.cambi} onChange={g.ricarica} /></>)} /> : <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="trend" />)}
+      {isAdmin && <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1 pt-2">Progressi estetici · foto, misure e peso</p>}
       <AndamentoGenerale checkins={checkins} obiettivo={obiettivo} obiettivoDal={obiettivoDal} />
       <div className="flex gap-2 overflow-x-auto pb-1">
         {opzioni.map((o) => (
@@ -1748,6 +2798,10 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         </ResponsiveContainer>
       </Card>
 
+      {!isAdmin && <CardProgressi dati={dati} opzioni={opzioni} />}
+
+      {!isAdmin && <CommentiCheckCliente checkins={checkins} />}
+
       <ConfrontoFoto checkins={checkins} isAdmin={isAdmin} />
 
       <HistoryTable checkins={checkins} sesso={sesso} />
@@ -1757,7 +2811,7 @@ function ClientProgress({ checkins, altezza, sesso, eta, obiettivo, obiettivoDal
         <TabellaEstrapolati checkins={checkins} altezza={altezza} sesso={sesso} eta={eta} />
       </div>
 
-      {clientId && <ProgressiCarichi clientId={clientId} />}
+      {clientId && !isAdmin && <ProgressiCarichi clientId={clientId} isAdmin={isAdmin} parte="resto" />}
     </div>
   );
 }
@@ -1780,8 +2834,21 @@ function formattaPeriodo(r) {
 
 function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   const [vista, setVista] = useState("aggiornamenti");
+  const [grafico, setGrafico] = useState("macro");
   const conKcal = (storico || []).filter((r) => r.kcal != null && r.data_aggiornamento);
   if (conKcal.length === 0) return null;
+  const dataCiclo = (r) => r.data_inizio || r.data_aggiornamento;
+  const ordinati = [...conKcal].sort((x, y) => dataCiclo(x).localeCompare(dataCiclo(y)));
+  const num = (v) => (v == null ? null : Number(v));
+  const delta = (corrente, precedente) => (corrente == null || precedente == null ? null : corrente - precedente);
+  const Freccia = ({ d, unita = "" }) => d == null || d === 0 ? null : <span className={`text-[10px] ml-0.5 ${d > 0 ? "text-sky-600" : "text-slate-800"}`}>{d > 0 ? "▲" : "▼"}{Math.abs(d)}{unita}</span>;
+  const primo = ordinati[0], ultimo = ordinati[ordinati.length - 1];
+  const variazione = (campo) => delta(num(ultimo[campo]), num(primo[campo]));
+  const fmtVar = (d, unita) => (d == null ? "—" : d === 0 ? "invariati" : `${d > 0 ? "+" : ""}${d}${unita}`);
+  const datiMacro = ordinati.map((r) => ({
+    data: dataCiclo(r).split("-").reverse().slice(0, 2).join("/"),
+    Proteine: num(r.proteine_g), Carboidrati: num(r.carboidrati_g), Grassi: num(r.grassi_g),
+  }));
 
   const perMese = (() => {
     const map = {};
@@ -1803,13 +2870,48 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   return (
     <Card className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Storico kcal</p>
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Storico nutrizione</p>
+        <div className="flex gap-1">
+          <button onClick={() => setGrafico("macro")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${grafico === "macro" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Macros</button>
+          <button onClick={() => setGrafico("kcal")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${grafico === "kcal" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Kcal</button>
+        </div>
+      </div>
+      <div className="flex justify-end">
         <div className="flex gap-1">
           <button onClick={() => setVista("aggiornamenti")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${vista === "aggiornamenti" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Settimanale</button>
           <button onClick={() => setVista("mensile")} className={`px-2.5 py-1 rounded-full text-xs font-medium ${vista === "mensile" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>Mensile</button>
         </div>
       </div>
-      {datiGrafico.length > 1 && (
+      {grafico === "macro" && datiMacro.length > 1 && (
+        <>
+          <div className="flex gap-3 text-[11px] text-slate-600">
+            <span><i className="inline-block w-2 h-2 rounded-full bg-sky-500 mr-1" />Proteine</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-sky-500 mr-1" />Carboidrati</span>
+            <span><i className="inline-block w-2 h-2 rounded-full bg-slate-500 mr-1" />Grassi</span>
+          </div>
+          <div style={{ width: "100%", height: 170 }}>
+            <ResponsiveContainer>
+              <LineChart data={datiMacro}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="data" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} width={34} domain={["dataMin - 10", "dataMax + 10"]} />
+                <Tooltip />
+                <Line type="monotone" dataKey="Proteine" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="Carboidrati" stroke="#27466D" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                <Line type="monotone" dataKey="Grassi" stroke="#94a3b8" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+      {ordinati.length > 1 && (
+        <div className="bg-slate-50 rounded-xl px-3 py-2.5 text-xs text-slate-700 leading-relaxed">
+          <p className="font-semibold">Dal {dataCiclo(primo).split("-").reverse().join("/")} a oggi</p>
+          <p>Proteine {fmtVar(variazione("proteine_g"), " g")} · Carboidrati {fmtVar(variazione("carboidrati_g"), " g")} · Grassi {fmtVar(variazione("grassi_g"), " g")}</p>
+          <p>Kcal {fmtVar(variazione("kcal"), "")}</p>
+        </div>
+      )}
+      {grafico === "kcal" && datiGrafico.length > 1 && (
         <div style={{ width: "100%", height: 150 }}>
           <ResponsiveContainer>
             <LineChart data={datiGrafico}>
@@ -1832,9 +2934,12 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
                   className={`w-full flex justify-between items-center text-sm border-b border-slate-100 pb-1.5 ${isAdmin ? "text-left hover:bg-slate-50 rounded px-1 -mx-1" : ""}`}>
                   <span className="text-slate-500">{formattaPeriodo(r)}</span>
                   <span className="text-slate-700 font-medium">{r.kcal} kcal</span>
-                  <span className="text-slate-400 text-xs">P{r.proteine_g ?? "—"} C{r.carboidrati_g ?? "—"} G{r.grassi_g ?? "—"}</span>
+                  {(() => {
+                    const i = ordinati.findIndex((x) => x.id === r.id); const pr = i > 0 ? ordinati[i - 1] : null;
+                    return <span className="text-slate-500 text-xs text-right">P{r.proteine_g ?? "—"}<Freccia d={pr ? delta(num(r.proteine_g), num(pr.proteine_g)) : null} /> C{r.carboidrati_g ?? "—"}<Freccia d={pr ? delta(num(r.carboidrati_g), num(pr.carboidrati_g)) : null} /> G{r.grassi_g ?? "—"}<Freccia d={pr ? delta(num(r.grassi_g), num(pr.grassi_g)) : null} /></span>;
+                  })()}
                 </Riga>
-                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-red-500 px-1.5 flex-shrink-0">🗑</button>}
+                {isAdmin && onElimina && <button onClick={() => onElimina(r)} title="Elimina questo ciclo" className="text-slate-300 hover:text-slate-800 px-1.5 flex-shrink-0"><Ic n="trash" bare/></button>}
               </li>
             );
           })}
@@ -1854,20 +2959,20 @@ function StoricoNutrizione({ storico, isAdmin, onModifica, onElimina }) {
   );
 }
 
-function ClientNutrizione({ piano, storico }) {
+function ClientNutrizione({ piano, storico, daNutrizionista = false }) {
   if (!piano) {
-    return <div className="px-5 pt-16 text-center text-slate-400 text-sm">Morgana non ha ancora impostato i tuoi valori nutrizionali.</div>;
+    return <div className="px-5 pt-16 text-center text-slate-400 text-sm">{daNutrizionista ? "Il programma della tua nutrizionista comparirà qui appena lo carichiamo ✨" : "Morgana non ha ancora impostato i tuoi valori nutrizionali."}</div>;
   }
   const macro = [
     { label: "Proteine", val: piano.proteine_g, color: "bg-sky-500" },
-    { label: "Carboidrati", val: piano.carboidrati_g, color: "bg-emerald-500" },
-    { label: "Grassi", val: piano.grassi_g, color: "bg-amber-500" },
+    { label: "Carboidrati", val: piano.carboidrati_g, color: "bg-sky-500" },
+    { label: "Grassi", val: piano.grassi_g, color: "bg-slate-500" },
   ];
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-slate-800">Nutrizione</h1>
-        <p className="text-slate-500 text-sm mt-1">Valori indicativi, {formattaPeriodo(piano)}</p>
+        <h1 className="text-xl font-semibold text-slate-800">{daNutrizionista ? "Il programma della tua nutrizionista" : "Nutrizione"}</h1>
+        <p className="text-slate-500 text-sm mt-1">{daNutrizionista ? "Macros indicativi in linea con il tuo programma, " : "Valori indicativi, "}{formattaPeriodo(piano)}</p>
       </div>
       <div className="rounded-2xl border border-slate-700 shadow-sm p-5 bg-slate-800">
         <div className="flex items-center gap-2 text-slate-300 text-xs uppercase tracking-wide font-medium mb-1"><Apple size={14} /> Kcal indicative giornaliere</div>
@@ -1893,12 +2998,25 @@ function ClientNutrizione({ piano, storico }) {
           ))}
         </Card>
       )}
+      {daNutrizionista && piano.note && (
+        <Card className="p-4 space-y-1.5">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Dieta e indicazioni</p>
+          <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{piano.note}</p>
+        </Card>
+      )}
       <StoricoNutrizione storico={storico} />
     </div>
   );
 }
 
-function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved }) {
+// Superset: "A + B" nel nome => parti separate, ognuna con carico e ripetizioni
+function partiSuperset(nome) {
+  const pulito = String(nome || "").replace(/\(\s*super\s*set\s*\)/i, "").trim();
+  const parti = pulito.split("+").map((x) => x.trim()).filter(Boolean);
+  return parti.length >= 2 && !/^\s*\+/.test(pulito) ? parti.slice(0, 4) : [];
+}
+function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, onSaved, etichetta = "", parti = [] }) {
+  const [extra, setExtra] = useState(entry?.extra || {});
   const [kg, setKg] = useState(entry?.kg ?? "");
   const [rip, setRip] = useState(entry?.ripetizioni ?? "");
   const [id, setId] = useState(entry?.id ?? null);
@@ -1908,12 +3026,14 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
     setKg(entry?.kg ?? "");
     setRip(entry?.ripetizioni ?? "");
     setId(entry?.id ?? null);
+    setExtra(entry?.extra || {});
   }, [entry?.id]);
 
   const salva = async () => {
-    if (kg === "" && rip === "" && !id) return;
+    const extraVuoto = !Object.values(extra).some((v) => v && (v.kg || v.rip));
+    if (kg === "" && rip === "" && extraVuoto && !id) return;
     setSalvando(true);
-    if (kg === "" && rip === "" && id) {
+    if (kg === "" && rip === "" && extraVuoto && id) {
       // riga svuotata: la rimuoviamo invece di lasciare un record vuoto
       await supabase.from("training_entries").delete().eq("id", id);
       setId(null);
@@ -1921,7 +3041,7 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
       onSaved();
       return;
     }
-    const payload = { kg: kg === "" ? null : Number(kg), ripetizioni: rip || null };
+    const payload = { kg: kg === "" ? null : Number(kg), ripetizioni: rip || null, extra: extraVuoto ? null : extra };
     if (id) {
       await supabase.from("training_entries").update(payload).eq("id", id);
     } else {
@@ -1936,18 +3056,54 @@ function RigaSerieAllenamento({ exerciseId, data, clientId, numeroSerie, entry, 
   };
 
   return (
-    <div className="flex gap-1 items-center">
-      <span className="text-[9px] text-slate-300 w-2.5 flex-shrink-0">{numeroSerie}</span>
+    <div className="flex flex-col gap-1">
+      <div className="flex gap-1 items-center">
+      <span className="text-[9px] text-slate-300 w-2.5 flex-shrink-0" title={etichetta}>{etichetta ? etichetta[0] : numeroSerie}</span>
       <input type="number" step="0.5" value={kg} onChange={(e) => setKg(e.target.value)} onBlur={salva} disabled={salvando}
         placeholder="kg" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
       <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={salva} disabled={salvando}
         placeholder="rip" className="w-1/2 min-w-0 text-center border border-slate-200 rounded px-1 py-1 text-xs" />
+      </div>
+      {parti.slice(1).map((nomeP, k) => {
+        const pk = String(k + 2);
+        const v = extra[pk] || {};
+        return (
+          <div key={pk} className="flex gap-1 items-center">
+            <span className="text-[9px] text-sky-500 w-2.5 flex-shrink-0" title={nomeP}>{pk === "2" ? "B" : pk === "3" ? "C" : "D"}</span>
+            <input value={v.kg ?? ""} onChange={(e) => setExtra({ ...extra, [pk]: { ...v, kg: e.target.value.replace(/[^0-9.,]/g, "") } })} onBlur={salva} disabled={salvando}
+              placeholder="kg" className="w-1/2 min-w-0 text-center border border-sky-200 rounded px-1 py-1 text-xs" />
+            <input value={v.rip ?? ""} onChange={(e) => setExtra({ ...extra, [pk]: { ...v, rip: e.target.value } })} onBlur={salva} disabled={salvando}
+              placeholder="rip" className="w-1/2 min-w-0 text-center border border-sky-200 rounded px-1 py-1 text-xs" />
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, onSaved }) {
-  const nSerie = Math.max(1, Math.min(Number(serieRichieste) || 3, 10));
+// Numero di serie da mostrare: quello indicato dal coach; se manca, top set = 1, back-off = 2, altrimenti 3
+function serieDefault(nome, serie) {
+  const n = Number(serie);
+  if (n > 0) return n;
+  if (/top\s*set/i.test(nome || "")) return 1;
+  if (/back.?off/i.test(nome || "")) return 2;
+  return 3;
+}
+// Tecniche di intensità impostabili dal coach per ogni esercizio
+const TECNICHE = [["", "Nessuna"], ["top_back", "Top set + back-off"], ["drop", "Drop set"], ["rest_pause", "Rest-pause"], ["myo", "Myo-reps"], ["super", "Superserie"], ["cluster", "Cluster"], ["pausa", "Serie con pausa"]];
+const nomeTecnica = (t) => (TECNICHE.find(([k]) => k === t) || [])[1] || "";
+// Serie totali: se top set + back-off sono indicati separati, la somma; altrimenti come prima
+function serieDi(es) {
+  if (es.tecnica === "top_back" && ((es.serie_top || 0) + (es.serie_backoff || 0)) > 0) return (es.serie_top || 0) + (es.serie_backoff || 0);
+  return serieDefault(es.nome, es.serie);
+}
+// Etichetta della singola serie ("Top" / "Back-off") quando l'esercizio è impostato come top set + back-off
+function etichettaSerie(es, n) {
+  if (es.tecnica === "top_back" && (es.serie_top || 0) > 0) return n <= es.serie_top ? "TOP" : "BACK";
+  return "";
+}
+function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste, etichette = [], onSaved, parti = [] }) {
+  const nSerie = Math.max(1, Math.min(serieRichieste, 10));
   const primaRigaConNota = entries.find((e) => e.note) || entries.find((e) => e.numero_serie === 1) || entries[0];
   const [nota, setNota] = useState(primaRigaConNota?.note ?? "");
   const [salvandoNota, setSalvandoNota] = useState(false);
@@ -1973,7 +3129,7 @@ function CellaAllenamento({ exerciseId, data, clientId, entries, serieRichieste,
         const entry = entries.find((e) => e.numero_serie === numeroSerie);
         return (
           <RigaSerieAllenamento key={numeroSerie} exerciseId={exerciseId} data={data} clientId={clientId}
-            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} />
+            numeroSerie={numeroSerie} entry={entry} onSaved={onSaved} etichetta={etichette[i]} parti={parti} />
         );
       })}
       <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} disabled={salvandoNota}
@@ -2010,15 +3166,52 @@ function EsercizioNome({ id, nome, onSaved }) {
 }
 
 // Libreria esercizi con video (tabella esercizi_video): trova l'esercizio che corrisponde al nome scritto in scheda
+// Scelte manuali della coach: per un esercizio può indicare un video preciso (anche di un esercizio simile) oppure "nessun video"
+let SCELTE_VIDEO = {};
+const normVideoNome = (n) => String(n || "").toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+async function caricaSceltaVideo() {
+  try {
+    const { data } = await supabase.from("esercizio_video_scelta").select("*");
+    const m = {}; (data || []).forEach((r) => { m[r.nome_norm] = r; }); SCELTE_VIDEO = m;
+  } catch (e) { /* ignora */ }
+}
 function trovaEsercizioVideo(nome, libreria) {
-  const n = (nome || "").toLowerCase();
+  const n = normVideoNome(nome);
+  const sc = SCELTE_VIDEO[n];
+  if (sc) { if (sc.nessuno || !sc.video_id) return null; return (libreria || []).find((e) => e.id === sc.video_id) || null; }
   let best = null, bestLen = 0;
   (libreria || []).forEach((e) => {
-    (e.parole_chiave || "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean).forEach((k) => {
+    // voci ancora vuote (senza video né testo) non si mostrano alle clienti
+    if (!(e.video_url || e.posizionamento || e.movimento || e.errori || e.senza_video)) return;
+    (e.parole_chiave || "").split(",").map((k) => normVideoNome(k)).filter(Boolean).forEach((k) => {
       if (n.includes(k) && k.length > bestLen) { best = e; bestLen = k.length; }
     });
   });
   return best;
+}
+function ScegliVideo({ nome, libreria, onCambiato }) {
+  const n = normVideoNome(nome);
+  const sc = SCELTE_VIDEO[n];
+  const valore = sc ? (sc.nessuno || !sc.video_id ? "nessuno" : sc.video_id) : "auto";
+  const cambia = async (v) => {
+    if (v === "auto") { await supabase.from("esercizio_video_scelta").delete().eq("nome_norm", n); delete SCELTE_VIDEO[n]; }
+    else {
+      const riga = { nome_norm: n, video_id: v === "nessuno" ? null : v, nessuno: v === "nessuno", updated_at: new Date().toISOString() };
+      await supabase.from("esercizio_video_scelta").upsert(riga, { onConflict: "nome_norm" });
+      SCELTE_VIDEO[n] = riga;
+    }
+    onCambiato?.();
+  };
+  return (
+    <label className="block mt-1">
+      <span className="text-[10px] text-slate-400">Video di questo esercizio{valore === "auto" ? " (automatico)" : " (scelto da te)"}</span>
+      <select value={valore} onChange={(e) => cambia(e.target.value)} className="w-full border border-slate-200 rounded-lg px-1.5 py-1 text-[11px] bg-white text-slate-600">
+        <option value="auto">Automatico (solo se è lo stesso esercizio)</option>
+        <option value="nessuno">Nessun video</option>
+        {(libreria || []).map((e) => <option key={e.id} value={e.id}>Usa: {e.nome}</option>)}
+      </select>
+    </label>
+  );
 }
 
 function videoIdYoutube(url) {
@@ -2074,6 +3267,36 @@ function EsercizioInfoModal({ es, onClose }) {
   );
 }
 
+// Slot video: più video per esercizio, ognuno con un nome facoltativo (es. "Frontale", "Laterale")
+function VideoSlots({ valore, onChange }) {
+  const leggi = (v) => {
+    const r = String(v || "").split("\n").map((x) => x.trim()).filter(Boolean).map((x) => { const i = x.indexOf("|"); return i > -1 ? { label: x.slice(0, i), url: x.slice(i + 1) } : { label: "", url: x }; });
+    while (r.length < 3) r.push({ label: "", url: "" });
+    return r;
+  };
+  const [righe, setRighe] = useState(() => leggi(valore));
+  const aggiorna = (nuove) => {
+    setRighe(nuove);
+    const piene = nuove.filter((r) => r.url.trim());
+    onChange(piene.map((r) => (r.label.trim() ? `${r.label.trim()}|${r.url.trim()}` : r.url.trim())).join("\n"));
+  };
+  const cambia = (i, campo, v) => aggiorna(righe.map((r, j) => (j === i ? { ...r, [campo]: v } : r)));
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-500 font-semibold mb-1">Video (puoi metterne più di uno)</p>
+      <div className="space-y-2">
+        {righe.map((r, i) => (
+          <div key={i} className="flex gap-2 items-center">
+            <span className="text-[11px] text-slate-400 w-4 flex-shrink-0 text-center">{i + 1}</span>
+            <input value={r.label} onChange={(e) => cambia(i, "label", e.target.value)} placeholder="Nome (facoltativo)" className="w-28 flex-shrink-0 border border-slate-200 rounded-xl px-2 py-2 text-sm" />
+            <input value={r.url} onChange={(e) => cambia(i, "url", e.target.value)} placeholder="Link YouTube" className="flex-1 min-w-0 border border-slate-200 rounded-xl px-3 py-2 text-sm" />
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={() => setRighe((x) => [...x, { label: "", url: "" }])} className="mt-2 text-xs text-sky-600 font-medium">+ Aggiungi un altro video</button>
+    </div>
+  );
+}
 function CampoEs({ edit, setEdit, label, k, righe = 1, hint }) {
   return (
     <div>
@@ -2086,11 +3309,63 @@ function CampoEs({ edit, setEdit, label, k, righe = 1, hint }) {
   );
 }
 
+// Cliente (Bulb e ibrida): tutti gli esercizi con video e spiegazione, cercabili
+function EserciziCliente() {
+  const [lista, setLista] = useState([]);
+  const [caricando, setCaricando] = useState(true);
+  const [cerca, setCerca] = useState("");
+  const [gruppo, setGruppo] = useState("");
+  const [aperto, setAperto] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("esercizi_video").select("*").order("nome");
+      setLista((data || []).filter((e) => e.video_url || e.posizionamento || e.movimento || e.errori));
+      setCaricando(false);
+    })();
+  }, []);
+  const prima = (g) => String(g || "Altro").split(/[\/(]/)[0].trim() || "Altro";
+  const gruppi = [...new Set(lista.map((e) => prima(e.gruppo)))].sort();
+  const q = cerca.trim().toLowerCase();
+  const filtrati = lista.filter((e) => (!q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""} ${e.parole_chiave || ""}`.toLowerCase().includes(q)) && (!gruppo || prima(e.gruppo) === gruppo));
+  if (caricando) return <Spinner />;
+  return (
+    <div className="px-5 pt-6 pb-24 space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-800">Esercizi</h1>
+        <p className="text-sm text-slate-500 mt-1">Tutti gli esercizi con video e spiegazione: cerca quello che ti serve ✨</p>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
+        <Search size={17} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
+        <input value={cerca} onChange={(e) => setCerca(e.target.value)} placeholder="Cerca un esercizio..." className="flex-1 min-w-0 text-sm text-slate-800 bg-transparent outline-none" />
+        {cerca && <button onClick={() => setCerca("")} className="text-slate-400 text-sm px-1" aria-label="Cancella">×</button>}
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        <button onClick={() => setGruppo("")} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${!gruppo ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>Tutti</button>
+        {gruppi.map((g) => <button key={g} onClick={() => setGruppo(g === gruppo ? "" : g)} className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap ${gruppo === g ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>{g}</button>)}
+      </div>
+      {filtrati.length === 0 && <p className="text-center text-sm text-slate-400 py-6">Nessun esercizio trovato</p>}
+      <div className="space-y-2">
+        {filtrati.map((e) => (
+          <button key={e.id} onClick={() => setAperto(e)} className="w-full text-left bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800">{e.nome}</p>
+              <p className="text-xs text-slate-400 truncate">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
+            </div>
+            <span className="text-[11px] text-sky-600 flex-shrink-0">{e.video_url ? "▶ Video" : "Tecnica"}</span>
+          </button>
+        ))}
+      </div>
+      {aperto && <EsercizioInfoModal es={aperto} onClose={() => setAperto(null)} />}
+    </div>
+  );
+}
+
 // Coach: modifica la libreria esercizi con video + richieste delle clienti
 function LibreriaEserciziCoach() {
   const [lista, setLista] = useState([]);
   const [richieste, setRichieste] = useState([]);
   const [cerca, setCerca] = useState("");
+  const [soloMancanti, setSoloMancanti] = useState(false);
   const [edit, setEdit] = useState(null);
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
@@ -2118,12 +3393,12 @@ function LibreriaEserciziCoach() {
       ? await supabase.from("esercizi_video").update(campi).eq("id", edit.id)
       : await supabase.from("esercizi_video").insert({ ...campi, ordine: (lista.reduce((m, e) => Math.max(m, e.ordine || 0), 0)) + 1 });
     setSalvando(false);
-    if (error) { setErrore("Non sono riuscita a salvare: " + error.message); return; }
+    if (error) { setErrore("Non siamo riusciti a salvare: " + error.message); return; }
     setEdit(null); carica();
   };
 
   const elimina = async () => {
-    if (!confirm(`Eliminare "${edit.nome}" dalla libreria? Non si può annullare.`)) return;
+    if (!await confermaApp(`Eliminare "${edit.nome}" dalla libreria? Non si può annullare.`)) return;
     await supabase.from("esercizi_video").delete().eq("id", edit.id);
     setEdit(null); carica();
   };
@@ -2132,7 +3407,9 @@ function LibreriaEserciziCoach() {
   const eliminaRichiesta = async (id) => { await supabase.from("esercizi_richieste").delete().eq("id", id); carica(); };
 
   const q = cerca.trim().toLowerCase();
-  const filtrati = lista.filter((e) => !q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""}`.toLowerCase().includes(q));
+  const mancaVideo = (e) => !e.video_url && !e.senza_video;
+  const nMancanti = lista.filter(mancaVideo).length;
+  const filtrati = lista.filter((e) => (!q || `${e.nome} ${e.gruppo || ""} ${e.attrezzo || ""}`.toLowerCase().includes(q)) && (!soloMancanti || mancaVideo(e)));
   const nuove = richieste.filter((r) => r.stato === "nuova");
 
   if (edit) {
@@ -2146,16 +3423,16 @@ function LibreriaEserciziCoach() {
             <CampoEs edit={edit} setEdit={setEdit} label="Gruppo muscolare" k="gruppo" />
             <CampoEs edit={edit} setEdit={setEdit} label="Attrezzo" k="attrezzo" />
           </div>
-          <CampoEs edit={edit} setEdit={setEdit} label="Link video YouTube" k="video_url" righe={3} hint="Un link per riga. Se ne metti più di uno puoi dare un nome: Frontale|https://youtube.com/shorts/..." />
+          <VideoSlots key={edit.id || "nuovo"} valore={edit.video_url} onChange={(v) => setEdit((e) => ({ ...e, video_url: v }))} />
           <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={!!edit.senza_video} onChange={(e) => setEdit({ ...edit, senza_video: e.target.checked })} /> Questo esercizio non ha bisogno del video (non comparirà tra i video mancanti)</label>
           <CampoEs edit={edit} setEdit={setEdit} label="Posizionamento" k="posizionamento" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Movimento e ROM" k="movimento" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Errori comuni" k="errori" righe={4} />
           <CampoEs edit={edit} setEdit={setEdit} label="Parole chiave" k="parole_chiave" righe={2} hint="Separate da virgola. Servono a collegare l'esercizio al nome scritto nella scheda della cliente." />
-          {errore && <p className="text-rose-600 text-sm">{errore}</p>}
+          {errore && <p className="text-slate-800 text-sm">{errore}</p>}
           <div className="flex gap-2">
             <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-3 text-sm font-medium disabled:opacity-50">{salvando ? "Salvo..." : "Salva"}</button>
-            {edit.id && <button onClick={elimina} className="px-4 rounded-xl border border-rose-200 text-rose-600 text-sm">Elimina</button>}
+            {edit.id && <button onClick={elimina} className="px-4 rounded-xl border border-slate-300 text-slate-800 text-sm">Elimina</button>}
           </div>
         </Card>
       </div>
@@ -2165,15 +3442,15 @@ function LibreriaEserciziCoach() {
   return (
     <div className="space-y-3">
       {nuove.length > 0 && (
-        <Card className="p-4 space-y-2 border-amber-200 bg-amber-50">
-          <p className="text-sm font-semibold text-amber-800">Video richiesti dalle clienti ({nuove.length})</p>
+        <Card className="p-4 space-y-2 border-slate-200 bg-slate-100">
+          <p className="text-sm font-semibold text-slate-800">Video richiesti dalle clienti ({nuove.length})</p>
           {nuove.map((r) => (
             <div key={r.id} className="bg-white rounded-xl px-3 py-2 text-sm">
               <p className="text-slate-800">{r.testo}</p>
               <p className="text-[11px] text-slate-400">{r.clients ? `${r.clients.nome} ${r.clients.cognome || ""}` : ""} · {new Date(r.created_at).toLocaleDateString("it-IT")}</p>
               <div className="flex gap-3 mt-1">
                 <button onClick={() => nuovo(r.testo)} className="text-xs text-sky-600 font-medium">Aggiungi alla libreria</button>
-                <button onClick={() => segnaFatta(r.id)} className="text-xs text-emerald-600 font-medium">Fatto</button>
+                <button onClick={() => segnaFatta(r.id)} className="text-xs text-sky-600 font-medium">Fatto</button>
                 <button onClick={() => eliminaRichiesta(r.id)} className="text-xs text-slate-400">Elimina</button>
               </div>
             </div>
@@ -2184,7 +3461,13 @@ function LibreriaEserciziCoach() {
         <input value={cerca} onChange={(e) => setCerca(e.target.value)} placeholder="Cerca esercizio..." className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
         <button onClick={() => nuovo()} className="bg-slate-800 text-white rounded-xl px-4 text-sm font-medium flex items-center gap-1"><Plus size={16} /> Nuovo</button>
       </div>
-      <p className="text-xs text-slate-400">{lista.length} esercizi · {lista.filter((e) => e.video_url).length} con video</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-400">{lista.length} esercizi · {lista.filter((e) => e.video_url).length} con video · {nMancanti} da completare</p>
+        <button onClick={() => setSoloMancanti((v) => !v)} className={`text-xs font-medium rounded-full px-3 py-1.5 flex-shrink-0 ${soloMancanti ? "bg-slate-800 text-white" : "bg-sky-50 text-sky-700"}`}>
+          {soloMancanti ? "Mostra tutti" : `Solo video mancanti (${nMancanti})`}
+        </button>
+      </div>
+      {soloMancanti && filtrati.length === 0 && <p className="text-center text-sm text-slate-400 py-6">Tutti i video sono stati aggiunti ✨</p>}
       {filtrati.map((e) => (
         <button key={e.id} onClick={() => setEdit({ ...e })} className="w-full text-left bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-2">
           <div>
@@ -2192,8 +3475,8 @@ function LibreriaEserciziCoach() {
             <p className="text-xs text-slate-400">{e.gruppo}{e.attrezzo ? ` · ${e.attrezzo}` : ""}</p>
           </div>
           <span className="flex flex-col items-end gap-1 flex-shrink-0">
-            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : e.senza_video ? "video non necessario" : "senza video"}</span>
-            {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">descrizioni da completare</span>}
+            <span className={`text-[11px] px-2 py-0.5 rounded-full ${e.video_url ? "bg-sky-50 text-sky-700" : "bg-slate-100 text-slate-500"}`}>{e.video_url ? "video" : e.senza_video ? "video non necessario" : "senza video"}</span>
+            {(!e.posizionamento || !e.movimento || !e.errori) && <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">descrizioni da completare</span>}
           </span>
         </button>
       ))}
@@ -2210,7 +3493,7 @@ function RichiediVideoEsercizio({ clientId }) {
   const invia = async () => {
     if (!testo.trim()) return;
     const { error } = await supabase.from("esercizi_richieste").insert({ client_id: clientId, testo: testo.trim() });
-    if (error) { setMsg("Non sono riuscita a inviare, riprova."); return; }
+    if (error) { setMsg("Non siamo riusciti a inviare, riprova."); return; }
     setTesto(""); setMsg("Richiesta inviata ✨ Morgana ti preparerà il video!");
   };
   return (
@@ -2219,7 +3502,7 @@ function RichiediVideoEsercizio({ clientId }) {
       <p className="text-xs text-slate-500">Scrivi il nome dell'esercizio e Morgana lo aggiungerà.</p>
       <input value={testo} onChange={(e) => { setTesto(e.target.value); setMsg(""); }} placeholder="Es. Hip thrust al multipower" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm" />
       <button onClick={invia} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Richiedi video</button>
-      {msg && <p className="text-xs text-emerald-600">{msg}</p>}
+      {msg && <p className="text-xs text-sky-600">{msg}</p>}
     </Card>
   );
 }
@@ -2282,7 +3565,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
     carica();
   };
   const eliminaPrep = async (id) => {
-    if (!confirm("Eliminare questa riga?")) return;
+    if (!await confermaApp("Eliminare questa riga?")) return;
     await supabase.from("training_exercises").delete().eq("id", id);
     carica();
   };
@@ -2323,7 +3606,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
   };
 
   const eliminaEsercizio = async (id) => {
-    if (!confirm("Eliminare questo esercizio e tutto il suo storico di carichi registrati?")) return;
+    if (!await confermaApp("Eliminare questo esercizio e tutto il suo storico di carichi registrati?")) return;
     await supabase.from("training_entries").delete().eq("exercise_id", id);
     await supabase.from("training_exercises").delete().eq("id", id);
     carica();
@@ -2377,7 +3660,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
                   ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-white/70 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
                 </div>
-                {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+                {isAdmin && <button onClick={() => eliminaPrep(es.id)} className="text-slate-300 hover:text-slate-800 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
               </div>
             );
           })}
@@ -2428,7 +3711,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       {isAdmin && <>
                       <button onClick={() => muoviEsercizio(es.id, -1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▲</button>
                       <button onClick={() => muoviEsercizio(es.id, 1)} className="text-slate-300 hover:text-slate-600 px-0.5 flex-shrink-0">▼</button>
-                      <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0"><X size={14} /></button>
+                      <button onClick={() => eliminaEsercizio(es.id)} className="text-slate-300 hover:text-slate-800 px-0.5 flex-shrink-0"><X size={14} /></button>
                       </>}
                     </div>
                     {(es.serie || es.ripetizioni) && (
@@ -2437,15 +3720,54 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
                       </p>
                     )}
                     {es.note && <p className="text-slate-400 text-[11px] mt-0.5 pr-1 break-words whitespace-normal leading-snug">{es.note}</p>}
+                    {isAdmin && (
+                      <div className="mt-1 space-y-1">
+                        <div className="flex items-center gap-1 flex-wrap text-[11px] text-slate-400">
+                          <select defaultValue={es.tecnica || ""} onChange={(e) => aggiornaEsercizioCampo(es.id, "tecnica", e.target.value || null)} className="border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600 bg-white">
+                            {TECNICHE.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                          </select>
+                          {es.tecnica === "top_back" ? (
+                            <>
+                              <input type="number" min="0" defaultValue={es.serie_top ?? ""} placeholder="top" title="Serie di top set"
+                                onBlur={async (e) => { const t = Number(e.target.value) || 0; await supabase.from("training_exercises").update({ serie_top: t, serie: t + (es.serie_backoff || 0) }).eq("id", es.id); carica(); }}
+                                className="w-10 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                              <span>top +</span>
+                              <input type="number" min="0" defaultValue={es.serie_backoff ?? ""} placeholder="back" title="Serie di back-off"
+                                onBlur={async (e) => { const b = Number(e.target.value) || 0; await supabase.from("training_exercises").update({ serie_backoff: b, serie: (es.serie_top || 0) + b }).eq("id", es.id); carica(); }}
+                                className="w-10 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                              <span>back-off</span>
+                            </>
+                          ) : (
+                            <>
+                              <input type="number" min="0" defaultValue={es.serie ?? ""} placeholder="serie" title="Serie"
+                                onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v !== (es.serie ?? null)) aggiornaEsercizioCampo(es.id, "serie", v); }}
+                                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                              <span>serie</span>
+                            </>
+                          )}
+                          <input defaultValue={es.ripetizioni ?? ""} placeholder="rip" title="Ripetizioni"
+                            onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (es.ripetizioni ?? null)) aggiornaEsercizioCampo(es.id, "ripetizioni", v); }}
+                            className="w-14 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                        </div>
+                      </div>
+                    )}
+                    {isAdmin && (
+                      <label className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">Recupero (sec)
+                        <input type="number" min="0" step="5" defaultValue={es.recupero_sec || ""} placeholder="90"
+                          onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v !== (es.recupero_sec || null)) aggiornaEsercizioCampo(es.id, "recupero_sec", v); }}
+                          className="w-14 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-slate-600" />
+                      </label>
+                    )}
                     {(() => { const info = trovaEsercizioVideo(es.nome, libreriaVideo); return info ? (
-                      <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}</button>
+                      <button onClick={() => setInfoEs(info)} className="text-sky-600 text-[11px] font-medium mt-1">{info.video_url ? "▶ Video" : "ℹ︎ Tecnica"}{info ? ` · ${info.nome}` : ""}</button>
                     ) : null; })()}
+                    {isAdmin && libreriaVideo.length > 0 && <ScegliVideo nome={es.nome} libreria={libreriaVideo} onCambiato={carica} />}
                   </td>
                   {date.map((d) => {
                     const entriesCella = entries.filter((en) => en.exercise_id === es.id && en.data === d);
                     return (
                       <td key={d} className="px-2 py-2 text-center">
-                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={es.serie} onSaved={carica} />
+                        <CellaAllenamento exerciseId={es.id} data={d} clientId={clientId} entries={entriesCella} serieRichieste={serieDi(es)} etichette={Array.from({ length: 10 }).map((_, i) => etichettaSerie(es, i + 1))} onSaved={carica} parti={partiSuperset(es.nome)} />
                       </td>
                     );
                   })}
@@ -2507,7 +3829,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
   useEffect(() => { carica(); }, [clientId]);
   if (righe === null || (righe.length === 0 && !isAdmin)) return null;
   const aggiorna = async (id, campo, valore) => { await supabase.from("training_exercises").update({ [campo]: valore }).eq("id", id); carica(); };
-  const elimina = async (id) => { if (!confirm("Eliminare questa riga?")) return; await supabase.from("training_exercises").delete().eq("id", id); carica(); };
+  const elimina = async (id) => { if (!await confermaApp("Eliminare questa riga?")) return; await supabase.from("training_exercises").delete().eq("id", id); carica(); };
   const aggiungi = async () => {
     if (!nome.trim()) return;
     await supabase.from("training_exercises").insert({ client_id: clientId, training_day_id: null, nome: nome.trim(), note: note.trim() || null, esecuzione: esec.trim() || null, tipo, ordine: righe.length + 1 });
@@ -2522,7 +3844,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
       </button>
       {aperto && (
         <div className="mt-2 space-y-3 max-h-[60vh] overflow-y-auto pb-1">
-          <p className="text-[11px] text-slate-400">Da fare prima di ogni allenamento. Non c'è nulla da segnare: nelle note trovi quanto o per quanto tempo.</p>
+          <p className="text-[11px] text-slate-400">Da fare prima di ogni allenamento: 30/60 secondi per ogni esercizio.</p>
           {["mobilita"].map((t) => {
             const gruppo = righe.filter((x) => x.tipo === t);
             if (gruppo.length === 0) return null;
@@ -2549,7 +3871,7 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
                             className="w-full border border-slate-200 rounded-lg px-2 py-1 text-xs mt-1 bg-white" />
                         ) : <p className="text-slate-600 text-xs mt-1 whitespace-pre-wrap bg-teal-50/60 rounded-lg px-2 py-1.5">{es.esecuzione}</p>)}
                       </div>
-                      {isAdmin && <button onClick={() => elimina(es.id)} className="text-slate-300 hover:text-rose-500 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
+                      {isAdmin && <button onClick={() => elimina(es.id)} className="text-slate-300 hover:text-slate-800 px-0.5 flex-shrink-0 mt-1"><X size={14} /></button>}
                     </div>
                   );
                 })}
@@ -2602,14 +3924,28 @@ function DiarioAllenamento({ clientId, isAdmin }) {
           const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi").eq("id", clientId).maybeSingle();
           if (!c || c.video_attivi === false || (c.tipo_servizio !== "online" && c.tipo_servizio !== "ibrido")) return;
         }
+        await caricaSceltaVideo();
         const { data } = await supabase.from("esercizi_video").select("*").order("ordine");
         setLibreriaVideo(data || []);
       } catch (e) { /* senza libreria l'app funziona come prima */ }
     })();
   }, [clientId, isAdmin]);
 
+  const eliminaProgramma = async (lista, testo) => {
+    if (!lista.length) return;
+    if (!await confermaApp(testo)) return;
+    const ids = lista.map((g) => g.id);
+    const { data: es } = await supabase.from("training_exercises").select("id").in("training_day_id", ids);
+    const idsEs = (es || []).map((e) => e.id);
+    if (idsEs.length) await supabase.from("training_entries").delete().in("exercise_id", idsEs);
+    await supabase.from("training_exercises").delete().in("training_day_id", ids);
+    await supabase.from("training_days").delete().in("id", ids);
+    setGiornoAttivo(null); setGiornoArchAttivo(null); setSchedaAperta(null);
+    await carica();
+  };
+
   const eliminaGiorno = async (giornoId) => {
-    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
+    if (!await confermaApp("Eliminare questo giorno e tutti i suoi esercizi/carichi registrati? Non si può annullare.")) return;
     const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giornoId);
     const idsEsercizi = (es || []).map((e) => e.id);
     if (idsEsercizi.length) await supabase.from("training_entries").delete().in("exercise_id", idsEsercizi);
@@ -2753,7 +4089,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   };
 
   const sostituisciConNuovaScheda = async (file) => {
-    if (giorni.length > 0 && !confirm("Il diario attuale (" + giorni.length + " giorno/i) verrà chiuso e archiviato come scheda T.N, con tutti i carichi registrati. Poi importo la nuova scheda dal CSV. Vuoi procedere?")) return;
+    if (giorni.length > 0 && !await confermaApp("Il diario attuale (" + giorni.length + " giorno/i) verrà chiuso e archiviato come scheda T.N, con tutti i carichi registrati. Poi importo la nuova scheda dal CSV. Vuoi procedere?")) return;
     setImportando(true);
     if (giorni.length > 0) {
       const numeri = archiviati.map((g) => parseInt((g.scheda_archiviata || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
@@ -2788,7 +4124,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                 {etichetta}
               </button>
               {isAdmin && (
-                <button onClick={() => eliminaGiorno(g.id)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-rose-500 flex items-center justify-center">
+                <button onClick={() => eliminaGiorno(g.id)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-800 flex items-center justify-center">
                   <X size={9} />
                 </button>
               )}
@@ -2803,14 +4139,18 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       {isAdmin && (
         <div className="space-y-2">
           <label className={`w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-            {importando ? "Importo..." : "📥 Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)"}
+            {importando ? "Importo..." : <><Ic n="download"/> Importa da file CSV: scheda, oppure mobilità e attivazione (aggiunge ai giorni esistenti)</>}
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importaSchedaDaCSV(e.target.files[0]); e.target.value = ""; }} />
           </label>
-          <label className={`w-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
-            🔄 Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
+          <label className={`w-full border border-slate-200 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl py-2 flex items-center justify-center cursor-pointer ${importando ? "opacity-50 pointer-events-none" : ""}`}>
+            <Ic n="sync"/> Nuova scheda: archivia quella attuale (T.1, T.2, ecc.) e importa il CSV
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) sostituisciConNuovaScheda(e.target.files[0]); e.target.value = ""; }} />
           </label>
         </div>
+      )}
+
+      {isAdmin && giorni.length > 0 && (
+        <button onClick={() => eliminaProgramma(giorni, `Eliminare TUTTO il programma attuale (${giorni.length} giorno/i, con esercizi e carichi registrati)? Non si può annullare.`)} className="text-xs text-slate-400 underline"><Ic n="trash"/> Elimina tutto il programma attuale</button>
       )}
 
       {giorni.length === 0 && (
@@ -2839,6 +4179,7 @@ function DiarioAllenamento({ clientId, isAdmin }) {
                 </button>
                 {schedaAperta === et && (
                   <div className="mt-3 space-y-3">
+                    {isAdmin && <button onClick={() => eliminaProgramma(gruppi[et], `Eliminare per sempre la scheda archiviata ${et} (${gruppi[et].length} giorno/i, con esercizi e carichi)? Non si può annullare.`)} className="text-xs text-slate-400 underline"><Ic n="trash"/> Elimina questa scheda archiviata</button>}
                     <div className="flex gap-2 overflow-x-auto pb-1">
                       {gruppi[et].map((g) => (
                         <button key={g.id} onClick={() => setGiornoArchAttivo(g.id)}
@@ -2861,6 +4202,745 @@ function DiarioAllenamento({ clientId, isAdmin }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Diario allenamento — nuovo layout lato cliente (con timer recupero) */
+/* ------------------------------------------------------------------ */
+const TIMER_KEY = "diario_timer_v1";
+const GIORNI_IT = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
+const MESI_IT = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
+function etichettaDataIt(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return `${GIORNI_IT[dt.getDay()]} ${d} ${MESI_IT[m - 1]}`;
+}
+function spostaData(iso, n) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return formatDataLocale(new Date(y, m - 1, d + n));
+}
+function fmtMmSs(s) {
+  s = Math.max(0, Math.round(s));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+// Recupero in secondi: campo del coach, altrimenti letto dalla nota ("Recupero: 1:30", "90s", "2 min"), altrimenti 90
+function recuperoSecondi(es) {
+  if (es.recupero_sec > 0) return es.recupero_sec;
+  const m = String(es.note || "").match(/recupero\s*:?\s*([0-9]+(?::[0-9]{2})?)\s*(min|m|'|s|sec|")?/i);
+  if (m) {
+    if (m[1].includes(":")) { const [a, b] = m[1].split(":").map(Number); return a * 60 + b; }
+    const n = Number(m[1]); const u = (m[2] || "").toLowerCase();
+    if (u === "min" || u === "m" || u === "'") return n * 60;
+    if (u === "s" || u === "sec" || u === '"') return n;
+    return n <= 10 ? n * 60 : n;
+  }
+  return 90;
+}
+function notaPulita(note) {
+  return String(note || "").split(" — ").filter((p) => !/^recupero\s*:/i.test(p.trim())).join(" — ");
+}
+const num = (v) => { if (v === "" || v == null) return null; const n = Number(String(v).replace(",", ".")); return isNaN(n) ? null : n; };
+const fmtKg = (v) => (v == null || v === "" ? "" : String(v).replace(".", ","));
+
+function suonoFine() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    const ctx = new AC(); const t = ctx.currentTime;
+    [660, 880].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.type = "sine"; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, t + i * 0.22); g.gain.exponentialRampToValueAtTime(0.18, t + i * 0.22 + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.22 + 0.2);
+      o.start(t + i * 0.22); o.stop(t + i * 0.22 + 0.22);
+    });
+  } catch (e) { /* senza suono si va avanti */ }
+}
+
+function BarraTimer({ timer, onChange, onVai }) {
+  const [, forza] = useState(0);
+  const avvisato = React.useRef(false);
+  useEffect(() => { avvisato.current = !!timer?.avvisato; }, [timer?.start]);
+  useEffect(() => {
+    if (!timer) return;
+    const tick = () => {
+      forza((x) => x + 1);
+      const resta = timer.dur - (Date.now() - timer.start) / 1000;
+      if (resta <= 0 && !avvisato.current) {
+        avvisato.current = true;
+        try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) {}
+        suonoFine();
+        onChange({ ...timer, avvisato: true });
+      }
+    };
+    const id = setInterval(tick, 250);
+    document.addEventListener("visibilitychange", tick);
+    tick();
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", tick); };
+  }, [timer?.start, timer?.dur]);
+  if (!timer) return null;
+  const resta = timer.dur - (Date.now() - timer.start) / 1000;
+  const fine = resta <= 0;
+  const pct = Math.max(0, Math.min(1, resta / timer.dur));
+  const R = 27, C = 2 * Math.PI * R;
+  const bg = fine ? "#4F8FD0" : "#27466D";
+  return (
+    <div className="fixed left-0 right-0 z-[60] flex justify-center px-3" style={{ bottom: "calc(env(safe-area-inset-bottom) + 76px)" }}>
+      <div className="w-full max-w-md rounded-3xl text-white flex items-center gap-3 px-4 py-3 shadow-xl" style={{ background: bg }}>
+        <svg width="62" height="62" viewBox="0 0 62 62" className="flex-shrink-0">
+          <circle cx="31" cy="31" r={R} fill="none" stroke="rgba(255,255,255,.2)" strokeWidth="5" />
+          <circle cx="31" cy="31" r={R} fill="none" stroke="#fff" strokeWidth="5" strokeLinecap="round"
+            strokeDasharray={C} strokeDashoffset={C * (fine ? 0 : 1 - pct)} transform="rotate(-90 31 31)" />
+        </svg>
+        {fine ? (
+          <>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-lg leading-tight">Si riparte ✨</p>
+              <p className="text-xs opacity-90 truncate">{timer.prossima || "Hai finito il recupero"}</p>
+            </div>
+            <button onClick={onVai} className="bg-white font-bold text-sm rounded-2xl px-6 py-3" style={{ color: "#27466D" }}>Vai</button>
+          </>
+        ) : (
+          <>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold leading-none" style={{ fontSize: 28 }}>{fmtMmSs(resta)}</p>
+              <p className="text-xs opacity-85 mt-1 truncate">Recupero{timer.prossima ? ` · poi ${timer.prossimaCorta}` : ""}</p>
+            </div>
+            <div className="flex gap-1.5 flex-shrink-0">
+              <button onClick={() => onChange({ ...timer, dur: Math.max(5, timer.dur - 15), avvisato: false })} className="px-2.5 py-2 rounded-xl bg-white/15 text-xs font-semibold">−15</button>
+              <button onClick={() => onChange({ ...timer, dur: timer.dur + 15, avvisato: false })} className="px-2.5 py-2 rounded-xl bg-white/15 text-xs font-semibold">+15</button>
+              <button onClick={() => onChange(null)} className="px-2.5 py-2 rounded-xl bg-white/15 text-xs font-semibold">Salta</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CasellaNumero({ valore, suggerimento, fatto, onChange, onBlur, etichetta }) {
+  const vuoto = valore === "" || valore == null;
+  return (
+    <div className="relative">
+      <input inputMode="decimal" value={valore ?? ""} onChange={(e) => onChange(e.target.value.replace(/[^0-9.,]/g, ""))} onBlur={onBlur}
+        placeholder={suggerimento != null && suggerimento !== "" ? fmtKg(suggerimento) : ""} aria-label={etichetta}
+        className="w-full text-center rounded-xl text-lg font-semibold focus:outline-none"
+        style={{ height: 46, border: `1.5px solid ${fatto ? "#C9E0F7" : "#C9E0F7"}`, background: fatto ? "#E1EEFB" : "#fff", color: "#27466D" }} />
+      {vuoto && suggerimento != null && suggerimento !== "" && (
+        <span className="absolute left-0 right-0 bottom-0.5 text-center pointer-events-none" style={{ fontSize: 8.5, color: "#8EBDED" }}>ultima volta</span>
+      )}
+    </div>
+  );
+}
+
+function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId, onSaved, libreria, onVideo, onSerieSpuntata, ultimo, mostraCiclo = true, inScarico = false, altraPalestra = false }) {
+  const nSerie = Math.max(1, Math.min(serieDi(es), 10));
+  const [bozza, setBozza] = useState({}); // { "n-kg": testo }
+  const [nota, setNota] = useState("");
+  const [notaAperta, setNotaAperta] = useState(false);
+  const entryDi = (n) => entries.find((e) => e.numero_serie === n);
+  const notaSalvata = (entries.find((e) => e.note) || {}).note || "";
+  useEffect(() => { setNota(notaSalvata); setNotaAperta(!!notaSalvata); }, [data, notaSalvata]);
+  const info = trovaEsercizioVideo(es.nome, libreria);
+  const parti = partiSuperset(es.nome);
+  const rec = recuperoSecondi(es);
+  const fatta = (n) => { const e = entryDi(n); return !!e && (e.completata === true || (e.completata == null && (e.kg != null || e.ripetizioni))); };
+  const fatteTot = Array.from({ length: nSerie }).filter((_, i) => fatta(i + 1)).length;
+  // carico più basso dell'ultima volta (stessa serie): si chiede il motivo
+  const calo = Array.from({ length: nSerie }).some((_, i) => { const e = entryDi(i + 1); const u = ultime[i + 1]; return !!e && e.kg != null && !!u && u.kg != null && Number(e.kg) < Number(u.kg); });
+  const motiviSalvati = ((entries.find((e) => e.motivo_calo) || {}).motivo_calo || "").split(",").filter(Boolean);
+  // seduta segnata come altra palestra o attrezzi diversi: il confronto con le altre sedute non conta
+  const dopoCambio = altraPalestra; // allenamento di oggi segnato come altra palestra / attrezzi diversi
+  const scegliMotivo = async (codice) => {
+    const nuovi = motiviSalvati.includes(codice) ? motiviSalvati.filter((x) => x !== codice) : [...motiviSalvati, codice];
+    const riga = entries.find((x) => x.numero_serie === 1) || entries[0];
+    if (!riga) return;
+    await supabase.from("training_entries").update({ motivo_calo: nuovi.join(",") || null }).eq("id", riga.id);
+    const altre = entries.filter((x) => x.id !== riga.id && x.motivo_calo);
+    if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
+    onSaved();
+  };
+
+  const valore = (n, campo, p = 1) => {
+    const k = p === 1 ? `${n}-${campo}` : `${n}-${campo}${p}`;
+    if (k in bozza) return bozza[k];
+    const e = entryDi(n);
+    if (p > 1) { const x = e?.extra?.[p]; return campo === "kg" ? (x?.kg ?? "") : (x?.rip ?? ""); }
+    return campo === "kg" ? fmtKg(e?.kg) : (e?.ripetizioni ?? "");
+  };
+  const extraDi = (n, usaUltima) => {
+    const o = {}; const u = (ultime[n] || {}).extra || {};
+    for (let p = 2; p <= parti.length; p++) {
+      const kg = valore(n, "kg", p) !== "" ? valore(n, "kg", p) : (usaUltima ? (u[p]?.kg ?? "") : "");
+      const rip = valore(n, "rip", p) !== "" ? valore(n, "rip", p) : (usaUltima ? (u[p]?.rip ?? "") : "");
+      if (kg !== "" || rip !== "") o[p] = { kg, rip };
+    }
+    return Object.keys(o).length ? o : null;
+  };
+  const salvaSerie = async (n, { kg, rip, completata }) => {
+    const e = entryDi(n);
+    const payload = { kg: num(kg), ripetizioni: rip === "" || rip == null ? null : String(rip) };
+    if (parti.length > 1) payload.extra = extraDi(n, completata === true);
+    if (completata !== undefined) payload.completata = completata;
+    if (!e && payload.kg == null && !payload.ripetizioni && !payload.completata && !payload.extra) return;
+    const op = { clientId, exerciseId: es.id, data, n, payload };
+    const idVero = e && !String(e.id).startsWith("loc-") ? e.id : null;
+    const giaInCoda = leggiCoda().some((x) => x.k === chiaveOp(op));
+    let ok = true;
+    if (giaInCoda) { accodaOp(op); ok = false; inviaCoda(); }
+    else {
+      try {
+        if (idVero) { const { error } = await supabase.from("training_entries").update(payload).eq("id", idVero); if (error) throw error; }
+        else await scriviSerieRemoto(op);
+      } catch (err) { accodaOp(op); ok = false; } // senza rete: resta sul telefono e parte appena possibile
+    }
+    if (ok && payload.kg != null) inviaPushCarichi();
+    setBozza((b) => { const c = { ...b }; Object.keys(c).forEach((k) => { if (k.startsWith(`${n}-`)) delete c[k]; }); return c; });
+    onSaved();
+  };
+  const alBlur = (n) => {
+    const e = entryDi(n);
+    const kgT = `${n}-kg` in bozza ? bozza[`${n}-kg`] : fmtKg(e?.kg);
+    const ripT = `${n}-rip` in bozza ? bozza[`${n}-rip`] : (e?.ripetizioni ?? "");
+    if (!Object.keys(bozza).some((k) => k.startsWith(`${n}-`))) return;
+    salvaSerie(n, { kg: kgT, rip: ripT });
+  };
+  const spunta = async (n) => {
+    const e = entryDi(n);
+    if (fatta(n)) { await salvaSerie(n, { kg: valore(n, "kg"), rip: valore(n, "rip"), completata: false }); return; }
+    const u = ultime[n] || {};
+    const kgT = valore(n, "kg") !== "" ? valore(n, "kg") : fmtKg(u.kg);
+    const ripT = valore(n, "rip") !== "" ? valore(n, "rip") : (u.ripetizioni ?? "");
+    await salvaSerie(n, { kg: kgT, rip: ripT, completata: true });
+    const tutte = Array.from({ length: nSerie }).every((_, i) => i + 1 === n || fatta(i + 1));
+    onSerieSpuntata(es, n, nSerie, rec, { kg: kgT, rip: ripT }, tutte);
+  };
+  const salvaNota = async () => {
+    if (nota === notaSalvata) return;
+    const prima = entries.find((x) => x.numero_serie === 1) || entries[0];
+    if (prima || nota) {
+      const op = { clientId, exerciseId: es.id, data, n: prima?.numero_serie ?? 1, payload: { note: nota || null } };
+      try { await scriviSerieRemoto(op); } catch (err) { accodaOp(op); }
+    }
+    onSaved();
+  };
+  const notaCoach = notaPulita(es.note);
+
+  return (
+    <div id={`card-${es.id}`} className="bg-white rounded-3xl p-4" style={{ border: "1px solid #C9E0F7", scrollMarginTop: 12 }}>
+      <button onClick={onToggle} className="w-full flex items-start justify-between gap-2 text-left">
+        <div className="min-w-0">
+          <h3 className="font-bold text-base leading-snug" style={{ color: "#27466D" }}>{es.nome}{fatteTot === nSerie ? " ✓" : ""}</h3>
+          <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>
+            {es.tecnica === "top_back" && es.serie_top > 0 ? `${es.serie_top} top set + ${es.serie_backoff || 0} back-off` : `${nSerie} serie`}{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{es.tecnica && es.tecnica !== "top_back" ? ` · ${nomeTecnica(es.tecnica)}` : ""}{notaCoach ? ` · ${notaCoach}` : ""}
+            {!aperto && fatteTot > 0 ? ` · ${fatteTot}/${nSerie} fatte` : ""}
+          </p>
+        </div>
+        <ChevronRight size={18} stroke="#4F8FD0" className={`flex-shrink-0 mt-1 transition-transform ${aperto ? "rotate-90" : ""}`} />
+      </button>
+      {aperto && (
+        <>
+          <div className="flex flex-wrap gap-2 mt-2.5">
+            {info && <button onClick={() => onVideo(info)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: "#E1EEFB", color: "#3F78B3" }}>▷ {info.video_url ? "Guarda il video" : "Tecnica"}</button>}
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: "#E1EEFB", color: "#3F78B3" }}>◷ Recupero {fmtMmSs(rec)}</span>
+          </div>
+          <div className="grid gap-2 mt-3 text-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px", fontSize: 10, color: "#7a8da3", letterSpacing: ".06em" }}>
+            <span></span><span>KG</span><span>RIP</span><span></span>
+          </div>
+          {parti.length > 1 && <p className="text-xs mt-1.5" style={{ color: "#3F78B3" }}>Superserie: segna carico e ripetizioni di ogni esercizio, in alternanza ✨</p>}
+          <div className="space-y-2 mt-1">
+            {Array.from({ length: nSerie }).map((_, i) => {
+              const n = i + 1; const ok = fatta(n); const u = ultime[n] || {};
+              const quandoVecchio = (() => {
+                if (ok || !u.data || !ultime._ultima || u.data >= ultime._ultima) return null;
+                const gg = Math.round((new Date(`${data}T12:00:00`) - new Date(`${u.data}T12:00:00`)) / 86400000);
+                const sett = Math.floor(gg / 7);
+                const dd = u.data.split("-").reverse().slice(0, 2).join("/");
+                return sett >= 1 ? `${sett} ${sett === 1 ? "settimana" : "settimane"} fa · ${dd}` : `${dd}`;
+              })();
+              return (
+                <div key={n} className={parti.length > 1 ? "rounded-2xl p-1.5 space-y-1.5" : ""} style={parti.length > 1 ? { background: "#F5FAFE" } : undefined}>
+                {parti.length > 1 && <p className="text-[11px] font-semibold pl-8 truncate" style={{ color: "#3F78B3" }}>A · {parti[0]}</p>}
+                <div id={`serie-${es.id}-${n}`} className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
+                  <span className="text-center font-bold leading-tight" style={{ color: "#7a8da3" }}>{n}{etichettaSerie(es, n) && <span className="block font-semibold" style={{ fontSize: 8, color: "#3F78B3" }}>{etichettaSerie(es, n) === "TOP" ? "TOP" : "BACK"}</span>}</span>
+                  <CasellaNumero valore={valore(n, "kg")} suggerimento={ok ? null : u.kg} fatto={ok} etichetta={`Chilogrammi serie ${n}`}
+                    onChange={(v) => setBozza((b) => ({ ...b, [`${n}-kg`]: v }))} onBlur={() => alBlur(n)} />
+                  <CasellaNumero valore={valore(n, "rip")} suggerimento={ok ? null : u.ripetizioni} fatto={ok} etichetta={`Ripetizioni serie ${n}`}
+                    onChange={(v) => setBozza((b) => ({ ...b, [`${n}-rip`]: v }))} onBlur={() => alBlur(n)} />
+                  <button onClick={() => spunta(n)} aria-label={ok ? "Serie fatta" : "Segna come fatta"}
+                    className="rounded-full flex items-center justify-center"
+                    style={{ width: 44, height: 44, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
+                    <Check size={20} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
+                  </button>
+                </div>
+                {quandoVecchio && <p className="pl-8" style={{ fontSize: 10, color: "#7a8da3" }}>Ultimo valore segnato: {quandoVecchio}</p>}
+                {parti.slice(1).map((nomeP, k) => {
+                  const p = k + 2; const uu = ((u.extra || {})[p]) || {};
+                  return (
+                    <div key={p}>
+                      <p className="text-[11px] font-semibold pl-8 truncate mb-1" style={{ color: "#3F78B3" }}>{String.fromCharCode(64 + p)} · {nomeP}</p>
+                      <div className="grid gap-2 items-center" style={{ gridTemplateColumns: "28px 1fr 1fr 44px" }}>
+                        <span></span>
+                        <CasellaNumero valore={valore(n, "kg", p)} suggerimento={ok ? null : uu.kg} fatto={ok} etichetta={`Chilogrammi ${nomeP} serie ${n}`}
+                          onChange={(v) => setBozza((b) => ({ ...b, [`${n}-kg${p}`]: v }))} onBlur={() => alBlur(n)} />
+                        <CasellaNumero valore={valore(n, "rip", p)} suggerimento={ok ? null : uu.rip} fatto={ok} etichetta={`Ripetizioni ${nomeP} serie ${n}`}
+                          onChange={(v) => setBozza((b) => ({ ...b, [`${n}-rip${p}`]: v }))} onBlur={() => alBlur(n)} />
+                        <span></span>
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+              );
+            })}
+          </div>
+          {!inScarico && dopoCambio && (
+            <div className="mt-3 rounded-2xl p-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
+              <p className="text-sm font-semibold" style={{ color: "#6b5d2e" }}>Oggi in un'altra palestra ✨</p>
+              <p className="text-xs mt-0.5" style={{ color: "#6b5d2e" }}>Macchinari e attrezzi diversi: oggi i carichi non si confrontano con le altre sedute{calo ? ", quindi un peso più basso non è un passo indietro" : ""}. Segna quello che usi, Morgana lo tiene presente 🫶🏻</p>
+            </div>
+          )}
+          {!inScarico && !dopoCambio && (calo || motiviSalvati.length > 0) && (
+            <div className="mt-3 rounded-2xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+              <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Carico più basso dell'ultima volta: com'è andata?</p>
+              <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Capita, è normale! Scegli cosa c'entra di più: aiuta a leggere bene i progressi ✨</p>
+              <div className="flex flex-wrap gap-2 mt-2.5">
+                {MOTIVI_CALO.filter((m) => m[0] !== "scarico" && !MOTIVI_SOLO_COACH.includes(m[0]) && (mostraCiclo || m[0] !== "ciclo")).map(([k, l]) => {
+                  const on = motiviSalvati.includes(k);
+                  return <button key={k} onClick={() => scegliMotivo(k)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
+                })}
+              </div>
+            </div>
+          )}
+          {notaAperta ? (
+            <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salvaNota} placeholder="Come è andata? Scrivi qui una nota ✨"
+              className="w-full mt-3 rounded-xl px-3 py-3 text-sm focus:outline-none" style={{ border: "1.5px dashed #C9E0F7", color: "#27466D" }} />
+          ) : (
+            <button onClick={() => setNotaAperta(true)} className="w-full mt-3 rounded-xl py-3 text-sm font-semibold" style={{ border: "1.5px dashed #C9E0F7", color: "#3F78B3" }}>+ Aggiungi una nota</button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function NotaFinaleAllenamento({ clientId, data }) {
+  const [nota, setNota] = useState("");
+  const [salvata, setSalvata] = useState("");
+  const [stato, setStato] = useState("");
+  useEffect(() => {
+    let vivo = true;
+    setNota(""); setSalvata(""); setStato("");
+    (async () => {
+      try {
+        const { data: r } = await supabase.from("note_allenamento").select("nota").eq("client_id", clientId).eq("data", data).maybeSingle();
+        if (vivo) { setNota(r?.nota || ""); setSalvata(r?.nota || ""); }
+      } catch (e) { /* ignora */ }
+    })();
+    return () => { vivo = false; };
+  }, [clientId, data]);
+  const salva = async () => {
+    if (nota === salvata) return;
+    setStato("Salvo…");
+    const { error } = nota.trim()
+      ? await supabase.from("note_allenamento").upsert({ client_id: clientId, data, nota: nota.trim(), updated_at: new Date().toISOString() })
+      : await supabase.from("note_allenamento").delete().eq("client_id", clientId).eq("data", data);
+    if (error) { setStato("Non siamo riusciti a salvare, riprova 🫶🏻"); return; }
+    setSalvata(nota); setStato("Nota salvata ✓");
+  };
+  return (
+    <div className="rounded-2xl p-3" style={{ background: "#fff", border: "1px solid #C9E0F7" }}>
+      <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Nota finale dell'allenamento</p>
+      <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Com'è andata in generale? Energia, sensazioni, cosa ricordare per la prossima volta.</p>
+      <textarea value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salva} rows={3} placeholder="Scrivi qui la tua nota finale ✨" className="w-full mt-2 text-sm rounded-xl px-3 py-2 border" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
+      {stato && <p className="text-xs mt-1" style={{ color: "#3F78B3" }}>{stato}</p>}
+    </div>
+  );
+}
+
+function DiarioClienteNuovo({ clientId, onStorico, etichettaStorico = "Storico", isAdmin = false }) {
+  const [inGruppo, setInGruppo] = useState(false); // clienti dei gruppi Bulb: per ora nessun allenamento, mobilità o attivazione
+  useEffect(() => { supabase.from("clients").select("gruppo_id").eq("id", clientId).maybeSingle().then(({ data }) => setInGruppo(!isAdmin && !!data?.gruppo_id)).catch(() => {}); }, [clientId]);
+  const [giorni, setGiorni] = useState([]);
+  const [giornoId, setGiornoId] = useState(null);
+  const [data, setData] = useState(formatDataLocale(new Date()));
+  const [esercizi, setEsercizi] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [storicoEntries, setStoricoEntries] = useState([]);
+  const [storicoNome, setStoricoNome] = useState([]); // carichi di programmi precedenti, ritrovati per nome dell'esercizio
+  const [libreria, setLibreria] = useState([]);
+  const [sessoCl, setSessoCl] = useState("");
+  const [scarCl, setScarCl] = useState([]);
+  const [cambiCl, setCambiCl] = useState([]);
+  const [aperti, setAperti] = useState({});
+  const [prep, setPrep] = useState([]);
+  const [infoEs, setInfoEs] = useState(null);
+  const [caricando, setCaricando] = useState(true);
+  const [timer, setTimerState] = useState(() => { try { const t = JSON.parse(localStorage.getItem(TIMER_KEY) || "null"); return t && Date.now() - t.start < 6 * 3600 * 1000 ? t : null; } catch (e) { return null; } });
+  const setTimer = (t) => { setTimerState(t); try { t ? localStorage.setItem(TIMER_KEY, JSON.stringify(t)) : localStorage.removeItem(TIMER_KEY); } catch (e) {} };
+
+  useEffect(() => {
+    (async () => {
+      const rg = await supabase.from("training_days").select("*").eq("client_id", clientId).order("ordine");
+      let g = rg.data;
+      const kG = `diario_giorni_${clientId}`;
+      if (rg.error || !g) { try { g = JSON.parse(localStorage.getItem(kG) || "null"); } catch (e) { g = null; } }
+      else { try { localStorage.setItem(kG, JSON.stringify(g)); } catch (e) { /* ignora */ } }
+      const attivi = (g || []).filter((x) => !x.scheda_archiviata);
+      setGiorni(attivi);
+      if (attivi.length) setGiornoId((cur) => cur || attivi[0].id);
+      setCaricando(false);
+      try {
+        const { data: c } = await supabase.from("clients").select("tipo_servizio, video_attivi, sesso").eq("id", clientId).maybeSingle();
+        if (c) setSessoCl(c.sesso || "");
+        try { const { data: sc } = await supabase.from("scarichi").select("dal, al").eq("client_id", clientId); setScarCl(sc || []); } catch (e) { /* ignora */ }
+        try { const { data: cp } = await supabase.from("cambi_palestra").select("dal, tipo").eq("client_id", clientId).order("dal"); setCambiCl(cp || []); } catch (e) { /* ignora */ }
+        if (c && c.video_attivi !== false && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido")) {
+          await caricaSceltaVideo();
+          const { data: v } = await supabase.from("esercizi_video").select("*").order("ordine");
+          setLibreria(v || []);
+        }
+      } catch (e) {}
+    })();
+  }, [clientId]);
+
+  const caricaGiorno = async () => {
+    if (!giornoId) return;
+    const cKey = `diario_cache_${clientId}_${giornoId}`;
+    let es, pr, ids, en = [];
+    try {
+      const r1 = await supabase.from("training_exercises").select("*").eq("training_day_id", giornoId).order("ordine");
+      if (r1.error) throw r1.error;
+      const tutti = r1.data || [];
+      const r2 = await supabase.from("training_exercises").select("*").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
+      if (r2.error) throw r2.error;
+      es = tutti.filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
+      pr = [...(r2.data || []), ...tutti.filter((e) => e.tipo === "attivazione")];
+      ids = [...es, ...pr].map((e) => e.id);
+      if (ids.length) { const r3 = await supabase.from("training_entries").select("*").in("exercise_id", ids); if (r3.error) throw r3.error; en = r3.data || []; }
+    } catch (err) {
+      // senza rete: si tiene quello che è già a schermo (o l'ultima copia salvata) e si aggiungono i carichi in attesa
+      if (!esercizi.length) {
+        try { const c = JSON.parse(localStorage.getItem(cKey) || "null"); if (c) { setEsercizi(c.es); setPrep(c.pr); setStoricoEntries(sovrapponiCoda(c.en || [], clientId)); return; } } catch (e2) { /* ignora */ }
+      }
+      setStoricoEntries((prev) => sovrapponiCoda(prev, clientId));
+      return;
+    }
+    setEsercizi(es);
+    setPrep(pr);
+    try { localStorage.setItem(cKey, JSON.stringify({ es, pr, en })); } catch (e3) { /* ignora */ }
+    if (ids.length) {
+      setStoricoEntries(sovrapponiCoda(en, clientId));
+      // Dopo un aggiornamento del programma gli esercizi mantenuti hanno un id nuovo: i vecchi carichi si ritrovano per nome
+      try {
+        const nn = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[-_()]/g, " ").replace(/\s+/g, " ").trim();
+        const { data: tuttiEs } = await supabase.from("training_exercises").select("id, nome").eq("client_id", clientId);
+        const perNome = {};
+        (tuttiEs || []).forEach((x) => { const k = nn(x.nome); if (k) (perNome[k] = perNome[k] || []).push(x.id); });
+        const mappaId = {}; // id vecchio -> id esercizio attuale
+        [...es, ...pr].forEach((cur) => { (perNome[nn(cur.nome)] || []).forEach((vecchio) => { if (!ids.includes(vecchio)) mappaId[vecchio] = cur.id; }); });
+        const vecchi = Object.keys(mappaId);
+        if (vecchi.length) {
+          const { data: en2 } = await supabase.from("training_entries").select("*").in("exercise_id", vecchi);
+          setStoricoNome((en2 || []).map((e) => ({ ...e, exercise_id: mappaId[e.exercise_id] })));
+        } else setStoricoNome([]);
+      } catch (e) { /* senza rete si tiene quanto già trovato */ }
+    } else { setStoricoEntries(sovrapponiCoda([], clientId)); setStoricoNome([]); }
+  };
+  useEffect(() => { caricaGiorno(); setAperti({}); }, [giornoId]);
+  const caricaRef = React.useRef(caricaGiorno); caricaRef.current = caricaGiorno;
+  useEffect(() => { const h = () => caricaRef.current(); window.addEventListener("coda-sync", h); return () => window.removeEventListener("coda-sync", h); }, []);
+  useEffect(() => { setEntries(storicoEntries.filter((e) => e.data === data)); }, [storicoEntries, data]);
+
+  // ultimi valori per esercizio: dalla data più recente precedente a quella scelta
+  const ultimePer = (exId) => {
+    const prima = [...storicoEntries, ...storicoNome].filter((e) => e.exercise_id === exId && e.data < data && (e.kg != null || e.ripetizioni));
+    if (!prima.length) return {};
+    const d = prima.map((e) => e.data).sort().pop();
+    // per ogni serie: il valore dell'ultimo allenamento; se in quell'allenamento quella serie non è stata segnata, si risale a quello prima
+    const m = {};
+    [...prima].sort((a, b) => a.data.localeCompare(b.data)).forEach((e) => { m[e.numero_serie] = e; });
+    m._ultima = d;
+    return m;
+  };
+
+  const onSerieSpuntata = (es, n, nSerie, rec, valori, tutte) => {
+    const idx = esercizi.findIndex((x) => x.id === es.id);
+    if (tutte) {
+      // esercizio finito: si chiude e si apre quello sotto
+      const prossimo = esercizi[idx + 1];
+      setAperti((a) => ({ ...a, [es.id]: false, ...(prossimo ? { [prossimo.id]: true } : {}) }));
+      if (prossimo) setTimeout(() => { const el = document.getElementById(`card-${prossimo.id}`); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 250);
+    }
+    const ultima = idx === esercizi.length - 1 && n >= nSerie;
+    if (ultima) { setTimer(null); return; }
+    let prossimaEs = es, prossimaN = n + 1;
+    if (n >= nSerie) { prossimaEs = esercizi[idx + 1]; prossimaN = 1; }
+    const u = ultimePer(prossimaEs.id)[prossimaN] || {};
+    const kg = u.kg != null ? fmtKg(u.kg) : fmtKg(valori.kg);
+    const rip = u.ripetizioni ?? valori.rip;
+    const dettaglio = kg || rip ? ` · ${kg ? kg + " kg" : ""}${kg && rip ? " × " : ""}${rip || ""}` : "";
+    setTimer({ start: Date.now(), dur: rec, avvisato: false, prossimaCorta: `serie ${prossimaN}`, prossima: `Serie ${prossimaN}${dettaglio}`, esId: prossimaEs.id, n: prossimaN });
+  };
+  const vai = () => {
+    const t = timer; setTimer(null);
+    if (t) {
+      setAperti((a) => ({ ...a, [t.esId]: true }));
+      setTimeout(() => { const el = document.getElementById(`serie-${t.esId}-${t.n}`); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 120);
+    }
+  };
+
+  const prepFatta = (p) => entries.some((e) => e.exercise_id === p.id && e.completata === true);
+  const prepCompleta = prep.length > 0 && prep.every(prepFatta);
+  const esCompleto = (es) => { const n = Math.max(1, Math.min(serieDi(es), 10)); const en = entries.filter((e) => e.exercise_id === es.id); return Array.from({ length: n }).every((_, i) => { const x = en.find((y) => y.numero_serie === i + 1); return !!x && (x.completata === true || (x.completata == null && (x.kg != null || x.ripetizioni))); }); };
+  const tuttiFatti = esercizi.length > 0 && esercizi.every(esCompleto);
+  const correnteKey = prep.length > 0 && !prepCompleta ? "prep" : (esercizi.find((e) => !esCompleto(e)) || {}).id;
+  useEffect(() => { if (tuttiFatti) { try { navigator.vibrate && navigator.vibrate(120); } catch (e) {} setTimeout(() => { const el = document.getElementById("fine-allenamento"); el && el.scrollIntoView({ behavior: "smooth", block: "center" }); }, 300); } }, [tuttiFatti, data]);
+  const spuntaPrep = async (p) => {
+    const e = entries.find((x) => x.exercise_id === p.id);
+    if (e) await supabase.from("training_entries").update({ completata: !(e.completata === true) }).eq("id", e.id);
+    else await supabase.from("training_entries").insert({ client_id: clientId, exercise_id: p.id, data, numero_serie: 1, completata: true });
+    const resto = prep.filter((x) => x.id !== p.id).every(prepFatta);
+    if (!prepFatta(p) && resto) {
+      setAperti((a) => ({ ...a, prep: false, ...(esercizi[0] ? { [esercizi[0].id]: true } : {}) }));
+      if (esercizi[0]) setTimeout(() => { const el = document.getElementById(`card-${esercizi[0].id}`); el && el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 250);
+    }
+    caricaGiorno();
+  };
+  if (inGruppo) return (
+    <div className="px-5 pt-6 pb-40 space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold" style={{ color: "#27466D" }}>Diario allenamento</h1>
+      </div>
+      <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
+    </div>
+  );
+  if (caricando) return <Spinner />;
+  const giorno = giorni.find((g) => g.id === giornoId);
+  const oggi = formatDataLocale(new Date());
+
+  return (
+    <div className="px-5 pt-6 pb-40 space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold" style={{ color: "#27466D" }}>Diario allenamento</h1>
+        <p className="text-sm mt-1" style={{ color: "#7a8da3" }}>Registra carichi e ripetizioni, serie dopo serie.</p>
+      </div>
+      <StatoSyncLog />
+      {giorni.length > 0 && (() => {
+        const altra = cambiCl.some((x) => x.dal === data);
+        const imposta = async () => {
+          if (altra) { setCambiCl((l) => l.filter((x) => x.dal !== data)); await supabase.from("cambi_palestra").delete().eq("client_id", clientId).eq("dal", data); }
+          else { setCambiCl((l) => [...l, { dal: data, tipo: "Altra palestra" }]); await supabase.from("cambi_palestra").insert({ client_id: clientId, dal: data, tipo: "Altra palestra" }); }
+        };
+        return altra ? (
+          <div className="rounded-2xl p-3.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+            <p className="text-sm font-semibold">Oggi ti alleni in un'altra palestra ✨</p>
+            <p className="text-xs mt-0.5">Macchinari e pesi diversi non sono un passo indietro: questo allenamento non entra nel confronto dei carichi. Morgana lo tiene presente 🫶🏻</p>
+            <button onClick={imposta} className="text-xs font-semibold mt-1.5 underline">Annulla, ero nella palestra di sempre</button>
+          </div>
+        ) : (
+          <button onClick={imposta} className="w-full rounded-2xl py-2.5 text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px dashed #C9E0F7" }}>Oggi mi alleno in un'altra palestra o con attrezzi diversi</button>
+        );
+      })()}
+
+      {giorni.length === 0 ? (
+        isAdmin ? (
+          <Card className="p-6 text-center space-y-3">
+            <p className="text-sm text-slate-500">Questa cliente non ha ancora un programma 🫶🏻</p>
+            <button onClick={onStorico} className="w-full text-white text-sm font-semibold rounded-xl py-2.5" style={{ background: "#27466D" }}><Ic n="download"/> Importa il programma da CSV (o crealo a mano)</button>
+          </Card>
+        ) : (
+          <Card className="p-6 text-center text-slate-400 text-sm">Il tuo programma di allenamento comparirà qui appena Morgana lo prepara ✨</Card>
+        )
+      ) : (
+        <>
+          <div className="flex gap-2 overflow-x-auto -mx-5 px-5 pb-1">
+            {giorni.map((g, i) => (
+              <button key={g.id} onClick={() => setGiornoId(g.id)} className="flex-shrink-0 whitespace-nowrap px-4 py-2 rounded-full text-sm font-semibold"
+                style={giornoId === g.id ? { background: "#27466D", color: "#fff", border: "1px solid #27466D" } : { background: "#fff", color: "#3F78B3", border: "1px solid #C9E0F7" }}>
+                Giorno {i + 1}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setData(spostaData(data, -1))} aria-label="Giorno precedente" className="w-9 h-9 rounded-full bg-white flex items-center justify-center" style={{ border: "1px solid #C9E0F7", color: "#3F78B3" }}>‹</button>
+              <button onClick={() => setData(oggi)} className="font-bold text-[15px]" style={{ color: "#27466D" }}>{etichettaDataIt(data)}</button>
+              <button onClick={() => setData(spostaData(data, 1))} aria-label="Giorno successivo" className="w-9 h-9 rounded-full bg-white flex items-center justify-center" style={{ border: "1px solid #C9E0F7", color: "#3F78B3" }}>›</button>
+            </div>
+            <button onClick={onStorico} className="text-sm font-semibold text-right" style={{ color: "#3F78B3" }}>{etichettaStorico}</button>
+          </div>
+
+          {giorno && <p className="text-xs -mt-1" style={{ color: "#7a8da3" }}>{nomeGiornoPulito(giorno.nome)}</p>}
+
+          {prep.length > 0 && (() => {
+            const aperta = aperti.prep ?? correnteKey === "prep";
+            const fatte = prep.filter(prepFatta).length;
+            return (
+              <div className="bg-white rounded-3xl p-4" style={{ border: "1px solid #C9E0F7" }}>
+                <button onClick={() => setAperti((a) => ({ ...a, prep: !aperta }))} className="w-full flex items-start justify-between gap-2 text-left">
+                  <div>
+                    <h3 className="font-bold text-base" style={{ color: "#27466D" }}>Mobilità pre allenamento{prepCompleta ? " ✓" : ""}</h3>
+                    <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>{fatte}/{prep.length} fatti · solo da spuntare</p>
+                  </div>
+                  <ChevronRight size={18} stroke="#4F8FD0" className={`flex-shrink-0 mt-1 transition-transform ${aperta ? "rotate-90" : ""}`} />
+                </button>
+                {aperta && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "#E1EEFB", color: "#27466D" }}><Ic n="timer"/> Fai 30/60 secondi per ogni esercizio</p>
+                    {prep.map((p) => {
+                      const ok = prepFatta(p); const info = trovaEsercizioVideo(p.nome, libreria);
+                      return (
+                        <div key={p.id} className="flex items-center gap-3 py-2" style={{ borderTop: "1px solid #EEF3F8" }}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold" style={{ color: "#27466D" }}>{p.nome}</p>
+                            {info && <button onClick={() => setInfoEs(info)} className="text-xs font-semibold mt-0.5" style={{ color: "#3F78B3" }}>▷ {info.video_url ? "Guarda il video" : "Tecnica"}</button>}
+                          </div>
+                          <button onClick={() => spuntaPrep(p)} aria-label={ok ? "Fatto" : "Segna come fatto"} className="rounded-full flex items-center justify-center flex-shrink-0"
+                            style={{ width: 44, height: 44, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
+                            <Check size={20} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          {esercizi.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Gli esercizi di questo giorno li aggiunge Morgana ✨</Card>}
+          {esercizi.map((es) => (
+            <EsercizioDiario key={es.id + data} es={es} aperto={aperti[es.id] ?? correnteKey === es.id}
+              onToggle={() => setAperti((a) => ({ ...a, [es.id]: !(a[es.id] ?? correnteKey === es.id) }))}
+              entries={entries.filter((e) => e.exercise_id === es.id)} ultime={ultimePer(es.id)} data={data} clientId={clientId}
+              onSaved={caricaGiorno} libreria={libreria} onVideo={setInfoEs} onSerieSpuntata={onSerieSpuntata} mostraCiclo={sessoCl !== "M"} inScarico={scarCl.some((x) => data >= x.dal && data <= x.al)} altraPalestra={cambiCl.some((x) => x.dal === data)} />
+          ))}
+          {tuttiFatti ? (
+            <div id="fine-allenamento" className="rounded-3xl p-5 text-center" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7" }}>
+              <p className="font-bold text-base" style={{ color: "#27466D" }}>Allenamento completato ✨</p>
+              <p className="text-sm mt-1" style={{ color: "#3F78B3" }}>Ora dedica 5 minuti allo stretching 🧘🏻‍♀️ aiuta il recupero e scioglie la tensione. Brava, grande lavoro 💪🏻</p>
+            </div>
+          ) : esercizi.length > 0 && <p className="text-center text-xs pt-1" style={{ color: "#7a8da3" }}>Ogni serie conta: brava, stai andando alla grande 💪🏻</p>}
+          {esercizi.length > 0 && <NotaFinaleAllenamento clientId={clientId} data={data} />}
+        </>
+      )}
+      {infoEs && <EsercizioInfoModal es={infoEs} onClose={() => setInfoEs(null)} />}
+      <BarraTimer timer={timer} onChange={setTimer} onVai={vai} />
+    </div>
+  );
+}
+
+// Coach: dossier unico per cliente (tutti i check con foto, misure, note e analisi) da salvare in PDF e allegare alla chat
+function DossierCheck({ client, onClose }) {
+  const [dati, setDati] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const [c, v, n] = await Promise.all([
+        supabase.from("checkins").select("*").eq("client_id", client.id).order("data_check", { ascending: true }),
+        supabase.from("valutazione_estetica").select("checkin_id, voti, analisi").eq("client_id", client.id),
+        supabase.from("notes").select("*").eq("client_id", client.id).order("data", { ascending: true }),
+      ]);
+      const slots = [["foto_frontale_path", "Frontale"], ["foto_laterale_path", "Laterale destra"], ["foto_posteriore_path", "Posteriore"], ["foto_extra_path", "Laterale sinistra"]];
+      const checks = await Promise.all((c.data || []).map(async (k) => {
+        const foto = (await Promise.all(slots.filter(([key]) => k[key]).map(async ([key, label]) => {
+          const { data } = await supabase.storage.from("progress-photos").createSignedUrl(k[key], 3600);
+          return data?.signedUrl ? { label, url: data.signedUrl } : null;
+        }))).filter(Boolean);
+        return { ...k, foto };
+      }));
+      if (vivo) setDati({ checks, val: Object.fromEntries((v.data || []).map((x) => [x.checkin_id, x])), note: n.data || [] });
+    })();
+    return () => { vivo = false; };
+  }, [client.id]);
+
+  const fmt = (d) => (d ? d.split("-").reverse().join("/") : "");
+  const MIS = [["peso_kg", "Peso", "kg"], ["spalle_cm", "Spalle", "cm"], ["collo_cm", "Collo", "cm"], ["petto_cm", "Petto", "cm"], ["braccio_dx_cm", "Braccio", "cm"], ["sopra_ombelico_cm", "Sopra ombelico", "cm"], ["ombelico_cm", "Ombelico", "cm"], ["sotto_ombelico_cm", "Sotto ombelico", "cm"], ["glutei_cm", "Glutei", "cm"], ["coscia_dx_cm", "Coscia", "cm"]];
+  const ETI_TESTO = { sintesi: "Sintesi", forti: "Punti forti", migliorare: "Da migliorare", osservazioni: "Osservazioni coach", suggerimenti: "Suggerimenti", qualita: "Qualità dei dati" };
+  const eta = calcolaEta(client.data_nascita) ?? client.eta;
+  const nCheck = dati?.checks.length || 0;
+  const nFoto = (dati?.checks || []).reduce((s, k) => s + k.foto.length, 0);
+
+  return createPortal(
+    <div className="scheda-overlay fixed inset-0 bg-black/50 z-50 overflow-y-auto p-3 print:bg-white print:p-0">
+      <style>{`
+        @page { size: A4; margin: 10mm; }
+        @media print {
+          html, body { height: auto !important; }
+          #root { display: none !important; }
+          .scheda-overlay { position: static !important; overflow: visible !important; background: white !important; }
+          .scheda-foglio { box-shadow: none !important; border-radius: 0 !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; font-size: 10px !important; }
+          .no-print { display: none !important; }
+          .dossier-check { break-inside: avoid; page-break-inside: avoid; }
+        }
+      `}</style>
+      <div className="scheda-foglio bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-auto p-4 space-y-4 text-slate-800">
+        <div className="flex justify-between items-start border-b border-slate-200 pb-2">
+          <div>
+            <p className="font-semibold text-base leading-tight">Dossier check · {[client.nome, client.cognome].filter(Boolean).join(" ")}</p>
+            <p className="text-slate-500 text-[11px]">
+              {[client.sesso === "M" ? "Uomo" : client.sesso ? "Donna" : null, eta ? `${eta} anni` : null, client.altezza_cm ? `${client.altezza_cm} cm` : null, client.obiettivo_attuale ? `Obiettivo: ${labelObiettivo(client.obiettivo_attuale)}` : null].filter(Boolean).join(" · ")}
+            </p>
+            <p className="text-slate-400 text-[11px]">{nCheck} check · {nFoto} foto · generato il {fmt(formatDataLocale(new Date()))}. Le foto sono in ordine: frontale, laterale destra, posteriore, laterale sinistra.</p>
+          </div>
+          <button onClick={onClose} className="no-print text-slate-300 hover:text-slate-500"><X size={20} /></button>
+        </div>
+        {!dati && <p className="text-slate-400 text-sm">Preparo il dossier e carico le foto...</p>}
+        {dati && (
+          <button onClick={() => window.print()} className="no-print w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">Stampa / Salva PDF (poi allegalo alla chat)</button>
+        )}
+        {dati && dati.checks.map((k, i) => {
+          const v = dati.val[k.id];
+          const prec = i > 0 ? dati.checks[i - 1] : null;
+          return (
+            <div key={k.id} className="dossier-check border border-slate-200 rounded-xl p-3 space-y-2">
+              <p className="font-semibold text-sm">Check {i + 1} · {fmt(k.data_check)}{k.fase_mestruale ? ` · fase ${k.fase_mestruale}` : ""}</p>
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-slate-400 text-left"><th className="font-medium">Misura</th><th className="font-medium text-right">Valore</th><th className="font-medium text-right">Δ prec.</th></tr></thead>
+                <tbody>
+                  {MIS.filter(([key]) => k[key] != null).map(([key, label, u]) => {
+                    const d = prec && prec[key] != null ? Math.round((k[key] - prec[key]) * 10) / 10 : null;
+                    return <tr key={key} className="border-t border-slate-100"><td>{label}</td><td className="text-right tabular-nums">{k[key]} {u}</td><td className="text-right tabular-nums text-slate-500">{d == null ? "" : (d > 0 ? "+" : "") + d}</td></tr>;
+                  })}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-slate-600">
+                {[k.energia != null && `Energia ${k.energia}/5`, k.sonno != null && `Sonno ${k.sonno}/5`, k.aderenza_cibo != null && `Aderenza alimentazione ${k.aderenza_cibo}/5`, k.aderenza_allenamento != null && `Aderenza allenamento ${k.aderenza_allenamento}/5`].filter(Boolean).join(" · ")}
+              </p>
+              {k.note_cliente && <p className="text-[11px]"><b>Note della cliente:</b> {k.note_cliente}</p>}
+              {k.nota_foto_coach && <p className="text-[11px]"><b>Nota coach sulle foto:</b> {k.nota_foto_coach}</p>}
+              {v?.voti && Object.keys(v.voti).length > 0 && <p className="text-[11px]"><b>Voti estetici (1-5):</b> {Object.entries(v.voti).map(([a, n]) => `${a} ${n}`).join(" · ")}</p>}
+              {v?.analisi && Object.entries(v.analisi).filter(([, t]) => t).map(([a, t]) => <p key={a} className="text-[11px]"><b>{ETI_TESTO[a] || a}:</b> {String(t)}</p>)}
+              {k.foto.length > 0 && (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {k.foto.map((f, j) => (
+                    <div key={j}><img src={f.url} alt={f.label} className="w-full object-cover rounded-md" style={{ aspectRatio: "3 / 4" }} /><p className="text-[9px] text-slate-400 text-center">{f.label}</p></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {dati && dati.note.length > 0 && (
+          <div className="dossier-check border border-slate-200 rounded-xl p-3 space-y-1">
+            <p className="font-semibold text-sm">Note della coach</p>
+            {dati.note.map((n) => <p key={n.id} className="text-[11px]"><b>{fmt(n.data)}</b>{n.tipo ? ` (${n.tipo})` : ""}: {n.testo}</p>)}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function DiarioClienteHost({ clientId, isAdmin = false }) {
+  const [storico, setStorico] = useState(false);
+  if (storico) return (
+    <div>
+      <button onClick={() => setStorico(false)} className="px-5 pt-5 text-sm font-semibold flex items-center gap-1" style={{ color: "#3F78B3" }}><ArrowLeft size={16} /> Torna al diario</button>
+      <DiarioAllenamento clientId={clientId} isAdmin={isAdmin} />
+    </div>
+  );
+  return <DiarioClienteNuovo clientId={clientId} onStorico={() => setStorico(true)} etichettaStorico={isAdmin ? "Modifica programma e storico" : "Storico"} isAdmin={isAdmin} />;
+}
+
 function NotificheCliente({ client }) {
   const [notifiche, setNotifiche] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -2878,6 +4958,8 @@ function NotificheCliente({ client }) {
     if (n.calendar_event_id) {
       await supabase.from("calendar_events").update({ data: n.proposta_data, ora: n.proposta_ora, luogo: n.proposta_luogo, stato: "confermato" }).eq("id", n.calendar_event_id);
       await sincronizzaLezionePacchetto(n.calendar_event_id);
+      const { data: evAcc } = await supabase.from("calendar_events").select("sostituisce_id").eq("id", n.calendar_event_id).maybeSingle();
+      if (evAcc?.sostituisce_id) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", evAcc.sostituisce_id); await scollegaLezionePacchetto(evAcc.sostituisce_id); }
     }
     await supabase.from("notifiche").update({ stato: "accettata" }).eq("id", n.id);
     carica();
@@ -2905,11 +4987,11 @@ function NotificheCliente({ client }) {
               {n.messaggio && <p className="text-slate-500 text-xs">{n.messaggio}</p>}
               {n.stato === "inviata" ? (
                 <div className="flex gap-2 pt-1">
-                  <button onClick={() => accetta(n)} className="flex-1 bg-emerald-500 text-white text-xs font-medium rounded-lg py-2">Accetta</button>
-                  <button onClick={() => rifiuta(n)} className="flex-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                  <button onClick={() => accetta(n)} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">Accetta</button>
+                  <button onClick={() => rifiuta(n)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
                 </div>
               ) : (
-                <Badge className={n.stato === "accettata" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}>{n.stato === "accettata" ? "Accettata" : "Rifiutata"}</Badge>
+                <Badge className={n.stato === "accettata" ? "bg-sky-100 text-sky-700" : "bg-slate-200 text-slate-800"}>{n.stato === "accettata" ? "Accettata" : "Rifiutata"}</Badge>
               )}
             </>
           ) : (
@@ -2932,6 +5014,7 @@ function NotificheCliente({ client }) {
 }
 
 function LeMieLezioni({ client }) {
+  const [sheet, setSheet] = useState(null);
   const [eventi, setEventi] = useState([]);
   const [caricando, setCaricando] = useState(true);
 
@@ -2952,28 +5035,29 @@ function LeMieLezioni({ client }) {
     const oreAllaLezione = (dataOra - new Date()) / 3600000;
     const inTempo = oreAllaLezione >= 24;
     if (!inTempo) {
-      const conferma = confirm("Mancano meno di 24 ore alla lezione: verrà comunque conteggiata come persa. Vuoi annullare comunque?");
+      const conferma = await confermaApp("Mancano meno di 24 ore alla lezione: verrà comunque conteggiata come persa. Vuoi annullare comunque?", { si: "Sì, annulla", no: "No, la tengo" });
       if (!conferma) return;
     }
-    await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa" }).eq("id", e.id);
+    await supabase.from("calendar_events").update({ stato: inTempo ? "annullata" : "persa", ...(inTempo && client.gruppo_id ? { recupero_entro: fineMeseSuccessivo(e.data), recuperata: false } : {}) }).eq("id", e.id);
     if (inTempo) await scollegaLezionePacchetto(e.id);
     carica();
   };
 
   const STATO_LEZIONE = {
-    richiesta: { t: "Da confermare", c: "bg-amber-100 text-amber-700" },
-    confermato: { t: "Confermata", c: "bg-emerald-100 text-emerald-700" },
+    richiesta: { t: "Da confermare", c: "bg-slate-100 text-slate-700" },
+    confermato: { t: "Confermata", c: "bg-sky-100 text-sky-700" },
     annullata: { t: "Annullata", c: "bg-slate-100 text-slate-500" },
-    persa: { t: "Persa", c: "bg-rose-100 text-rose-700" },
+    persa: { t: "Persa", c: "bg-slate-200 text-slate-800" },
   };
 
   if (caricando) return <Spinner />;
 
   return (
     <div className="px-5 pt-6 pb-24 space-y-5">
+      {sheet && <ModificaLezioneSheet client={client} evento={sheet} onChiudi={() => setSheet(null)} onFatto={carica} />}
       <div>
         <h1 className="text-xl font-semibold text-slate-800">Le mie lezioni</h1>
-        <p className="text-slate-500 text-sm mt-1">Puoi annullare gratuitamente fino a 24 ore prima.</p>
+        <p className="text-slate-500 text-sm mt-1">Puoi annullare gratuitamente fino a 24 ore prima.{client.gruppo_id ? " Se annulli in tempo, puoi recuperare la lezione entro la fine del mese successivo 🫶🏻" : ""}</p>
       </div>
 
       <div>
@@ -2987,7 +5071,8 @@ function LeMieLezioni({ client }) {
                 <p className="text-slate-500 text-xs ">{e.luogo}</p>
               </div>
               <Badge className={STATO_LEZIONE[e.stato].c}>{STATO_LEZIONE[e.stato].t}</Badge>
-              <button onClick={() => annulla(e)} className="text-rose-500 text-xs font-medium flex-shrink-0">Annulla</button>
+              {e.stato === "confermato" && <button onClick={() => setSheet(e)} className="text-sky-600 text-xs font-medium flex-shrink-0">Sposta</button>}
+              <button onClick={() => annulla(e)} className="text-slate-800 text-xs font-medium flex-shrink-0">Annulla</button>
             </Card>
           ))}
         </div>
@@ -3038,7 +5123,264 @@ function ClientApprofondimenti() {
   );
 }
 
-function ClientApp({ session, anteprima = null }) {
+
+/* ===== Commento automatico sul check (solo coach, con un click lo vede la cliente) ===== */
+function generaCommentoCheck(c, tutti, client) {
+  const ord = [...tutti].sort((a, b) => (a.data_check || "").localeCompare(b.data_check || ""));
+  const i = ord.findIndex((x) => x.id === c.id);
+  const prev = i > 0 ? ord[i - 1] : null;
+  const f1 = (n) => (Math.round(n * 10) / 10).toString().replace(".", ",");
+  const sg = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + f1(Math.abs(n));
+  const fd = (d) => (d || "").split("-").reverse().join("/");
+  const nome = client?.nome || "";
+  const righe = [];
+  righe.push(prev ? `Ciao ${nome}! ✨ Ecco come leggo questo check rispetto a quello del ${fd(prev.data_check)}.` : `Ciao ${nome}! ✨ Questo è il tuo primo check: da qui in poi lo useremo come punto di partenza.`);
+  if (c.peso_kg != null) {
+    if (prev && prev.peso_kg != null) {
+      const d = Number(c.peso_kg) - Number(prev.peso_kg);
+      const gg = Math.max(1, Math.round((new Date(c.data_check) - new Date(prev.data_check)) / 86400000));
+      const sett = d / (gg / 7);
+      let lett;
+      if (Math.abs(d) <= 0.5) lett = "praticamente stabile: rientra nella normale oscillazione quotidiana (liquidi, sodio, transito, ciclo).";
+      else if (Math.abs(sett) <= 0.5) lett = "una variazione graduale, in linea con un ritmo sostenibile.";
+      else lett = "una variazione un po' più marcata: la guardiamo insieme sul trend dei prossimi check, non sul singolo dato.";
+      righe.push(`• Peso: ${f1(c.peso_kg)} kg (${sg(d)} kg in ${gg} giorni, circa ${sg(sett)} kg a settimana): ${lett}`);
+    } else righe.push(`• Peso: ${f1(c.peso_kg)} kg.`);
+  }
+  const campi = getCampiMisura(client?.sesso).filter((k) => k.key !== "peso_kg");
+  if (prev) {
+    const cambi = [], stabili = [];
+    campi.forEach((k) => {
+      if (c[k.key] == null || prev[k.key] == null) return;
+      const d = Number(c[k.key]) - Number(prev[k.key]);
+      (Math.abs(d) >= 0.5 ? cambi : stabili).push(Math.abs(d) >= 0.5 ? `${k.label.toLowerCase()} ${sg(d)} cm` : k.label.toLowerCase());
+    });
+    if (cambi.length) righe.push(`• Misure: ${cambi.join(", ")}.`);
+    if (stabili.length && cambi.length) righe.push(`• Stabili: ${stabili.join(", ")}.`);
+    if (!cambi.length && stabili.length) righe.push("• Misure sostanzialmente invariate rispetto all'ultimo check.");
+    if (c.sopra_ombelico_cm && c.glutei_cm && prev.sopra_ombelico_cm && prev.glutei_cm) {
+      const w1 = c.sopra_ombelico_cm / c.glutei_cm, w0 = prev.sopra_ombelico_cm / prev.glutei_cm;
+      if (Math.abs(w1 - w0) >= 0.01) righe.push(`• Rapporto vita/fianchi ${w1 < w0 ? "in miglioramento" : "in leggero aumento"} (${w0.toFixed(2).replace(".", ",")} → ${w1.toFixed(2).replace(".", ",")}).`);
+    }
+  } else {
+    const v = campi.filter((k) => c[k.key] != null).map((k) => `${k.label.toLowerCase()} ${f1(c[k.key])}`);
+    if (v.length) righe.push(`• Misure registrate: ${v.join(", ")} cm.`);
+  }
+  const sogg = [["energia", "energia"], ["sonno", "sonno"], ["aderenza_cibo", "aderenza all'alimentazione"], ["aderenza_allenamento", "aderenza all'allenamento"]].filter(([k]) => c[k] != null);
+  if (sogg.length) {
+    righe.push(`• Come ti sei sentita: ${sogg.map(([k, l]) => `${l} ${c[k]}/5`).join(", ")}.`);
+    const basse = sogg.filter(([k]) => c[k] <= 2).map(([, l]) => l);
+    if (basse.length) righe.push(`• Su ${basse.join(" e ")} ti vedo un po' sotto: ne parliamo e aggiustiamo il tiro insieme 🫶🏻`);
+    else if (sogg.every(([k]) => c[k] >= 4)) righe.push("• Parametri soggettivi ottimi: è un'ottima base per spingere sul programma 💪🏻");
+  }
+  if (client?.sesso !== "M" && c.fase_mestruale) righe.push(`• Fase del ciclo: ${c.fase_mestruale}. Tieni presente che il peso e le misure possono oscillare con la ritenzione idrica del ciclo.`);
+  righe.push("Un check è una fotografia di un giorno: conta il trend nel tempo. Sei sulla strada giusta ✨");
+  return righe.join("\n");
+}
+function CommentoCheck({ checkin, tutti, client }) {
+  const [riga, setRiga] = useState(undefined);
+  const [testo, setTesto] = useState("");
+  const [msg, setMsg] = useState("");
+  const [aperto, setAperto] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data } = await supabase.from("commenti_check").select("*").eq("checkin_id", checkin.id).maybeSingle();
+      if (!vivo) return;
+      if (data) { setRiga(data); setTesto(data.testo); return; }
+      const nuovo = { checkin_id: checkin.id, client_id: checkin.client_id, testo: generaCommentoCheck(checkin, tutti, client), visibile: false };
+      const { data: ins } = await supabase.from("commenti_check").insert(nuovo).select().single();
+      if (vivo) { setRiga(ins || nuovo); setTesto(nuovo.testo); }
+    })();
+    return () => { vivo = false; };
+  }, [checkin.id]);
+  if (riga === undefined) return null;
+  const salva = async (patch) => {
+    const { error } = await supabase.from("commenti_check").update({ ...patch, updated_at: new Date().toISOString() }).eq("checkin_id", checkin.id);
+    if (error) { setMsg("Non siamo riusciti a salvare"); return; }
+    setRiga((r) => ({ ...r, ...patch }));
+    setMsg("Salvato ✓"); setTimeout(() => setMsg(""), 2000);
+  };
+  const visibile = !!riga.visibile;
+  return (
+    <div className="mt-2 rounded-xl border border-sky-100 bg-sky-50/60">
+      <button onClick={() => setAperto((a) => !a)} className="w-full flex items-center justify-between px-3 py-2 text-left">
+        <span className="text-[12px] font-semibold text-slate-700">Commento automatico <span className="font-normal text-slate-400">· {visibile ? "visibile alla cliente" : "solo tu"}</span></span>
+        <ChevronRight size={14} className={`text-sky-500 transition-transform ${aperto ? "rotate-90" : ""}`} />
+      </button>
+      {aperto && (
+        <div className="px-3 pb-3 space-y-2">
+          <textarea value={testo} onChange={(e) => setTesto(e.target.value)} onBlur={() => testo !== riga.testo && salva({ testo })} rows={9}
+            className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white text-slate-700" />
+          <div className="flex flex-wrap gap-2 items-center">
+            <button onClick={() => salva({ visibile: !visibile, testo })} className={`text-xs font-medium rounded-lg px-3 py-2 ${visibile ? "bg-slate-100 text-slate-600" : "bg-slate-800 text-white"}`}>
+              {visibile ? "Nascondi alla cliente" : `Rendi visibile a ${client?.nome || "la cliente"}`}
+            </button>
+            <button onClick={() => { const t = generaCommentoCheck(checkin, tutti, client); setTesto(t); salva({ testo: t }); }} className="text-[11px] text-sky-600 underline">Rigenera</button>
+            {msg && <span className="text-[11px] text-sky-600">{msg}</span>}
+          </div>
+          <p className="text-[11px] text-slate-400">Puoi modificarlo prima di renderlo visibile. Finché non premi il tasto, la cliente non lo vede.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+// Lato cliente: i commenti che Morgana ha deciso di condividere
+function CommentiCheckCliente({ checkins }) {
+  const [lista, setLista] = useState([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("commenti_check").select("checkin_id, testo, updated_at").eq("visibile", true);
+      setLista(data || []);
+    })();
+  }, [checkins.length]);
+  const conData = lista.map((l) => ({ ...l, data: (checkins.find((c) => c.id === l.checkin_id) || {}).data_check || "" })).filter((l) => l.data).sort((a, b) => b.data.localeCompare(a.data));
+  if (!conData.length) return null;
+  return (
+    <div>
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">I commenti di Morgana ✨</p>
+      <div className="space-y-2">
+        {conData.map((l, i) => (
+          <Card key={l.checkin_id} className="p-3">
+            <p className="text-[11px] text-sky-700 font-medium mb-1">Check del {l.data.split("-").reverse().join("/")}</p>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{l.testo}</p>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Appunti condivisi (al posto della chat): pagina a righe, scrivono sia Morgana sia la cliente ===== */
+function AppuntiPagina({ clientId, ruolo, onLetti, nomeCliente = "" }) {
+  const [testo, setTesto] = useState("");
+  const [stato, setStato] = useState("");
+  const [caricato, setCaricato] = useState(false);
+  const base = React.useRef({ testo: "", updated_at: null });
+  const sporco = React.useRef(false);
+  const fuoco = React.useRef(false);
+  const timer = React.useRef(null);
+  const ultimoTesto = React.useRef("");
+  const altro = ruolo === "coach" ? "cliente" : "coach";
+  const flagMio = ruolo === "coach" ? "nuovo_per_coach" : "nuovo_per_cliente";
+  const flagAltro = ruolo === "coach" ? "nuovo_per_cliente" : "nuovo_per_coach";
+
+  const carica = async () => {
+    const { data } = await supabase.from("appunti").select("*").eq("client_id", clientId).maybeSingle();
+    if (data) {
+      if (!sporco.current && !fuoco.current && data.testo !== ultimoTesto.current) { setTesto(data.testo); ultimoTesto.current = data.testo; }
+      base.current = { testo: data.testo, updated_at: data.updated_at };
+      if (data[flagMio]) { await supabase.from("appunti").update({ [flagMio]: false }).eq("client_id", clientId); onLetti?.(); }
+    }
+    setCaricato(true);
+  };
+  useEffect(() => { carica(); const t = setInterval(carica, 8000); return () => { clearInterval(t); clearTimeout(timer.current); }; }, [clientId]);
+
+  const salva = async (corrente) => {
+    clearTimeout(timer.current);
+    if (!sporco.current) return;
+    setStato("Salvo…");
+    let mio = corrente;
+    const { data: remoto } = await supabase.from("appunti").select("testo, updated_at").eq("client_id", clientId).maybeSingle();
+    if (remoto && base.current.updated_at && remoto.updated_at !== base.current.updated_at && remoto.testo !== base.current.testo) {
+      // nel frattempo l'altra persona ha scritto: tengo il suo testo e aggiungo in fondo ciò che ho aggiunto io
+      const aggiunto = mio.startsWith(base.current.testo) ? mio.slice(base.current.testo.length) : "\n" + mio;
+      mio = remoto.testo + (aggiunto.trim() ? (remoto.testo.endsWith("\n") || aggiunto.startsWith("\n") ? "" : "\n") + aggiunto : "");
+      setTesto(mio);
+    }
+    const adesso = new Date().toISOString();
+    const { error } = await supabase.from("appunti").upsert({ client_id: clientId, testo: mio, ultimo_autore: ruolo, [flagAltro]: true, [flagMio]: false, updated_at: adesso }, { onConflict: "client_id" });
+    if (error) { setStato("Non salvato: riprova"); return; }
+    base.current = { testo: mio, updated_at: adesso };
+    ultimoTesto.current = mio;
+    sporco.current = false;
+    setStato("Salvato ✓");
+    setTimeout(() => setStato(""), 2000);
+  };
+  const cambia = (v) => {
+    setTesto(v); sporco.current = true; ultimoTesto.current = v; setStato("");
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => salva(v), 1500);
+  };
+  const firma = () => {
+    const d = new Date();
+    const riga = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} · ${ruolo === "coach" ? "Morgana" : (nomeCliente || "Io")}: `;
+    cambia((testo && !testo.endsWith("\n") ? testo + "\n" : testo) + riga);
+  };
+  const H = 32;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between px-1">
+        <p className="text-[12px]" style={{ color: "#7a8da3" }}>Una pagina sola per noi due: scriviamo qui appunti, promemoria e domande ✨</p>
+        <span className="text-[11px] text-sky-600 flex-shrink-0 ml-2">{stato}</span>
+      </div>
+      <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #C9E0F7", background: "#FFFDF7" }}>
+        <textarea value={testo} onChange={(e) => cambia(e.target.value)} onFocus={() => { fuoco.current = true; }} onBlur={() => { fuoco.current = false; salva(testo); }}
+          placeholder={caricato ? "Scrivi qui…" : ""} spellCheck
+          style={{
+            display: "block", width: "100%", minHeight: "62vh", resize: "none", border: 0, outline: "none", color: "#27466D",
+            fontSize: 16, lineHeight: `${H}px`, padding: `0 14px ${H}px 52px`, background: "transparent",
+            backgroundImage: `linear-gradient(to right, transparent 40px, #8EBDED 40px, #8EBDED 41px, transparent 41px), repeating-linear-gradient(to bottom, transparent 0, transparent ${H - 1}px, #C9E0F7 ${H - 1}px, #C9E0F7 ${H}px)`,
+            backgroundAttachment: "local",
+          }} />
+      </div>
+      <button onClick={firma} className="text-xs font-semibold rounded-full px-3 py-2" style={{ background: "#E1EEFB", color: "#3F78B3" }}>+ Aggiungi data e nome</button>
+    </div>
+  );
+}
+
+/* Pallino chat mobile: si trascina dove si vuole (la posizione resta salvata) e, toccandolo, apre la chat sopra la sezione in cui si è */
+function ChatBolla({ chiave, conteggio = 0, titolo, onChiudi, children }) {
+  const DIM = 56;
+  const leggi = () => { try { const p = JSON.parse(localStorage.getItem("bolla_" + chiave) || "null"); if (p && typeof p.x === "number") return p; } catch (e) { /* ignora */ } return null; };
+  const [pos, setPos] = useState(() => leggi() || { x: Math.max(8, window.innerWidth - DIM - 16), y: Math.max(8, window.innerHeight - DIM - 96) });
+  const [aperta, setAperta] = useState(false);
+  const trascino = React.useRef(null);
+  const limita = (p) => ({ x: Math.min(Math.max(4, p.x), window.innerWidth - DIM - 4), y: Math.min(Math.max(4, p.y), window.innerHeight - DIM - 4) });
+  useEffect(() => { const f = () => setPos((p) => limita(p)); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  const giu = (e) => { trascino.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y, mosso: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch (er) { /* ignora */ } };
+  const muovi = (e) => {
+    const t = trascino.current; if (!t) return;
+    const dx = e.clientX - t.sx, dy = e.clientY - t.sy;
+    if (!t.mosso && Math.abs(dx) + Math.abs(dy) < 6) return;
+    t.mosso = true;
+    setPos(limita({ x: t.ox + dx, y: t.oy + dy }));
+  };
+  const su = () => {
+    const t = trascino.current; trascino.current = null;
+    if (!t) return;
+    if (t.mosso) { try { localStorage.setItem("bolla_" + chiave, JSON.stringify(pos)); } catch (e) { /* ignora */ } }
+    else setAperta(true);
+  };
+  const chiudi = () => { setAperta(false); onChiudi?.(); };
+  return createPortal(
+    <>
+      {!aperta && (
+        <button onPointerDown={giu} onPointerMove={muovi} onPointerUp={su} onPointerCancel={() => { trascino.current = null; }} aria-label="Apri la chat"
+          style={{ position: "fixed", left: pos.x, top: pos.y, width: DIM, height: DIM, zIndex: 60, touchAction: "none" }}
+          className="rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/40 flex items-center justify-center">
+          <MessageCircle size={26} strokeWidth={1.75} />
+          {conteggio > 0 && <span className="absolute -top-1 -right-1 bg-slate-800 text-white text-[11px] font-bold rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center border-2 border-slate-50">{conteggio}</span>}
+        </button>
+      )}
+      {aperta && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 70 }} className="flex flex-col justify-end">
+          <div className="absolute inset-0 bg-slate-900/30" onClick={chiudi} />
+          <div className="relative bg-white rounded-t-3xl shadow-2xl w-full max-w-md mx-auto flex flex-col" style={{ height: "72dvh" }}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-shrink-0">
+              <p className="font-semibold text-slate-800 text-sm">{titolo}</p>
+              <button onClick={chiudi} className="text-slate-400 p-1" aria-label="Chiudi"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3 bg-slate-50 rounded-b-none">{children}</div>
+          </div>
+        </div>
+      )}
+    </>,
+    document.body
+  );
+}
+
+function ClientApp({ session, anteprima = null, onTornaCoach = null }) {
   const [tab, setTab] = useState("home");
   const [client, setClient] = useState(null);
   const [checkins, setCheckins] = useState([]);
@@ -3048,6 +5390,19 @@ function ClientApp({ session, anteprima = null }) {
   const [nonLette, setNonLette] = useState(0);
   const [chatNonLetti, setChatNonLetti] = useState(0);
   const [lezioneProssima, setLezioneProssima] = useState(null);
+  const [cicloImp, setCicloImp] = useState(null);
+  const contaChat = async () => {
+    try {
+      if (!client || anteprima) return;
+      const { count } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("client_id", client.id).eq("nuovo_per_cliente", true);
+      setChatNonLetti(count || 0);
+    } catch (e) { /* ignora */ }
+  };
+  useEffect(() => {
+    if (!client || anteprima) return;
+    const t = setInterval(contaChat, 20000);
+    return () => clearInterval(t);
+  }, [client?.id]);
 
   const carica = async () => {
     setCaricando(true);
@@ -3093,6 +5448,7 @@ function ClientApp({ session, anteprima = null }) {
       setChatNonLetti(chatCount || 0);
       const { data: lzP } = await supabase.from("calendar_events").select("id, data, ora, luogo, stato").eq("client_id", c.id).eq("tipo", "lezione").in("stato", ["confermato", "richiesta"]).gte("data", formatDataLocale(new Date())).order("data").order("ora").limit(1);
       setLezioneProssima(lzP?.[0] || null);
+      try { const { data: ci } = await supabase.from("ciclo_impostazioni").select("*").eq("client_id", c.id).maybeSingle(); setCicloImp(ci || null); } catch (e) { setCicloImp(null); }
     }
     setCaricando(false);
   };
@@ -3107,15 +5463,16 @@ function ClientApp({ session, anteprima = null }) {
   const nav = [
     { key: "home", label: "Home", icon: Home },
     { key: "notifiche", label: "Notifiche", icon: Bell, badge: nonLette },
-    ...(client.nutrizione_attiva !== false ? [{ key: "nutrizione", label: "Macros", icon: Apple }] : []),
+    ...(client.nutrizione_attiva !== false || client.kcal_attivo !== false || client.seguita_da_nutrizionista ? [{ key: "kcal", label: client.seguita_da_nutrizionista ? "Nutrizione" : "Macros", icon: Apple }] : []),
     ...(client.tipo_servizio !== "presenza" || client.log_visibile_cliente ? [{ key: "log", label: "Log allenamento", icon: Dumbbell }] : []),
-    ...(client.kcal_attivo !== false ? [{ key: "kcal", label: "Log alimentazione", icon: Flame }] : []),
     ...(isOnlineNav ? [{ key: "checkin", label: "Check", icon: ClipboardList }] : []),
+    ...(cicloAttivoPer(client, cicloImp) ? [{ key: "ciclo", label: "Il mio ciclo", icon: Droplets }] : []),
     { key: "progressi", label: "Progressi", icon: TrendingUp },
     ...((isBulbNav && client.pacchetto_lezioni !== "1") || lezioneProssima ? [{ key: "lezioni", label: isBulbNav ? "Lezioni" : "Appuntamenti", icon: Phone }] : []),
     { key: "sfide", label: "Sfide", icon: Trophy },
+    ...(isBulbNav ? [{ key: "esercizi", label: "Esercizi", icon: Search }] : []),
     { key: "extra", label: "Extra", icon: BookOpen },
-    { key: "chat", label: "Chat con Morgana", icon: MessageCircle, badge: chatNonLetti },
+    { key: "chat", label: "Appunti con Morgana", icon: MessageCircle, badge: chatNonLetti },
   ].filter((n) => !anteprima || (n.key !== "chat" && n.key !== "notifiche"));
 
   return (
@@ -3126,20 +5483,34 @@ function ClientApp({ session, anteprima = null }) {
             <ArrowLeft size={18} /> Home
           </button>
         ) : (
-          <img src="/logo.png" alt="MorGainz" className="h-11 w-auto" />
+          <img src="/logo.png" alt="MorGainz" className="h-8 w-auto" />
         )}
-        {!anteprima && <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>}
+        {!anteprima && (
+          <div className="flex items-center gap-4">
+            {onTornaCoach && <button onClick={onTornaCoach} className="text-sky-600 text-xs font-medium">← Torna a Coach</button>}
+            <button onClick={() => supabase.auth.signOut()} className="text-slate-400"><LogOut size={16} /></button>
+          </div>
+        )}
       </div>
       <PullToRefresh onRefresh={carica} ownScroll className="flex-1">
         {tab === "home" && <ClientHome client={client} onAggiornato={carica} menu={nav.filter((n) => n.key !== "home")} onApri={setTab} lezioneProssima={lezioneProssima} />}
         {tab === "checkin" && <ClientCheckin client={client} onInviato={carica} />}
         {tab === "lezioni" && <LeMieLezioni client={client} />}
+        {tab === "esercizi" && isBulbNav && <EserciziCliente />}
         {tab === "notifiche" && <NotificheCliente client={client} />}
-        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Chat con Morgana</p><ChatMessaggi clientId={client.id} ruolo="cliente" onLetti={() => setChatNonLetti(0)} /></div>}
-        {tab === "log" && <DiarioAllenamento clientId={client.id} />}
+        {tab === "chat" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Appunti con Morgana</p><AppuntiPagina clientId={client.id} ruolo="cliente" nomeCliente={client.nome} onLetti={() => { setChatNonLetti(0); contaChat(); }} /></div>}
+        {tab === "log" && <><div className="px-5 pt-4"><RiepilogoSettimana client={client} /></div><DiarioClienteHost clientId={client.id} /></>}
         {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} clientId={client.id} />}
-        {tab === "nutrizione" && client.nutrizione_attiva !== false && <ClientNutrizione piano={piano} storico={pianoStorico} />}
-        {tab === "kcal" && client.kcal_attivo !== false && <div className="px-5 pt-6 pb-24"><DiarioKcal clientId={client.id} /></div>}
+        {(tab === "kcal" || tab === "nutrizione") && (client.nutrizione_attiva !== false || client.kcal_attivo !== false || client.seguita_da_nutrizionista) && (
+          <div className="px-5 pt-6 pb-24">
+            {(client.kcal_attivo === false || client.seguita_da_nutrizionista) && <div className="mb-4"><AcquaCliente clientId={client.id} /></div>}
+            <DiarioKcal clientId={client.id} vistaIniziale={tab === "nutrizione" ? "piano" : "diario"}
+              senzaDiario={client.kcal_attivo === false}
+              soloPianoERicette={!!client.seguita_da_nutrizionista}
+              pianoNode={client.nutrizione_attiva !== false || client.seguita_da_nutrizionista ? <ClientNutrizione piano={piano} storico={pianoStorico} daNutrizionista={!!client.seguita_da_nutrizionista} /> : null} />
+          </div>
+        )}
+        {tab === "ciclo" && <div className="px-5 pt-6 pb-24 space-y-4"><p className="text-lg font-semibold text-slate-800">Il mio ciclo</p><CicloCliente client={client} /></div>}
         {tab === "sfide" && <SfideCliente client={client} />}
         {tab === "extra" && <ClientApprofondimenti />}
       </PullToRefresh>
@@ -3161,6 +5532,13 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
   const [files, setFiles] = useState({ frontale: null, laterale: null, posteriore: null, extra: null });
   const [salvando, setSalvando] = useState(false);
   const [errore, setErrore] = useState("");
+  useEffect(() => {
+    if (sesso === "M" || !f.data_check || f.fase_mestruale) return;
+    let vivo = true;
+    const p = f.data_check.split("-");
+    fasePerData(clientId, new Date(+p[0], +p[1] - 1, +p[2])).then((x) => { if (vivo && x) setF((q) => (q.fase_mestruale ? q : { ...q, fase_mestruale: x })); });
+    return () => { vivo = false; };
+  }, [f.data_check]);
   const campo = (label, key, unit) => (
     <div>
       <label className="text-xs text-slate-500">{label}</label>
@@ -3188,9 +5566,11 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
       return;
     }
     if (checkin) {
-      await supabase.from("checkins").update(payload).eq("id", checkin.id);
+      const { error: errUp } = await supabase.from("checkins").update(payload).eq("id", checkin.id);
+      if (errUp) { setSalvando(false); setErrore("Non siamo riusciti a salvare il check: " + errUp.message); return; }
     } else {
-      await supabase.from("checkins").insert(payload);
+      const { error: errIns } = await supabase.from("checkins").insert(payload);
+      if (errIns) { setSalvando(false); setErrore("Non siamo riusciti a salvare il check: " + errIns.message); return; }
       // Il check lo inserisce la coach stessa: niente da rivedere e il promemoria non serve più.
       try {
         await supabase.from("notifiche").update({ coach_vista: true }).eq("client_id", clientId).like("proposta_luogo", "promemoria_check%");
@@ -3244,7 +5624,7 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
         <label className="text-xs text-slate-500 block mb-1">Foto progressi</label>
         <FotoInputs files={files} setFiles={setFiles} />
       </div>
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : checkin ? "Salva modifiche" : "Salva check"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -3316,7 +5696,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
           nuovi.push({ client_id: clientId, nome, marca, unit, uname: unit === "pz" ? ((iP >= 0 && (r[iP] || "").trim()) || "pezzo") : null, per: unit === "pz" ? 1 : (num(iPer >= 0 ? r[iPer] : null) || 100), kcal, proteine: iPr >= 0 ? num(r[iPr]) : null, carboidrati: iC >= 0 ? num(r[iC]) : null, grassi: iG >= 0 ? num(r[iG]) : null, quantita_abituale: iQ >= 0 ? num(r[iQ]) : null });
         }
         if (nuovi.length === 0) { setMsg(`Nessun alimento nuovo da importare (${saltati} righe saltate: vuote o già presenti).`); setLavoro(false); return; }
-        if (!confirm(`Importo ${nuovi.length} alimenti nella lista di questa cliente? (${saltati} righe saltate)`)) { setLavoro(false); return; }
+        if (!await confermaApp(`Importo ${nuovi.length} alimenti nella lista di questa cliente? (${saltati} righe saltate)`)) { setLavoro(false); return; }
         const { error } = await supabase.from("kcal_foods").insert(nuovi);
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} alimenti ✓${saltati ? ` (${saltati} saltati)` : ""}`);
         if (!error) onFatto?.();
@@ -3353,16 +5733,16 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
         cicli.forEach((c, i) => { c.end = c.fin || (cicli[i + 1] ? addGiorni(cicli[i + 1].start, -1) : null); });
         const nuovi = cicli.map((c) => ({ client_id: clientId, data_aggiornamento: c.start, data_inizio: c.start, data_fine: c.end, kcal: Math.round(c.tot.kcal), proteine_g: c.tot.proteine_g, carboidrati_g: c.tot.carboidrati_g, grassi_g: c.tot.grassi_g, note: c.nota, pasti: c.pasti.length ? c.pasti : null }));
         const fd = (d) => d.split("-").reverse().slice(0, 2).join("/");
-        if (!confirm(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
+        if (!await confermaApp(`Importo ${nuovi.length} cicli alimentari, dal ${fd(cicli[0].start)} al ${fd(cicli[cicli.length - 1].start)} (un ciclo nuovo ogni lunedì se non hai indicato le date)?`)) { setLavoro(false); return; }
         const { count: giaPresenti } = await supabase.from("nutrition_plans").select("id", { count: "exact", head: true }).eq("client_id", clientId);
-        if (giaPresenti > 0 && confirm(`Questa cliente ha già ${giaPresenti} cicli salvati. OK = li elimino e metto solo quelli nuovi. Annulla = li tengo e aggiungo i nuovi (rischi di averli doppi).`)) {
+        if (giaPresenti > 0 && await confermaApp(`Questa cliente ha già ${giaPresenti} cicli salvati. Conferma = li elimino e metto solo quelli nuovi. Annulla = li tengo e aggiungo i nuovi (rischi di averli doppi).`)) {
           await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
         }
         const { error } = await supabase.from("nutrition_plans").insert(nuovi);
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} cicli alimentari ✓`);
         if (!error) onFatto?.();
       } else setMsg("Non riconosco il file: serve una colonna “kcal” (cicli) oppure “nome” + “kcal” (alimenti).");
-    } catch (e) { setMsg("Non riesco a leggere il file."); }
+    } catch (e) { setMsg("Non è stato possibile leggere il file."); }
     setLavoro(false);
   };
   return (
@@ -3370,7 +5750,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
       <p className="text-sm font-medium text-slate-700">Importa da file CSV</p>
       <p className="text-[11px] text-slate-400">Cicli alimentari (colonne: settimana, inizio, fine, pasto, kcal, proteine, carboidrati, grassi, note; le date sono facoltative e se mancano ogni ciclo parte il lunedì dopo) oppure lista alimenti della cliente (nome, marca, unita, nome_pezzo, per, kcal, proteine, carboidrati, grassi, quantita_abituale). Capisco da sola quale dei due è.</p>
       <label className="block w-full text-center border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2 cursor-pointer">
-        {lavoro ? "Importo..." : "📥 Scegli file CSV"}
+        {lavoro ? "Importo..." : <><Ic n="download"/> Scegli file CSV</>}
         <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { if (e.target.files[0]) importa(e.target.files[0]); e.target.value = ""; }} />
       </label>
       {msg && <p className="text-xs text-slate-600">{msg}</p>}
@@ -3383,12 +5763,12 @@ function AnteprimaCliente({ client }) {
   const [aperta, setAperta] = useState(false);
   return (
     <>
-      <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">👁 Vedi l’app come la vede {client.nome}</button>
+      <button onClick={() => setAperta(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5"><Ic n="eye"/> Vedi l’app come la vede {client.nome}</button>
       {aperta && createPortal(
         <div className="fixed inset-0 z-[90] bg-slate-200 flex flex-col">
-          <div className="flex-shrink-0 bg-amber-100 text-amber-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
-            <span>👁 Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
-            <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-amber-300 rounded-lg px-3 py-1 font-medium">Esci</button>
+          <div className="flex-shrink-0 bg-slate-100 text-slate-900 text-xs px-4 py-2 flex items-center justify-between gap-3">
+            <span><Ic n="eye"/> Anteprima di {client.nome}: guarda soltanto, quello che inserisci qui finisce nei suoi dati.</span>
+            <button onClick={() => setAperta(false)} className="flex-shrink-0 bg-white border border-slate-300 rounded-lg px-3 py-1 font-medium">Esci</button>
           </div>
           <div className="flex-1 min-h-0 [&>div]:!h-full"><ClientApp session={null} anteprima={client} /></div>
         </div>,
@@ -3423,7 +5803,7 @@ function NotificheDellaCliente({ client }) {
   if (righe === null) return <Spinner />;
   const m = (n) => n.proposta_luogo || "";
   const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : m(n).startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : m(n).startsWith("promemoria_check") ? "Promemoria: check in arrivo" : m(n).startsWith("auto_check") ? "Check ricevuto ✨" : m(n).startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : m(n).startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : m(n).startsWith("auto_traguardo_streak") ? "Costanza 🔥" : m(n).startsWith("auto_") ? "Messaggio automatico" : m(n).startsWith("lez_prom") ? "Promemoria lezione" : m(n).startsWith("lez_mod") ? "Lezione spostata" : m(n).startsWith("lez_nuova") ? "Nuova lezione" : "Nota";
-  const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-emerald-100 text-emerald-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-rose-100 text-rose-700" } : { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+  const badge = (n) => n.stato === "inviata" ? { t: "Non ancora vista", c: "bg-slate-100 text-slate-700" } : n.stato === "accettata" ? { t: "Accettata", c: "bg-sky-100 text-sky-700" } : n.stato === "rifiutata" ? { t: "Rifiutata", c: "bg-slate-200 text-slate-800" } : { t: "Vista", c: "bg-sky-100 text-sky-700" };
   const nuove = righe.filter((n) => n.stato === "inviata");
   const vecchie = righe.filter((n) => n.stato !== "inviata");
   const Riga = ({ n }) => {
@@ -3463,7 +5843,7 @@ function NotificheDellaCliente({ client }) {
           {azioni.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna azione registrata finora.</Card>}
           {azioni.map((r, i) => (
             <Card key={i} className="p-3 flex items-center justify-between gap-3">
-              <p className="text-slate-600 text-sm">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+              <p className="text-slate-600 text-sm">{r.tipo === "nutrizione" ? <><Ic n="meal"/> Ha aggiornato il diario alimentare</> : "💪🏻 Ha registrato l'allenamento"}</p>
               <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
             </Card>
           ))}
@@ -3552,7 +5932,7 @@ function NutrizioneForm({ clientId, ultimo, onSalvato, modifica, onAnnullaModifi
             <div key={i} className="space-y-1">
               <div className="flex gap-1.5">
                 <input value={r.nome} onChange={set("nome")} placeholder="Pasto (es. Colazione)" className="flex-1 min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
-                <button onClick={() => setF({ ...f, pasti: f.pasti.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-slate-600 px-2">✕</button>
+                <button onClick={() => setF({ ...f, pasti: f.pasti.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-slate-600 px-2"><Ic n="x" bare/></button>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 <input type="number" value={r.kcal} onChange={set("kcal")} placeholder="kcal" className="min-w-0 border border-slate-200 rounded-lg px-2 py-1.5 text-xs" />
@@ -3604,9 +5984,9 @@ function mesiDelPagamento(p, pianoCliente) {
   }
   return 0;
 }
-function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
+function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio, mesiOmaggio = 0) {
   const validi = (pagamenti || [])
-    .filter((p) => p.stato === "saldato" && mesiDelPagamento(p, pianoCliente) > 0)
+    .filter((p) => (p.stato === "saldato" || p.scadenza_saldo) && mesiDelPagamento(p, pianoCliente) > 0)
     .slice()
     .sort((a, b) => (a.data_pagamento || "").localeCompare(b.data_pagamento || ""));
   let scadenza = null;
@@ -3618,6 +5998,7 @@ function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
     scadenza = addMesi(base, mesiDelPagamento(p, pianoCliente));
     ultimoTipo = MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] ? p.tipo_piano : pianoCliente;
   }
+  if (scadenza && mesiOmaggio > 0) scadenza = addMesi(scadenza, mesiOmaggio); // mese gratuito della promo (si aggiunge una volta sola)
   return { scadenza, ultimoTipo };
 }
 
@@ -3626,9 +6007,9 @@ function ricalcolaScadenzaDaPagamenti(pagamenti, pianoCliente, dataInizio) {
 // cadenza fissa, sia dopo averne cancellato uno, cosi' un doppione eliminato non lascia
 // la scadenza avanzata "a vuoto".
 async function ricalcolaEAggiornaScadenza(clientId) {
-  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note").eq("client_id", clientId);
-  const { data: cli } = await supabase.from("clients").select("piano, data_inizio").eq("id", clientId).single();
-  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio);
+  const { data: pagamenti } = await supabase.from("payments").select("data_pagamento, tipo_piano, stato, note, scadenza_saldo").eq("client_id", clientId);
+  const { data: cli } = await supabase.from("clients").select("piano, data_inizio, mesi_omaggio").eq("id", clientId).single();
+  const { scadenza, ultimoTipo } = ricalcolaScadenzaDaPagamenti(pagamenti, cli?.piano, cli?.data_inizio, Number(cli?.mesi_omaggio) || 0);
   if (!scadenza) return;
   const oggiStr = formatDataLocale(new Date());
   const giorniAScadenza = Math.round((new Date(scadenza + "T00:00:00") - new Date(oggiStr + "T00:00:00")) / 86400000);
@@ -3716,6 +6097,10 @@ function FatturazioneCliente({ clientId }) {
   );
 }
 
+async function chiudiEventoSaldo(paymentId) {
+  try { await supabase.from("calendar_events").delete().eq("pagamento_id", paymentId); } catch (e) { /* ignora */ }
+}
+
 function AccontoDaSaldare({ p, onSalvato }) {
   const [valore, setValore] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -3730,6 +6115,7 @@ function AccontoDaSaldare({ p, onSalvato }) {
     await supabase.from("payments").update(
       completato ? { importo_saldato: Number(p.importo), stato: "saldato" } : { importo_saldato: nuovoSaldato }
     ).eq("id", p.id);
+    if (completato) await chiudiEventoSaldo(p.id);
     if (completato && MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
     setSalvando(false);
     setValore("");
@@ -3739,8 +6125,8 @@ function AccontoDaSaldare({ p, onSalvato }) {
   return (
     <div className="flex items-center gap-1 flex-shrink-0">
       <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="acconto €"
-        className="w-20 border border-amber-300 rounded-lg px-1.5 py-1 text-[11px]" />
-      <button onClick={registra} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={14} /></button>
+        className="w-20 border border-slate-300 rounded-lg px-1.5 py-1 text-[11px]" />
+      <button onClick={registra} disabled={salvando} className="text-sky-600 flex-shrink-0"><Check size={14} /></button>
     </div>
   );
 }
@@ -3756,7 +6142,12 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
   const [nota, setNota] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [fatto, setFatto] = useState(false);
+  const [rate, setRate] = useState(false);
+  const [primaRata, setPrimaRata] = useState("");
+  const [scadSaldo, setScadSaldo] = useState("");
   const isGratuito = tipo === "Gratuito";
+  const inRate = rate && tipo === "Semestrale";
+  const scadSaldoEff = scadSaldo || addMesi(dataPagamento, 3);
   const aggiornaScadenza = ["Mensile", "Trimestrale", "Semestrale"].includes(tipo);
 
   const registra = async () => {
@@ -3766,10 +6157,23 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
     if (isGratuito) {
       await supabase.from("clients").update({ piano: "Gratuito", stato_pacchetto: "gratuito" }).eq("id", client.id);
     } else {
-      await supabase.from("payments").insert({
+      const totale = importo === "" ? null : Number(importo);
+      const versato = inRate && primaRata !== "" ? Math.min(Number(primaRata), totale ?? Number(primaRata)) : 0;
+      const { data: pagNuovo } = await supabase.from("payments").insert({
         client_id: client.id, data_pagamento: dataPagamento, tipo_piano: tipo,
-        importo: importo === "" ? null : Number(importo), metodo_pagamento: metodo || null, stato, note: nota || null,
-      });
+        importo: totale, metodo_pagamento: metodo || null, stato: inRate ? "da_saldare" : stato,
+        note: inRate ? ["Dilazionato in 2 rate", nota].filter(Boolean).join(" · ") : (nota || null),
+        ...(inRate ? { importo_saldato: versato, scadenza_saldo: scadSaldoEff } : {}),
+      }).select().single();
+      if (tipo === "Pacchetto lezioni Bulb" && stato === "saldato" && !inRate) await supabase.from("pacchetti_lezioni").update({ saldato: true }).eq("client_id", client.id).eq("saldato", false);
+      if (inRate && pagNuovo) {
+        const resta = totale != null ? Math.max(0, totale - versato) : null;
+        await supabase.from("calendar_events").insert({
+          tipo: "personale", data: scadSaldoEff, ora: null, stato: "confermato", pagamento_id: pagNuovo.id,
+          titolo: `💶 Saldo 2ª rata — ${`${client.nome || ""} ${client.cognome || ""}`.trim()}`,
+          nota: `Semestrale in 2 rate${resta != null ? ` · restano ${resta.toFixed(2)}€` : ""}. La cliente riceve la notifica di pagamento in questa data.`,
+        });
+      }
       if (aggiornaScadenza) {
         if (!client.data_inizio) {
           await supabase.from("clients").update({ data_inizio: dataPagamento }).eq("id", client.id);
@@ -3787,11 +6191,12 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
 
   const cambiaStato = async (p) => {
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (p.stato !== "saldato") await chiudiEventoSaldo(p.id);
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) await ricalcolaEAggiornaScadenza(client.id);
     onRegistrato();
   };
   const elimina = async (p) => {
-    if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
+    if (!await confermaApp(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
     await supabase.from("payments").delete().eq("id", p.id);
     // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
@@ -3845,6 +6250,26 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                 </select>
               </div>
             </div>
+            {tipo === "Semestrale" && (
+              <div className="rounded-xl p-3 space-y-2" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+                <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={rate} onChange={(e) => setRate(e.target.checked)} /> Dilazionato in 2 rate</label>
+                {rate && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-slate-500">1ª rata versata (€)</label>
+                        <input type="number" step="0.01" value={primaRata} onChange={(e) => setPrimaRata(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. 200" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">Saldo entro</label>
+                        <InputData value={scadSaldoEff} onChange={(e) => setScadSaldo(e.target.value)} className="mt-1" />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-500">L'importo sopra è il totale del semestrale. Il pagamento resta "da saldare" e la scadenza del percorso avanza di 6 mesi. Segno la scadenza del saldo sul tuo calendario e alla cliente arriva la notifica in quella data (ricordata nell'app finché non salda).</p>
+                  </>
+                )}
+              </div>
+            )}
             <div>
               <label className="text-xs text-slate-500">Nota (facoltativa)</label>
               <input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" placeholder="es. sconto amica, saldo pacchetto..." />
@@ -3855,7 +6280,7 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
       <button onClick={registra} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">
         {salvando ? "Registro..." : isGratuito ? "Imposta come gratuito" : "Registra pagamento"}
       </button>
-      {fatto && <p className="text-emerald-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : aggiornaScadenza ? "Pagamento registrato e scadenza aggiornata." : "Pagamento registrato."}</p>}
+      {fatto && <p className="text-sky-600 text-xs">Fatto! {isGratuito ? "Pacchetto impostato su gratuito." : aggiornaScadenza ? "Pagamento registrato e scadenza aggiornata." : "Pagamento registrato."}</p>}
       {pagamenti.length > 0 && (
         <div className="pt-2 border-t border-slate-100">
           <p className="text-slate-400 text-xs mb-1">Storico pagamenti</p>
@@ -3866,25 +6291,26 @@ function RegistraPagamento({ client, pagamenti, onRegistrato }) {
                   <span className="flex-1 min-w-0">
                     <span className="font-medium">{p.data_pagamento}</span> — {p.tipo_piano}
                     {p.importo != null && ` · ${Number(p.importo).toFixed(2)}€`}
-                    {p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" && p.importo != null ? <span className="text-amber-600"> · metodo mancante</span> : null)}
+                    {p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" && p.importo != null ? <span className="text-slate-600"> · metodo mancante</span> : null)}
                     {p.note && <span className="text-slate-400"> — {p.note}</span>}
                   </span>
                   {p.stato && (
-                    <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                    <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-700"}`}>
                       {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                     </button>
                   )}
-                  <button onClick={() => setModificaPer(p)} className="flex-shrink-0 text-slate-400 hover:text-slate-600 px-0.5 text-[13px] leading-none" title="Modifica pagamento">✏️</button>
+                  <button onClick={() => setModificaPer(p)} className="flex-shrink-0 text-slate-400 hover:text-slate-600 px-0.5 text-[13px] leading-none" title="Modifica pagamento"><Ic n="edit" bare/></button>
                   {p.importo != null && p.stato !== "spesa" && (
                     <button onClick={() => setRicevutaPer(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-500 px-0.5"><FileText size={13} /></button>
                   )}
-                  <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
+                  <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-800 px-0.5"><X size={13} /></button>
                 </div>
                 {p.stato === "da_saldare" && p.importo != null && (
                   <div className="flex items-center gap-2 pl-1">
                     {Number(p.importo_saldato) > 0 && (
-                      <span className="text-[11px] text-emerald-600">saldati {Number(p.importo_saldato).toFixed(2)}€, restano {(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€</span>
+                      <span className="text-[11px] text-sky-600">saldati {Number(p.importo_saldato).toFixed(2)}€, restano {(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€</span>
                     )}
+                    {p.scadenza_saldo && <span className="text-[11px] text-slate-500">saldo entro {p.scadenza_saldo.split("-").reverse().join("/")}</span>}
                     <AccontoDaSaldare p={p} onSalvato={onRegistrato} />
                   </div>
                 )}
@@ -3961,7 +6387,7 @@ function InvitaClienteForm({ client, onInvitato }) {
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@esempio.com"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <div className="grid grid-cols-1 gap-2">
-        <button onClick={() => { setMostraImposta((v) => !v); setErrore(""); setLink(""); }} className="bg-emerald-500 text-white text-sm font-medium rounded-lg py-2">
+        <button onClick={() => { setMostraImposta((v) => !v); setErrore(""); setLink(""); }} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
           {mostraImposta ? "Annulla" : "Imposta tu la password (senza link)"}
         </button>
         <button onClick={() => generaLink("crea")} disabled={!!generando} className="bg-sky-500 text-white text-sm font-medium rounded-lg py-2">
@@ -3972,15 +6398,15 @@ function InvitaClienteForm({ client, onInvitato }) {
         </button>
       </div>
       {mostraImposta && (
-        <form onSubmit={impostaPassword} className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
+        <form onSubmit={impostaPassword} className="bg-sky-50 border border-sky-200 rounded-lg p-3 space-y-2">
           <input type="password" placeholder="Nuova password (almeno 6 caratteri)" value={nuovaPassword} onChange={(e) => setNuovaPassword(e.target.value)}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           <input type="password" placeholder="Ripeti la password" value={confermaPassword} onChange={(e) => setConfermaPassword(e.target.value)}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          <button disabled={generando === "imposta"} className="w-full bg-emerald-600 text-white text-sm font-medium rounded-lg py-2">
+          <button disabled={generando === "imposta"} className="w-full bg-sky-600 text-white text-sm font-medium rounded-lg py-2">
             {generando === "imposta" ? "Salvo..." : "Salva questa password per la cliente"}
           </button>
-          <p className="text-emerald-700 text-[11px]">Funziona sia se la cliente ha già un account con questa email (le cambia la password), sia se non ce l'ha ancora (glielo crea). Comunicagliela tu, di persona o come preferisci: qui non parte nessuna email.</p>
+          <p className="text-sky-700 text-[11px]">Funziona sia se la cliente ha già un account con questa email (le cambia la password), sia se non ce l'ha ancora (glielo crea). Comunicagliela tu, di persona o come preferisci: qui non parte nessuna email.</p>
         </form>
       )}
       {!mostraImposta && (
@@ -3988,11 +6414,11 @@ function InvitaClienteForm({ client, onInvitato }) {
           "Crea account e password" serve per un'email nuova (anche per sostituire quella vecchia). "Reimposta password" serve a chi ha già un account con questa email ma ha perso/scordato l'accesso. Nessuna email viene inviata automaticamente: il link lo mandi tu, su WhatsApp o come preferisci.
         </p>
       )}
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-      {fattoImposta && <p className="text-emerald-600 text-xs">Password salvata ✓ — comunicala alla cliente.</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
+      {fattoImposta && <p className="text-sky-600 text-xs">Password salvata ✓ — comunicala alla cliente.</p>}
       {link && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
-          <p className="text-emerald-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
+        <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 space-y-2">
+          <p className="text-sky-700 text-xs font-medium">Link pronto — valido per un tempo limitato, mandalo subito:</p>
           <p className="text-slate-600 text-xs break-all bg-white border border-slate-200 rounded-lg p-2">{link}</p>
           <button onClick={copia} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
             {copiato ? "Copiato ✓" : "Copia link"}
@@ -4045,8 +6471,8 @@ function CambiaPasswordPropria() {
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         <input type="password" placeholder="Ripeti la nuova password" value={conferma} onChange={(e) => setConferma(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-        {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-        {fatto && <p className="text-emerald-600 text-xs">Password aggiornata ✓</p>}
+        {errore && <p className="text-slate-800 text-xs">{errore}</p>}
+        {fatto && <p className="text-sky-600 text-xs">Password aggiornata ✓</p>}
         <div className="flex gap-2">
           <button disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-lg py-2">{salvando ? "Salvo..." : "Salva nuova password"}</button>
           <button type="button" onClick={() => setAperto(false)} className="px-4 rounded-lg border border-slate-200 text-sm text-slate-500">Chiudi</button>
@@ -4173,7 +6599,7 @@ function SchedaRiassuntiva({ client, onClose }) {
 
         {principale && (
           <div className="scheda-blocco">
-            <p className="text-[10px] uppercase tracking-wide text-sky-700 font-semibold mb-0.5">🍽️ Nutrizione · {inCorso ? "ciclo in corso" : principale === ultimo && !prossimi.length ? "ultimo ciclo" : "prossimo ciclo"}{principale.data_inizio ? ` · ${fmtC(principale.data_inizio)}${principale.data_fine ? `–${fmtC(principale.data_fine)}` : ""}` : ""}</p>
+            <p className="text-[10px] uppercase tracking-wide text-sky-700 font-semibold mb-0.5"><Ic n="meal"/> Nutrizione · {inCorso ? "ciclo in corso" : principale === ultimo && !prossimi.length ? "ultimo ciclo" : "prossimo ciclo"}{principale.data_inizio ? ` · ${fmtC(principale.data_inizio)}${principale.data_fine ? `–${fmtC(principale.data_fine)}` : ""}` : ""}</p>
             <table className="w-full text-[11px]">
               <thead><tr><th className={th}>Pasto</th><th className={`${th} text-right`}>kcal</th><th className={`${th} text-right`}>P</th><th className={`${th} text-right`}>C</th><th className={`${th} text-right`}>G</th></tr></thead>
               <tbody>
@@ -4221,8 +6647,8 @@ function SchedaPdfUpload({ client, onCaricato }) {
       <input type="file" accept="application/pdf" onChange={carica} disabled={caricando}
         className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-600" />
       {caricando && <p className="text-slate-400 text-xs">Caricamento...</p>}
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
-      {client.scheda_pdf_path && <p className="text-emerald-600 text-xs">PDF caricato ✓ (sostituiscilo caricandone un altro)</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
+      {client.scheda_pdf_path && <p className="text-sky-600 text-xs">PDF caricato ✓ (sostituiscilo caricandone un altro)</p>}
     </div>
   );
 }
@@ -4239,13 +6665,13 @@ function EliminaClienteBottone({ client, onEliminato }) {
   };
 
   if (!confermare) {
-    return <button onClick={() => setConfermare(true)} className="text-rose-500 text-sm font-medium">Elimina cliente</button>;
+    return <button onClick={() => setConfermare(true)} className="text-slate-800 text-sm font-medium">Elimina cliente</button>;
   }
   return (
-    <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 space-y-2">
-      <p className="text-rose-700 text-sm">Eliminare <strong>{client.nome} {client.cognome}</strong>? Tutti i suoi check, note e dati nutrizionali verranno cancellati per sempre.</p>
+    <div className="bg-slate-100 border border-slate-300 rounded-xl p-3 space-y-2">
+      <p className="text-slate-800 text-sm">Eliminare <strong>{client.nome} {client.cognome}</strong>? Tutti i suoi check, note e dati nutrizionali verranno cancellati per sempre.</p>
       <div className="flex gap-2">
-        <button onClick={elimina} disabled={eliminando} className="bg-rose-600 text-white text-sm font-medium rounded-lg px-4 py-2">
+        <button onClick={elimina} disabled={eliminando} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">
           {eliminando ? "Elimino..." : "Sì, elimina definitivamente"}
         </button>
         <button onClick={() => setConfermare(false)} className="text-slate-500 text-sm px-3">Annulla</button>
@@ -4254,13 +6680,50 @@ function EliminaClienteBottone({ client, onEliminato }) {
   );
 }
 
+// Una lezione di una cliente di gruppo segnata dall'elenco lezioni vale per tutto il gruppo Bulb:
+// nuova -> creata per le altre; cambio data/ora/sede -> cambia per le altre; data tolta -> tolta alle altre.
+async function rispecchiaLezioneGruppo(client, { azione, evOld, dataV, oraV, luogo, nuovoEvento }) {
+  const g = client.gruppo_id;
+  if (!g) return;
+  try {
+    if (azione === "nuovo" && nuovoEvento) {
+      await supabase.from("calendar_events").update({ gruppo_id: g }).eq("id", nuovoEvento.id);
+      const { data: membri } = await supabase.from("clients").select("id").eq("gruppo_id", g).neq("id", client.id);
+      for (const m of membri || []) {
+        const { data: gia } = await supabase.from("calendar_events").select("id").eq("client_id", m.id).eq("tipo", "lezione").eq("data", nuovoEvento.data).eq("stato", "confermato").limit(1).maybeSingle();
+        if (gia) continue;
+        const { data: creato } = await supabase.from("calendar_events").insert({ client_id: m.id, tipo: "lezione", data: nuovoEvento.data, ora: nuovoEvento.ora || null, luogo: nuovoEvento.luogo || null, stato: "confermato", gruppo_id: g }).select().single();
+        if (creato) { try { await collegaLezionePacchetto(m.id, creato); } catch (e) { /* una cliente senza pacchetto non blocca le altre */ } }
+      }
+      return;
+    }
+    if (!evOld) return;
+    const { data: sorelle } = await supabase.from("calendar_events").select("id").eq("gruppo_id", g).eq("tipo", "lezione").eq("stato", "confermato").eq("data", evOld.data).eq("ora", evOld.ora).neq("client_id", client.id);
+    for (const x of sorelle || []) {
+      if (azione === "aggiorna") {
+        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null, luogo: luogo || null }).eq("id", x.id);
+        await supabase.from("lezioni_svolte").update({ data: dataV, ora: oraV || null }).eq("calendar_event_id", x.id);
+      } else if (azione === "elimina") {
+        await supabase.from("lezioni_svolte").update({ data: null, ora: null, calendar_event_id: null }).eq("calendar_event_id", x.id).eq("fatta", false);
+        await supabase.from("calendar_events").delete().eq("id", x.id);
+      }
+    }
+  } catch (e) { /* il salvataggio della cliente principale resta valido */ }
+}
+
 function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
   const [data, setData] = useState(lezione.data || "");
   const [ora, setOra] = useState((lezione.ora || "").slice(0, 5));
   const [nota, setNota] = useState(lezione.nota || "");
+  const [luogo, setLuogo] = useState(client.sede_abituale || LUOGHI[0]);
+  const [luogoOrig, setLuogoOrig] = useState(client.sede_abituale || LUOGHI[0]);
+  useEffect(() => {
+    if (!lezione.calendar_event_id) return;
+    supabase.from("calendar_events").select("luogo").eq("id", lezione.calendar_event_id).maybeSingle().then(({ data: ev }) => { if (ev?.luogo) { setLuogo(ev.luogo); setLuogoOrig(ev.luogo); } });
+  }, [lezione.calendar_event_id]);
   const [salvando, setSalvando] = useState(false);
   const [salvato, setSalvato] = useState(false);
-  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "").slice(0, 5) || nota !== (lezione.nota || "");
+  const modificato = data !== (lezione.data || "") || ora !== (lezione.ora || "").slice(0, 5) || nota !== (lezione.nota || "") || luogo !== luogoOrig;
 
   const salva = async (ov = {}) => {
     const dataV = "data" in ov ? ov.data : data;
@@ -4276,23 +6739,29 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
     let calendarEventId = rigaAttuale?.calendar_event_id || null;
     if (dataV) {
       if (calendarEventId) {
-        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null }).eq("id", calendarEventId);
+        const { data: evOld } = await supabase.from("calendar_events").select("data, ora").eq("id", calendarEventId).maybeSingle();
+        await supabase.from("calendar_events").update({ data: dataV, ora: oraV || null, luogo: luogo || null, ...(client.gruppo_id ? { gruppo_id: client.gruppo_id } : {}) }).eq("id", calendarEventId);
+        await rispecchiaLezioneGruppo(client, { azione: "aggiorna", evOld, dataV, oraV, luogo });
       } else {
         const { data: nuovoEvento } = await supabase.from("calendar_events").insert({
-          client_id: client.id, tipo: "lezione", data: dataV, ora: oraV || null, luogo: client.sede_abituale || null, stato: "confermato",
+          client_id: client.id, tipo: "lezione", data: dataV, ora: oraV || null, luogo: luogo || null, stato: "confermato",
         }).select().single();
         if (nuovoEvento) {
           calendarEventId = nuovoEvento.id;
           await supabase.from("lezioni_svolte").update({ calendar_event_id: calendarEventId }).eq("id", lezione.id);
+          await rispecchiaLezioneGruppo(client, { azione: "nuovo", nuovoEvento });
         }
       }
     } else if (calendarEventId) {
       // Data cancellata: l'appuntamento sparisce anche dal calendario, come se lo eliminassi
+      const { data: evOld } = await supabase.from("calendar_events").select("data, ora").eq("id", calendarEventId).maybeSingle();
       await supabase.from("lezioni_svolte").update({ calendar_event_id: null }).eq("id", lezione.id);
       await supabase.from("calendar_events").delete().eq("id", calendarEventId);
+      await rispecchiaLezioneGruppo(client, { azione: "elimina", evOld });
       calendarEventId = null;
     }
 
+    setLuogoOrig(luogo);
     setSalvando(false);
     setSalvato(true);
     onSalvato({ ...lezione, ...campi, calendar_event_id: calendarEventId });
@@ -4302,16 +6771,14 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
     <Card className="p-3 space-y-2">
       <div className="flex items-center gap-3">
         <button onClick={() => onFattaCambiata(lezione.id, !lezione.fatta)}
-          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${lezione.fatta ? "bg-emerald-500" : "border-2 border-slate-300"}`}>
+          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${lezione.fatta ? "bg-sky-500" : "border-2 border-slate-300"}`}>
           {lezione.fatta && <CheckCircle2 size={16} className="text-white" />}
         </button>
         <p className="font-medium text-slate-700 text-sm flex-shrink-0">Lezione {lezione.numero}</p>
         <InputData value={data} onChange={(e) => { const v = e.target.value; setData(v); setSalvato(false); if (!v) { setOra(""); salva({ data: "", ora: "" }); } }} className="flex-1" onBlur={(e) => { if (!e.target.value && (lezione.data || lezione.calendar_event_id)) { setOra(""); salva({ data: "", ora: "" }); } }} />
-        <select value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0">
-          <option value="">--:--</option>
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={ora} onChange={(e) => { const v = e.target.value; setOra(v); setSalvato(false); if (!v && data) salva({ data, ora: "" }); }} className="border border-slate-200 rounded-lg px-2 py-2 text-sm w-24 flex-shrink-0" vuoto />
       </div>
+      <SelezionaLuogo value={luogo} onChange={(v) => { setLuogo(v); setSalvato(false); }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
       <input value={nota} onChange={(e) => { setNota(e.target.value); setSalvato(false); }} placeholder="Nota sulla lezione"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs" />
       <div className="flex items-center gap-2">
@@ -4321,11 +6788,11 @@ function RigaLezione({ lezione, client, onFattaCambiata, onSalvato }) {
         </button>
         {(lezione.data || lezione.calendar_event_id) && (
           <button onClick={() => { setData(""); setOra(""); salva({ data: "", ora: "" }); }} disabled={salvando}
-            className="rounded-lg py-2 px-3 text-xs font-medium bg-rose-50 text-rose-600 flex-shrink-0">
+            className="rounded-lg py-2 px-3 text-xs font-medium bg-slate-100 text-slate-800 flex-shrink-0">
             Elimina appuntamento
           </button>
         )}
-        {salvato && !modificato && <span className="text-emerald-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
+        {salvato && !modificato && <span className="text-sky-600 text-xs font-medium flex-shrink-0">Salvato ✓</span>}
       </div>
     </Card>
   );
@@ -4445,7 +6912,7 @@ function LezioniPacchetto({ client, onCompletato }) {
 
   if (caricando) return <Spinner />;
 
-  const opzioniPacchetto = ["1", "4", "8", "10", "24", "48"];
+  const opzioniPacchetto = ["1", "4", "8", "12", "24"];
 
   if (!pacchettoAttivo) {
     return (
@@ -4506,6 +6973,12 @@ async function collegaLezionePacchetto(clientId, evento) {
     await supabase.from("lezioni_svolte").update({ data: evento.data, ora: evento.ora || null }).eq("id", gia.id);
     return;
   }
+  // lezione prenotata nel mese successivo a una annullata in tempo: conta come recupero
+  if (evento.stato === "confermato" && evento.data) {
+    const { data: pend } = await supabase.from("calendar_events").select("id, data, recupero_entro").eq("client_id", clientId).eq("tipo", "lezione").eq("stato", "annullata").eq("recuperata", false).not("recupero_entro", "is", null).order("data").limit(10);
+    const ok = (pend || []).find((p) => evento.data >= inizioMeseSuccessivo(p.data) && evento.data <= p.recupero_entro);
+    if (ok) await supabase.from("calendar_events").update({ recuperata: true }).eq("id", ok.id);
+  }
   const { data: pacc } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", clientId).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
   if (!pacc) return;
   const { data: libera } = await supabase.from("lezioni_svolte")
@@ -4531,9 +7004,9 @@ function RigaStato({ label, valore, presente }) {
   return (
     <div className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
       <span className="text-slate-500 text-sm">{label}</span>
-      <span className={`text-sm font-medium flex items-center gap-1.5 ${presente ? "text-slate-700" : "text-amber-600"}`}>
+      <span className={`text-sm font-medium flex items-center gap-1.5 ${presente ? "text-slate-700" : "text-slate-600"}`}>
         {presente ? valore : "Mancante"}
-        {presente ? <CheckCircle2 size={14} className="text-emerald-500" /> : <AlertCircle size={14} className="text-amber-500" />}
+        {presente ? <CheckCircle2 size={14} className="text-sky-500" /> : <AlertCircle size={14} className="text-slate-500" />}
       </span>
     </div>
   );
@@ -4871,7 +7344,7 @@ function suggerimentiFeedback(tags, obiettivoAttuale) {
   if (tags.includes("dolore")) out.push("Priorità alta: valutare in sessione, eventualmente sostituire esercizio o ridurre ROM/carico sulla zona interessata.");
   if (tags.includes("stanca") || tags.includes("troppo_lavoro")) {
     out.push("Allenamento: valutare deload leggero (-20/30% volume).");
-    out.push(obiettivoAttuale !== "definizione" ? "Alimentazione: valutare +20/30g carboidrati nei prossimi 3-4 giorni." : "Alimentazione: verificare sonno/aderenza prima di intervenire sui carboidrati.");
+    out.push(normalizzaObiettivo(obiettivoAttuale) !== "dimagrimento" ? "Alimentazione: valutare +20/30g carboidrati nei prossimi 3-4 giorni." : "Alimentazione: verificare sonno/aderenza prima di intervenire sui carboidrati.");
   }
   if (tags.includes("energica") || tags.includes("poco_lavoro")) out.push("Valutare un set extra o piccolo incremento carico/intensità.");
   if (tags.includes("vuole_aggiungere_giorno")) out.push("Valutare inserimento sessione aggiuntiva, contenuto da calibrare.");
@@ -4991,7 +7464,7 @@ function EsercizioSchedaRiga({ es, onCambia, onElimina, onMuovi }) {
         <div className="flex gap-1 flex-shrink-0">
           <button onClick={() => onMuovi(-1)} className="text-slate-300 hover:text-slate-600 px-1">▲</button>
           <button onClick={() => onMuovi(1)} className="text-slate-300 hover:text-slate-600 px-1">▼</button>
-          <button onClick={onElimina} className="text-slate-300 hover:text-rose-500 px-1"><X size={16} /></button>
+          <button onClick={onElimina} className="text-slate-300 hover:text-slate-800 px-1"><X size={16} /></button>
         </div>
       </div>
       {mostraLibreria && (
@@ -5090,7 +7563,7 @@ function apriStampaScheda(client, scheda, trend, feedback) {
 <body>
   <div class="intestazione">
     <h1>${esc(client.nome)} ${esc(client.cognome)}</h1>
-    <p class="sottotitolo">Fase ${esc(client.fase_allenamento || "—")} · Livello ${esc(client.livello_allenamento || "—")} · Obiettivo: ${esc(client.obiettivo_attuale || "—")}</p>
+    <p class="sottotitolo">Fase ${esc(client.fase_allenamento || "—")} · Livello ${esc(client.livello_allenamento || "—")} · Obiettivo: ${esc(labelObiettivo(client.obiettivo_attuale) || "—")}</p>
   </div>
   ${righeGiorni}
   ${noteCoach}
@@ -5147,7 +7620,7 @@ function GiornoScheda({ giorno, client, onEliminaGiorno, onRinominaGiorno, onMuo
         <input defaultValue={giorno.nome} onBlur={(e) => onRinominaGiorno(giorno.id, e.target.value)} className="flex-1 font-semibold text-slate-800 border-0 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
         <button onClick={() => onMuoviGiorno(giorno.id, -1)} className="text-slate-300 hover:text-slate-600 px-1">▲</button>
         <button onClick={() => onMuoviGiorno(giorno.id, 1)} className="text-slate-300 hover:text-slate-600 px-1">▼</button>
-        <button onClick={() => onEliminaGiorno(giorno.id)} className="text-slate-300 hover:text-rose-500 px-1"><X size={16} /></button>
+        <button onClick={() => onEliminaGiorno(giorno.id)} className="text-slate-300 hover:text-slate-800 px-1"><X size={16} /></button>
       </div>
       <div className="space-y-2">
         {esercizi.map((es) => (
@@ -5172,19 +7645,16 @@ function LivelloFaseObiettivo({ client, salvaCliente }) {
         </select>
         <input type="number" defaultValue={client.fase_allenamento || ""} onBlur={(e) => salvaCliente({ fase_allenamento: e.target.value ? Number(e.target.value) : null })} placeholder="Fase (numero)" className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
-      <select defaultValue={client.obiettivo_attuale || ""} onBlur={(e) => {
+      <select defaultValue={normalizzaObiettivo(client.obiettivo_attuale) || ""} onBlur={(e) => {
         const nuovo = e.target.value || null;
-        if (nuovo === (client.obiettivo_attuale || null)) return; // niente da fare se non è cambiato
+        if (nuovo === (normalizzaObiettivo(client.obiettivo_attuale) || null)) return; // niente da fare se non è cambiato
         // Ogni cambio di obiettivo segna l'inizio di una nuova fase: l'andamento generale nella
         // scheda progressi guarda da questa data in poi, così un cut seguito da un reverse (o da
         // una massa) non si mescolano nello stesso trend.
         salvaCliente({ obiettivo_attuale: nuovo, obiettivo_dal: nuovo ? formatDataLocale(new Date()) : null });
       }} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
         <option value="">Obiettivo attuale...</option>
-        <option value="definizione">Definizione (cut)</option>
-        <option value="mantenimento">Mantenimento</option>
-        <option value="massa">Massa (bulk)</option>
-        <option value="reverse">Reverse (dopo definizione/gara)</option>
+        {OBIETTIVI.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
       </select>
       {client.obiettivo_dal && (
         <p className="text-[11px] text-slate-400">In questa fase dal {client.obiettivo_dal.split("-").reverse().join("/")} — l'andamento generale nella scheda progressi si basa sui check da questa data in poi.</p>
@@ -5269,7 +7739,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   };
   const rinominaGiorno = async (giornoId, nome) => { aggiornaGiornoLocale(giornoId, { nome }); await supabase.from("scheda_giorni").update({ nome }).eq("id", giornoId); };
   const eliminaGiorno = async (giornoId) => {
-    if (!confirm("Eliminare questo giorno e tutti i suoi esercizi?")) return;
+    if (!await confermaApp("Eliminare questo giorno e tutti i suoi esercizi?")) return;
     setSchedaCorrente((prev) => ({ ...prev, giorni: prev.giorni.filter((g) => g.id !== giornoId) }));
     await supabase.from("scheda_giorni").delete().eq("id", giornoId);
   };
@@ -5453,7 +7923,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <div className="flex flex-wrap gap-2">
           {CONDIZIONI_SALUTE.map((c) => (
             <button key={c.value} onClick={() => toggleCondizione(c.value)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium ${(client.problematiche_salute || []).includes(c.value) ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${(client.problematiche_salute || []).includes(c.value) ? "bg-slate-500 text-white" : "bg-slate-100 text-slate-600"}`}>
               {c.label}
             </button>
           ))}
@@ -5461,9 +7931,9 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <textarea value={condizioniAltroTesto} onChange={(e) => setCondizioniAltroTesto(e.target.value)} onBlur={salvaCondizioniAltro}
           placeholder="Altro (testo libero)..." rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
         {(client.problematiche_salute || []).length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+          <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 space-y-1">
             {CONDIZIONI_SALUTE.filter((c) => (client.problematiche_salute || []).includes(c.value)).map((c) => (
-              <p key={c.value} className="text-amber-700 text-xs"><strong>{c.label}:</strong> {c.avviso}</p>
+              <p key={c.value} className="text-slate-700 text-xs"><strong>{c.label}:</strong> {c.avviso}</p>
             ))}
           </div>
         )}
@@ -5479,7 +7949,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
       {mostraGeneratore && (
         <Card className="p-4 space-y-4">
           <p className="text-sm font-medium text-slate-700">Genera scheda automatica</p>
-          <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {client.obiettivo_attuale || "—"}</p>
+          <p className="text-slate-500 text-xs">Livello: {client.livello_allenamento || "non impostato"} · Fase: {client.fase_allenamento || "—"} · Obiettivo: {labelObiettivo(client.obiettivo_attuale) || "—"}</p>
 
           <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50">
             <div>
@@ -5487,7 +7957,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {Object.keys(VOLUME_LANDMARKS).map((gr) => (
                   <button key={gr} onClick={() => salvaCliente({ focus_crescita: (client.focus_crescita || []).includes(gr) ? (client.focus_crescita || []).filter((x) => x !== gr) : [...(client.focus_crescita || []), gr] })}
-                    className={`px-2.5 py-1 rounded-full text-xs ${(client.focus_crescita || []).includes(gr) ? "bg-emerald-500 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+                    className={`px-2.5 py-1 rounded-full text-xs ${(client.focus_crescita || []).includes(gr) ? "bg-sky-500 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
                     {gr}
                   </button>
                 ))}
@@ -5501,7 +7971,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
             </div>
             <button onClick={() => setGiorniGenerator(generaSplitAutomatica(numeroGiorniSettimana, client.focus_crescita))}
               className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2">
-              🧠 Elabora la split migliore per questa cliente
+              <Ic n="brain"/> Elabora la split migliore per questa cliente
             </button>
             <p className="text-slate-400 text-[11px]">Genera una proposta di split scientificamente sensata; puoi comunque modificarla liberamente qui sotto prima di generare la scheda.</p>
           </div>
@@ -5511,7 +7981,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
               <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2">
                 <div className="flex items-center gap-2">
                   <input value={g.nome} onChange={(e) => rinominaGiornoGenerator(idx, e.target.value)} className="flex-1 border-0 bg-transparent font-medium text-sm focus:outline-none focus:bg-slate-50 rounded px-1 -mx-1" />
-                  {giorniGenerator.length > 1 && <button onClick={() => rimuoviGiornoGenerator(idx)} className="text-slate-300 hover:text-rose-500"><X size={16} /></button>}
+                  {giorniGenerator.length > 1 && <button onClick={() => rimuoviGiornoGenerator(idx)} className="text-slate-300 hover:text-slate-800"><X size={16} /></button>}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {gruppiDisponibili.map((gr) => (
@@ -5552,7 +8022,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           )}
 
           <div className="flex gap-2">
-            <button onClick={generaSchedaAutomatica} disabled={generando || gruppiUsatiNelGeneratore.length === 0} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2 disabled:opacity-50">
+            <button onClick={generaSchedaAutomatica} disabled={generando || gruppiUsatiNelGeneratore.length === 0} className="flex-1 bg-sky-500 text-white text-sm font-medium rounded-xl py-2 disabled:opacity-50">
               {generando ? "Genero..." : "Genera bozza"}
             </button>
             <button onClick={() => setMostraGeneratore(false)} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -5566,7 +8036,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{isBozza ? "Bozza in corso" : "Scheda attuale (finale)"}</p>
             {!isBozza && (
               <div className="flex gap-3">
-                <button onClick={() => setMostraGeneratore(true)} className="text-emerald-600 text-xs font-medium">✨ Genera fase successiva</button>
+                <button onClick={() => setMostraGeneratore(true)} className="text-sky-600 text-xs font-medium">✨ Genera fase successiva</button>
                 <button onClick={() => creaNuovaBozza(schedaCorrente)} className="text-sky-600 text-xs font-medium">Duplica e modifica →</button>
               </div>
             )}
@@ -5592,7 +8062,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
           {isBozza && (
             <div className="flex gap-2">
               <button onClick={aggiungiGiorno} className="flex-1 border border-dashed border-slate-300 text-slate-500 text-sm font-medium rounded-xl py-2">+ Giorno</button>
-              <button onClick={finalizzaScheda} className="flex-1 bg-emerald-500 text-white text-sm font-medium rounded-xl py-2">Finalizza scheda</button>
+              <button onClick={finalizzaScheda} className="flex-1 bg-sky-500 text-white text-sm font-medium rounded-xl py-2">Finalizza scheda</button>
             </div>
           )}
           <button onClick={() => apriStampaScheda(client, schedaCorrente, trend, feedback)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2">Stampa / Salva PDF</button>
@@ -5603,7 +8073,7 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2 px-1">Segnali dai check</p>
         <Card className="p-4 space-y-2">
           <p className="text-sm text-slate-700">{segnaliCheck.segnale}</p>
-          {segnaliCheck.avvisoDistanza && <p className="text-amber-600 text-xs">{segnaliCheck.avvisoDistanza}</p>}
+          {segnaliCheck.avvisoDistanza && <p className="text-slate-600 text-xs">{segnaliCheck.avvisoDistanza}</p>}
           {calibrazioneCheck(checkOrdinati[0], checkOrdinati[1]).map((c, i) => (
             <p key={i} className="text-slate-600 text-xs border-t border-slate-100 pt-2 first:border-0 first:pt-0">{c}</p>
           ))}
@@ -5651,6 +8121,160 @@ function SchedaCoach({ client, checkins, salvaCliente }) {
   );
 }
 
+// Esporta in un unico file di testo tutto ciò che serve a un'analisi esterna (chat AI): profilo, check, dieta, diario kcal, log, note, ciclo…
+const SEZIONI_AI = [
+  { k: "check", l: "Check, misure e foto-valutazioni" },
+  { k: "nutrizione", l: "Alimentazione e diario kcal" },
+  { k: "allenamento", l: "Programma, log carichi e feedback" },
+  { k: "scarichi", l: "Scarichi e altra palestra" },
+  { k: "commenti", l: "I tuoi commenti e note" },
+  { k: "ciclo", l: "Ciclo mestruale" },
+];
+
+function ModaleEsportaAI({ client, onClose, setInCorso, inCorso }) {
+  const [attive, setAttive] = useState(SEZIONI_AI.map((x) => x.k));
+  const [anonimo, setAnonimo] = useState(false);
+  const alterna = (k) => setAttive((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k]));
+  const vai = async (azione) => { await esportaPerAnalisiEsterna(client, setInCorso, { sezioni: attive, anonimo, azione }); };
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(39,70,109,0.45)" }} onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div>
+          <h3 className="text-base font-semibold" style={{ color: "#27466D" }}><Ic n="brain"/> Esporta per AI</h3>
+          <p className="text-xs text-slate-500 mt-1">Prepara un testo con i dati di {client.nome || "questa cliente"} da incollare nella chat del progetto Clienti. Scegli cosa includere.</p>
+        </div>
+        <div className="space-y-2">
+          {SEZIONI_AI.map((x) => (
+            <label key={x.k} className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={attive.includes(x.k)} onChange={() => alterna(x.k)} />
+              {x.l}
+            </label>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 rounded-xl px-3 py-2" style={{ background: "#EEF5FC" }}>
+          <input type="checkbox" checked={anonimo} onChange={() => setAnonimo(!anonimo)} />
+          Nascondi il cognome (solo nome)
+        </label>
+        <p className="text-[11px] text-slate-400">Il profilo e l'elenco dei dati mancanti sono sempre inclusi. Contatti e foto non vengono mai esportati.</p>
+        <div className="flex gap-2">
+          <button disabled={inCorso} onClick={() => vai("copia")} className="flex-1 rounded-xl py-2 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{inCorso ? "Preparo..." : "Copia per la chat"}</button>
+          <button disabled={inCorso} onClick={() => vai("scarica")} className="flex-1 rounded-xl py-2 text-sm font-semibold disabled:opacity-50" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Scarica file</button>
+        </div>
+        <button onClick={onClose} className="w-full text-xs text-slate-400">Chiudi</button>
+      </div>
+    </div>
+  );
+}
+
+async function esportaPerAnalisiEsterna(client, setInCorso, opz = {}) {
+  let cons = null;
+  try { const { data } = await supabase.from("consensi_cliente").select("*").eq("client_id", client.id).maybeSingle(); cons = data; } catch (e) { /* senza tabella: nessun blocco */ }
+  if (cons?.analisi_esterna === false) { alert(`${client.nome || "La cliente"} ha scelto di NON far elaborare i suoi dati con strumenti esterni. Non esporto nulla 🫶🏻`); return; }
+  if (cons?.analisi_esterna == null && !await confermaApp(`${client.nome || "La cliente"} non ha ancora dato il consenso all'analisi con strumenti esterni. Vuoi esportare lo stesso?`)) return;
+  setInCorso(true);
+  try {
+    const cid = client.id;
+    const q = async (tab, ord, asc = true) => { try { return await leggiTutto(() => supabase.from(tab).select("*").eq("client_id", cid).order(ord, { ascending: asc })); } catch (e) { return []; } };
+    const [checkins, notes, piani, kcal, giorni, esercizi, entries, nlog, scarichi, appunti, feedback, cicli, valEst, valBulb, calo, cambiPal, commenti] = await Promise.all([
+      q("checkins", "data_check"), q("notes", "data"), q("nutrition_plans", "data_aggiornamento"), q("kcal_voci", "data"),
+      q("training_days", "ordine"), q("training_exercises", "ordine"), q("training_entries", "data"), q("note_allenamento", "data"),
+      q("scarichi", "dal"), q("appunti", "updated_at"), q("feedback_soggettivo", "data"), q("ciclo_mestruale", "data_inizio"),
+      q("valutazione_estetica", "data_check"), q("valutazioni_bulb", "data"), q("carichi_calo_log", "data"), q("cambi_palestra", "dal"), q("commenti_check", "created_at"),
+    ]);
+    const n = (v, u = "") => (v == null || v === "" ? "-" : `${String(v).replace(".", ",")}${u}`);
+    const r = [];
+    r.push(`# Dati di ${client.nome || ""} ${client.cognome || ""} per analisi`.trim());
+    r.push(`Esportato il ${new Date().toLocaleDateString("it-IT")}. Dati dell'app di coaching: profilo, check, alimentazione, diario kcal, allenamento e note. Valori mancanti = "-" (non dedurre che siano zero).`);
+    r.push("");
+    r.push("## Profilo");
+    r.push(`- Sesso: ${client.sesso || "-"} · Età: ${calcolaEta(client.data_nascita) ?? client.eta ?? "-"} · Altezza: ${n(client.altezza_cm, " cm")} · Peso iniziale: ${n(client.peso_kg, " kg")}`);
+    r.push(`- Servizio: ${client.tipo_servizio || "-"} · Obiettivo attuale: ${labelObiettivo(client.obiettivo_attuale) || "-"} · Fase: ${client.fase_allenamento || "-"}`);
+    r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Livello attività: ${client.livello_attivita || "-"}`);
+    r.push(`- Focus di crescita: ${(client.focus_crescita || []).join(", ") || "-"}`);
+    r.push(`- Problematiche di salute: ${(client.problematiche_salute || []).join(", ") || "-"}${client.problematiche_salute_note ? " — " + client.problematiche_salute_note : ""}`);
+    r.push(`- Note particolari: ${client.note_particolari || "-"}`);
+    r.push("");
+
+    r.push(`## Check (${checkins.length})`);
+    r.push("Data | Peso kg | Petto | Spalle | Sopra ombelico | Ombelico | Sotto ombelico | Glutei | Coscia dx | Braccio dx | Collo | Energia | Sonno | Aderenza cibo | Aderenza allenamento | Fase ciclo | Note cliente");
+    checkins.forEach((c) => r.push([c.data_check, n(c.peso_kg), n(c.petto_cm), n(c.spalle_cm), n(c.sopra_ombelico_cm), n(c.ombelico_cm), n(c.sotto_ombelico_cm), n(c.glutei_cm), n(c.coscia_dx_cm), n(c.braccio_dx_cm), n(c.collo_cm), n(c.energia), n(c.sonno), n(c.aderenza_cibo), n(c.aderenza_allenamento), c.fase_mestruale || "-", (c.note_cliente || "-").replace(/\s+/g, " ")].join(" | ")));
+    r.push("");
+    if (valEst.length) {
+      r.push("## Valutazioni estetiche dei check");
+      valEst.forEach((v) => r.push(`- ${v.data_check || ""}: ${typeof v.analisi === "string" ? v.analisi.replace(/\s+/g, " ") : JSON.stringify(v.analisi || v.voti || {})}`));
+      r.push("");
+    }
+
+    r.push("## Piani alimentari");
+    piani.forEach((p) => r.push(`- Dal ${p.data_inizio || p.data_aggiornamento || "-"}${p.data_fine ? " al " + p.data_fine : ""}: ${n(p.kcal)} kcal · P ${n(p.proteine_g)} g · C ${n(p.carboidrati_g)} g · G ${n(p.grassi_g)} g${p.note ? " — " + String(p.note).replace(/\s+/g, " ") : ""}`));
+    if (!piani.length) r.push("- Nessun piano registrato");
+    r.push("");
+
+    // diario kcal: totali per giorno (le voci "totale" sono macro scritti a mano per il giorno)
+    const perGiorno = {};
+    kcal.forEach((v) => { const g = (perGiorno[v.data] = perGiorno[v.data] || { kcal: 0, p: 0, c: 0, g: 0, voci: [], manuale: false }); g.kcal += Number(v.kcal) || 0; g.p += Number(v.proteine) || 0; g.c += Number(v.carboidrati) || 0; g.g += Number(v.grassi) || 0; if (v.pasto === "totale") g.manuale = true; g.voci.push(v); });
+    const date = Object.keys(perGiorno).sort();
+    r.push(`## Diario alimentare — totali giornalieri (${date.length} giorni registrati)`);
+    r.push("Data | kcal | Proteine g | Carboidrati g | Grassi g | Tipo di registrazione");
+    date.forEach((d) => { const g = perGiorno[d]; r.push(`${d} | ${Math.round(g.kcal)} | ${Math.round(g.p)} | ${Math.round(g.c)} | ${Math.round(g.g)} | ${g.manuale ? "totale manuale" : "alimenti singoli"}`); });
+    r.push("");
+    const ultimi = date.slice(-14);
+    if (ultimi.length) {
+      r.push("### Dettaglio alimenti degli ultimi giorni registrati");
+      ultimi.forEach((d) => {
+        r.push(`**${d}**`);
+        perGiorno[d].voci.forEach((v) => r.push(`- ${v.pasto || "-"}: ${v.nome || "-"}${v.quantita ? ` ${v.quantita}${v.uname || v.unit || ""}` : ""} — ${Math.round(Number(v.kcal) || 0)} kcal, P ${n(v.proteine)}, C ${n(v.carboidrati)}, G ${n(v.grassi)}`));
+      });
+      r.push("");
+    }
+
+    r.push("## Programma di allenamento attuale");
+    const nomeEs = Object.fromEntries(esercizi.map((e) => [e.id, e]));
+    giorni.filter((g) => !g.scheda_archiviata).forEach((g) => {
+      r.push(`### ${g.nome}`);
+      esercizi.filter((e) => e.training_day_id === g.id).forEach((e) => r.push(`- ${e.nome}${e.tipo && e.tipo !== "forza" ? ` (${e.tipo})` : ""}: ${n(e.serie)} serie × ${n(e.ripetizioni)} rip${e.recupero_sec ? ` · rec ${e.recupero_sec}s` : ""}${e.tecnica ? ` · ${e.tecnica}` : ""}${e.note ? ` — ${String(e.note).replace(/\s+/g, " ")}` : ""}`));
+    });
+    r.push("");
+    const archiviati = giorni.filter((g) => g.scheda_archiviata);
+    if (archiviati.length) { r.push(`(Esistono anche ${archiviati.length} giorni di programmi precedenti archiviati, i cui carichi sono nel log qui sotto.)`); r.push(""); }
+
+    r.push("## Log allenamento (serie: kg × ripetizioni; ✓ = segnata come fatta)");
+    const perEsData = {};
+    entries.forEach((e) => { if (e.kg == null && !e.ripetizioni) return; const k = `${e.exercise_id}|${e.data}`; (perEsData[k] = perEsData[k] || []).push(e); });
+    const perEs = {};
+    Object.entries(perEsData).forEach(([k, arr]) => { const [id, d] = k.split("|"); (perEs[id] = perEs[id] || []).push([d, arr.sort((a, b) => (a.numero_serie || 0) - (b.numero_serie || 0))]); });
+    Object.entries(perEs).forEach(([id, giorniEs]) => {
+      const e = nomeEs[id]; if (!e || e.tipo === "mobilita" || e.tipo === "attivazione") return;
+      r.push(`### ${e.nome}`);
+      giorniEs.sort((a, b) => a[0].localeCompare(b[0])).forEach(([d, arr]) => r.push(`- ${d}: ${arr.map((s) => `${n(s.kg)}×${n(s.ripetizioni)}${s.completata ? "✓" : ""}`).join(", ")}${arr.some((s) => s.motivo_calo) ? ` [motivo carico ridotto: ${arr.find((s) => s.motivo_calo).motivo_calo}]` : ""}`));
+    });
+    r.push("");
+    if (calo.length) { r.push("## Carichi scesi rispetto alla volta prima"); calo.forEach((c) => r.push(`- ${c.data}: ${c.esercizio} ${n(c.kg_prima)} → ${n(c.kg_oggi)} kg`)); r.push(""); }
+    if (cambiPal.length) { r.push("## Allenamenti in altra palestra o con attrezzi diversi"); r.push("Queste sedute NON sono confrontabili con le altre (macchinari, leve e tarature diversi): le differenze di carico non indicano progressione né regressione di forza."); cambiPal.forEach((x) => r.push(`- ${x.dal}: ${x.tipo}${x.nota ? " — " + x.nota : ""}`)); r.push(""); }
+    if (scarichi.length) { r.push("## Settimane di scarico programmato"); scarichi.forEach((s) => r.push(`- dal ${s.dal} al ${s.al}${s.nota ? " — " + s.nota : ""}`)); r.push(""); }
+    if (nlog.length) { r.push("## Note finali degli allenamenti"); nlog.forEach((x) => r.push(`- ${x.data}: ${String(x.nota || "").replace(/\s+/g, " ")}`)); r.push(""); }
+    if (feedback.length) { r.push("## Feedback soggettivo"); feedback.forEach((f) => r.push(`- ${f.data}: ${(f.tags || []).join(", ")}${f.nota_libera ? " — " + f.nota_libera : ""}`)); r.push(""); }
+    if (cicli.length && cons?.ciclo !== false) { r.push("## Ciclo mestruale (inizio di ogni ciclo, giorni di flusso)"); cicli.forEach((c) => r.push(`- ${c.data_inizio} (flusso ${n(c.giorni_flusso)} giorni)`)); r.push(""); }
+    if (notes.length) { r.push("## Note della coach"); notes.forEach((x) => r.push(`- [${x.data}] (${x.tipo || "nota"}) ${String(x.testo || "").replace(/\s+/g, " ")}`)); r.push(""); }
+    if (commenti.length) { r.push("## Commenti della coach ai check"); commenti.forEach((x) => { if (x.testo) r.push(`- [${String(x.updated_at || x.created_at || "").slice(0, 10)}] ${String(x.testo).replace(/\s+/g, " ")}`); }); r.push(""); }
+    if (appunti.length && appunti[0].testo) { r.push("## Appunti condivisi coach/cliente"); r.push(String(appunti[0].testo)); r.push(""); }
+    if (valBulb.length) { r.push("## Valutazioni funzionali (Bulb)"); valBulb.forEach((v) => r.push(`- ${v.data} ${v.titolo || ""}: anamnesi ${JSON.stringify(v.anamnesi || {})} · restrizioni ${JSON.stringify(v.restrizioni || [])} · da lavorare ${JSON.stringify(v.lavorare || [])}${v.note ? " · " + v.note : ""}`)); r.push(""); }
+    const chiaveSez = (t) => /^## (Check|Valutazioni estetiche)/.test(t) ? "check" : /^## (Piani alimentari|Diario alimentare)/.test(t) ? "nutrizione" : /^## (Programma di allenamento|Log allenamento|Carichi scesi|Note finali|Feedback soggettivo|Valutazioni funzionali)/.test(t) ? "allenamento" : /^## (Allenamenti in altra|Settimane di scarico)/.test(t) ? "scarichi" : /^## (Note della coach|Commenti della coach|Appunti condivisi)/.test(t) ? "commenti" : /^## Ciclo/.test(t) ? "ciclo" : "base";
+    const attive = opz.sezioni || null;
+    let chiave = "base";
+    let righe = r.filter((riga) => { if (riga.startsWith("## ")) chiave = chiaveSez(riga); return !attive || chiave === "base" || attive.includes(chiave); });
+    if (opz.anonimo) righe = righe.map((riga, i) => i === 0 ? `# Dati di ${client.nome || "cliente"} per analisi` : riga);
+    const testoFinale = righe.join("\n");
+    if (opz.azione === "copia") {
+      try { await navigator.clipboard.writeText(testoFinale); alert("Copiato! Ora incolla nella chat del progetto Clienti 🫶🏻"); }
+      catch (e) { scaricaFile(`analisi-${formatDataLocale(new Date())}.md`, testoFinale, "text/markdown"); alert("Non riesco a copiare da qui: ho scaricato il file, caricalo nella chat."); }
+    } else {
+      scaricaFile(`analisi-${opz.anonimo ? "" : (client.cognome || "").toLowerCase() + "-"}${(client.nome || "").toLowerCase()}-${formatDataLocale(new Date())}.md`.replace(/\s+/g, "-"), testoFinale, "text/markdown");
+    }
+  } catch (e) { alert("Non è stato possibile preparare il file: " + (e?.message || "riprova tra poco")); }
+  setInCorso(false);
+}
+
 async function esportaDatiCliente(client, setInCorso) {
   setInCorso(true);
   const cid = client.id;
@@ -5691,7 +8315,7 @@ async function esportaDatiCliente(client, setInCorso) {
   r.push(`- Sesso: ${client.sesso || "-"} · Età: ${calcolaEta(client.data_nascita) ?? client.eta ?? "-"} · Data nascita: ${client.data_nascita || "-"} · Altezza: ${client.altezza_cm || "-"} cm`);
   r.push(`- Tipo servizio: ${client.tipo_servizio || "-"} · Piano: ${client.piano || "-"}`);
   r.push(`- Livello attività: ${client.livello_attivita || "-"}`);
-  r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${client.obiettivo_attuale || "-"}`);
+  r.push(`- Livello allenamento: ${client.livello_allenamento || "-"} · Fase: ${client.fase_allenamento || "-"} · Obiettivo: ${labelObiettivo(client.obiettivo_attuale) || "-"}`);
   r.push(`- Focus di crescita: ${(client.focus_crescita || []).join(", ") || "-"}`);
   r.push(`- Problematiche di salute: ${(client.problematiche_salute || []).join(", ") || "-"}${client.problematiche_salute_note ? " — " + client.problematiche_salute_note : ""}`);
   r.push(`- Note particolari: ${client.note_particolari || "-"}`);
@@ -5762,8 +8386,10 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   const [nutrizioneStorico, setNutrizioneStorico] = useState([]);
   const [pagamenti, setPagamenti] = useState([]);
   const [tab, setTab] = useState("riepilogo");
+  const [chatAperta, setChatAperta] = useState(false);
   const [schedaRiass, setSchedaRiass] = useState(false);
   const [esportazioneInCorso, setEsportazioneInCorso] = useState(false);
+  const [modaleAI, setModaleAI] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [mostraCheckForm, setMostraCheckForm] = useState(false);
   const [checkInModifica, setCheckInModifica] = useState(null);
@@ -5785,6 +8411,14 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
     setPagamenti(pg || []);
   };
   useEffect(() => { carica(); }, [clientId]);
+  const [dossier, setDossier] = useState(false);
+  const apertoIniziale = React.useRef(null);
+  useEffect(() => {
+    if (client && apertoIniziale.current !== clientId) {
+      apertoIniziale.current = clientId;
+      if (client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido") setTab("allenamento");
+    }
+  }, [client?.id, client?.tipo_servizio]);
 
   const salvaCliente = async (campi) => {
     setSalvando(true);
@@ -5797,29 +8431,35 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
   if (!client) return <Spinner />;
   const isBulb = client.tipo_servizio === "presenza" || client.tipo_servizio === "ibrido";
   const isOnline = client.tipo_servizio === "online" || client.tipo_servizio === "ibrido";
+  const tabAll = { key: "allenamento", label: "Allenamento" };
   const tabs = [
+    ...(isBulb ? [tabAll] : []), // Bulb e ibride: l'allenamento viene prima del riepilogo
     { key: "riepilogo", label: "Riepilogo" },
     { key: "dati", label: "Dati" },
     ...(isOnline ? [{ key: "check", label: "Check" }] : []), // tab "Scheda" congelato temporaneamente (workflow spostato su CSV esterno)
     ...(isBulb && client.pacchetto_lezioni !== "1" ? [{ key: "lezioni", label: "Lezioni" }] : []),
+    ...(isBulb ? [{ key: "valutazione", label: "Valutazione" }] : []),
     { key: "progressi", label: "Progressi" },
-    { key: "allenamento", label: "Allenamento" },
-    { key: "nutrizione", label: "Nutrizione" },
-    { key: "kcal", label: "Alimentazione" },
-    { key: "chat", label: "Chat" },
+    ...(isBulb ? [] : [tabAll]),
+    { key: "nutrizione", label: "Macros" },
+    ...(client.kcal_attivo !== false || client.nutrizione_attiva !== false || client.seguita_da_nutrizionista ? [{ key: "analisi", label: "Analisi alimentazione" }] : []),
+    ...(client.sesso !== "M" ? [{ key: "ciclo", label: "Ciclo" }] : []),
     { key: "notifiche", label: "Notifiche" },
     { key: "note", label: "Note" },
   ];
 
   return (
-    <div className="px-6 pt-6 pb-16 max-w-3xl mx-auto space-y-5 overflow-x-hidden">
+    <div className="px-6 pt-6 pb-16 max-w-3xl lg:max-w-5xl mx-auto space-y-5 overflow-x-hidden">
+      {modaleAI && <ModaleEsportaAI client={client} onClose={() => setModaleAI(false)} setInCorso={setEsportazioneInCorso} inCorso={esportazioneInCorso} />}
       <button onClick={onBack} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti i clienti</button>
       <div className="flex items-center justify-between">
         <div><h1 className="text-xl font-semibold text-slate-800">{client.nome} {client.cognome}</h1><p className="text-slate-500 text-sm">{client.codice}</p></div>
         <div className="flex items-center gap-2">
           <button onClick={async () => { setEsportazioneInCorso(true); try { await esportaStoricoCompletoCliente(client.id); } catch (e) { alert("Esportazione non riuscita: " + (e?.message || "riprova")); } setEsportazioneInCorso(false); }} disabled={esportazioneInCorso} className="text-slate-400 text-xs disabled:opacity-50">
-            {esportazioneInCorso ? "Esporto..." : "📄 Esporta dati"}
+            {esportazioneInCorso ? "Esporto..." : <><Ic n="file"/> Esporta dati</>}
           </button>
+          <button onClick={() => setModaleAI(true)} disabled={esportazioneInCorso} className="text-sky-700 text-xs font-medium disabled:opacity-50"><Ic n="brain"/> Esporta per AI</button>
+          <button onClick={() => setChatAperta(true)} className="bg-sky-700 text-white text-xs font-medium rounded-lg px-3 py-1.5"><Ic n="chat"/> Appunti</button>
           <StatoBadge stato={client.stato_check} />
         </div>
       </div>
@@ -5829,6 +8469,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <button onClick={() => salvaCliente({ archiviato: false })} disabled={salvando} className="flex-shrink-0 text-sky-600 font-medium">Riattiva</button>
         </div>
       )}
+      <ConsensiCoach clientId={client.id} />
       <AnteprimaCliente client={client} />
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">
         {tabs.map((t) => (
@@ -5836,7 +8477,35 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         ))}
       </div>
 
-      {tab === "riepilogo" && <RiepilogoCliente client={client} checkins={checkins} onVaiADati={() => setTab("dati")} />}
+      {tab === "riepilogo" && (
+        <div className="space-y-4">
+          <QuadroGenerale client={client} checkins={checkins} />
+          <BilancioAvanzatoCliente client={client} />
+          <AcquaCoach clientId={client.id} nome={client.nome} />
+          <AndamentoCliente client={client} checkins={checkins} />
+          <div className="grid lg:grid-cols-2 gap-4 items-start">
+            <ConsigliProgramma client={client} />
+            <ValutazioneEstetica client={client} checkins={checkins} />
+          </div>
+          <div className="grid lg:grid-cols-3 gap-4 items-start">
+            <div className="space-y-3 min-w-0">
+              <AttivitaClienti clients={[client]} singola />
+              {(client.kcal_attivo !== false || client.nutrizione_attiva !== false || client.seguita_da_nutrizionista) && <button onClick={() => setTab("analisi")} className="w-full bg-sky-50 text-sky-700 rounded-xl py-2 text-[13px] font-medium">Apri analisi alimentazione →</button>}
+              <button onClick={() => setTab("dati")} className="w-full bg-slate-100 text-slate-600 rounded-xl py-2 text-[13px]">Anagrafica e percorso →</button>
+            </div>
+            <Card className="p-4 space-y-3 min-w-0">
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Note</p>
+              <MessaggioPronto client={client} chiuso={false} soloCopia />
+              <NoteRapide client={client} />
+            </Card>
+            <Card className="p-4 space-y-3 min-w-0">
+              <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Primo e ultimo check</p>
+              <PrimoEUltimoCheck checkins={checkins} onApriConfronto={() => setTab("progressi")} />
+            </Card>
+          </div>
+          <TraguardiENotifiche client={client} />
+        </div>
+      )}
 
       {tab === "dati" && (
         <Card className="p-4 grid grid-cols-2 gap-4 text-sm [&_input]:min-w-0 [&_select]:min-w-0 [&>div]:min-w-0">
@@ -5914,7 +8583,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
               <span className="text-sm text-slate-700">Diario allenamento visibile alla cliente</span>
               <button onClick={() => salvaCliente({ log_visibile_cliente: !client.log_visibile_cliente })}
-                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.log_visibile_cliente ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.log_visibile_cliente ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
                 <span className="w-5 h-5 bg-white rounded-full block" />
               </button>
             </div>
@@ -5923,7 +8592,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
               <span className="text-sm text-slate-700">Video degli esercizi per la cliente</span>
               <button onClick={() => salvaCliente({ video_attivi: client.video_attivi === false })}
-                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.video_attivi !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.video_attivi !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
                 <span className="w-5 h-5 bg-white rounded-full block" />
               </button>
             </div>
@@ -5931,14 +8600,24 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Sezione nutrizione visibile alla cliente</span>
             <button onClick={() => salvaCliente({ nutrizione_attiva: client.nutrizione_attiva === false })}
-              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.nutrizione_attiva !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
+          </div>
+          <div className="col-span-2 bg-slate-50 rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-700">Seguita da nutrizionista</span>
+              <button onClick={() => salvaCliente({ seguita_da_nutrizionista: !client.seguita_da_nutrizionista })}
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.seguita_da_nutrizionista ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
+                <span className="w-5 h-5 bg-white rounded-full block" />
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Alla cliente compaiono il programma della nutrizionista (macros indicativi e dieta, da inserire nella tab Nutrizione) e le ricette. Il log dell'alimentazione sparisce.</p>
           </div>
           <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
             <span className="text-sm text-slate-700">Diario Kcal visibile alla cliente</span>
             <button onClick={() => salvaCliente({ kcal_attivo: client.kcal_attivo === false })}
-              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.kcal_attivo !== false ? "bg-emerald-500 justify-end" : "bg-slate-300 justify-start"}`}>
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${client.kcal_attivo !== false ? "bg-sky-500 justify-end" : "bg-slate-300 justify-start"}`}>
               <span className="w-5 h-5 bg-white rounded-full block" />
             </button>
           </div>
@@ -5952,8 +8631,8 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <InputData key={client.data_scadenza || "nessuna"} defaultValue={client.data_scadenza || ""} onBlur={(e) => salvaCliente({ data_scadenza: e.target.value || null })}
               className="mt-1" />
             {client.data_scadenza && (
-              <button onClick={() => { if (confirm("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
-                className="mt-2 text-rose-600 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
+              <button onClick={async () => { if (await confermaApp("Rimuovere la scadenza del pacchetto?")) salvaCliente({ data_scadenza: null, stato_pacchetto: null }); }}
+                className="mt-2 text-slate-800 text-xs font-medium">Rimuovi scadenza (il pacchetto non c'è più)</button>
             )}
           </div>
           <div>
@@ -6027,7 +8706,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                   if (client.scheda_pdf_path) {
                     const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
                     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
-                    else alert("Non riesco ad aprire il PDF della scheda.");
+                    else alert("Non è stato possibile aprire il PDF del programma.");
                   } else {
                     window.open(client.link_scheda, "_blank");
                   }
@@ -6047,7 +8726,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           {salvando && <p className="text-slate-400 text-xs col-span-2">Salvataggio...</p>}
           <div className="col-span-2 border-t border-slate-100 pt-4 space-y-3">
             {client.user_id && (
-              <p className="text-emerald-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
+              <p className="text-sky-600 text-sm flex items-center gap-1"><CheckCircle2 size={16} /> Accesso attivo ({client.email})</p>
             )}
             <InvitaClienteForm client={client} onInvitato={carica} />
           </div>
@@ -6063,7 +8742,14 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </Card>
       )}
 
-      {tab === "chat" && <ChatMessaggi clientId={clientId} ruolo="coach" onLetti={() => onChanged?.()} />}
+      {chatAperta && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30" onClick={() => setChatAperta(false)}>
+          <div className="w-full max-w-md bg-white h-full overflow-y-auto p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3"><p className="font-semibold text-slate-800">Appunti con {client.nome}</p><button onClick={() => setChatAperta(false)} className="text-slate-500 text-lg px-2" aria-label="Chiudi"><Ic n="x" bare/></button></div>
+            <AppuntiPagina clientId={clientId} ruolo="coach" nomeCliente={client.nome} onLetti={() => onChanged?.()} />
+          </div>
+        </div>
+      )}
       {tab === "lezioni" && <LezioniPacchetto client={client} onCompletato={carica} />}
 
       {tab === "scheda" && <SchedaCoach client={client} checkins={checkins} salvaCliente={salvaCliente} />}
@@ -6093,17 +8779,18 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                       </button>
                       <button
                         onClick={async () => {
-                          if (!confirm(`Eliminare il check del ${r.data_check}? L'operazione non è reversibile.`)) return;
+                          if (!await confermaApp(`Eliminare il check del ${r.data_check}? L'operazione non è reversibile.`)) return;
                           await supabase.from("checkins").delete().eq("id", r.id);
                           carica();
                         }}
-                        className="flex-shrink-0 text-slate-300 hover:text-rose-500 p-1"
+                        className="flex-shrink-0 text-slate-300 hover:text-slate-800 p-1"
                         title="Elimina check"
                       >
                         <X size={15} />
                       </button>
                     </div>
                     <FotoCheck checkin={r} />
+                    <CommentoCheck checkin={r} tutti={checkins} client={client} />
                   </li>
                 ))}
                 {checkins.length === 0 && <p className="text-slate-400 text-sm">Nessun check ancora.</p>}
@@ -6113,44 +8800,58 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
         </div>
       )}
 
-      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label="⬇ Esporta tutto lo storico di questa cliente (Excel con foto)" />}
+      {tab === "progressi" && (
+        <button onClick={() => setDossier(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5"><Ic n="clip"/> Dossier per la chat (PDF con tutti i check, foto, misure e note)</button>
+      )}
+      {dossier && <DossierCheck client={client} onClose={() => setDossier(false)} />}
+      {tab === "progressi" && <BottoneEsportaExcel clientId={client.id} label={<><Ic n="download"/> Esporta tutto lo storico di questa cliente (Excel con foto)</>} />}
       {tab === "progressi" && <ClientProgress checkins={checkins} altezza={client.altezza_cm} sesso={client.sesso} eta={calcolaEta(client.data_nascita) ?? client.eta} obiettivo={client.obiettivo_attuale} obiettivoDal={client.obiettivo_dal} titolo="Progressi e storico check" clientId={client.id} isAdmin />}
+
+      {tab === "valutazione" && <ValutazioniBulb client={client} />}
 
       {tab === "allenamento" && (
         <div className="space-y-5">
+          {isBulb && <RestrizioniCliente clientId={client.id} />}
+          <ScarichiCliente clientId={client.id} />
           <LivelloFaseObiettivo client={client} salvaCliente={salvaCliente} />
-          <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5">📄 Vedi la scheda riassuntiva (si crea da sola)</button>
+          <button onClick={() => setSchedaRiass(true)} className="w-full border border-slate-200 text-slate-600 text-sm font-medium rounded-xl py-2.5"><Ic n="file"/> Vedi la scheda riassuntiva (si crea da sola)</button>
           {schedaRiass && <SchedaRiassuntiva client={client} onClose={() => setSchedaRiass(false)} />}
-          <DiarioAllenamento clientId={clientId} isAdmin />
+          {isBulb
+            ? <DiarioClienteHost clientId={clientId} isAdmin />
+            : <DiarioAllenamento clientId={clientId} isAdmin />}
         </div>
       )}
 
-      {tab === "nutrizione" && (
+      {(tab === "nutrizione" || tab === "kcal") && (
+        <DiarioKcal clientId={clientId} isAdmin
+          pianoNode={
         <div className="space-y-3">
           <NutrizioneForm clientId={clientId} ultimo={nutrizione} onSalvato={carica}
             modifica={nutrizioneModifica} onAnnullaModifica={() => setNutrizioneModifica(null)} />
           <ImportaNutrizioneCSV clientId={clientId} onFatto={carica} />
           <StoricoNutrizione storico={nutrizioneStorico} isAdmin onModifica={setNutrizioneModifica}
             onElimina={async (r) => {
-              if (!confirm(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
+              if (!await confermaApp(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
               const { error } = await supabase.from("nutrition_plans").delete().eq("id", r.id);
-              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              if (error) { alert("Non è stato possibile eliminarlo."); return; }
               if (nutrizioneModifica?.id === r.id) setNutrizioneModifica(null);
               carica();
             }} />
           {nutrizioneStorico.length > 0 && (
             <button onClick={async () => {
-              if (!confirm(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
+              if (!await confermaApp(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
               const { error } = await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
-              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              if (error) { alert("Non è stato possibile eliminarlo."); return; }
               setNutrizioneModifica(null);
               carica();
-            }} className="w-full border border-red-100 bg-red-50 text-red-600 text-xs font-medium rounded-lg py-2">🗑 Elimina tutto lo storico nutrizione</button>
+            }} className="w-full border border-slate-200 bg-slate-100 text-slate-800 text-xs font-medium rounded-lg py-2"><Ic n="trash"/> Elimina tutto lo storico nutrizione</button>
           )}
         </div>
+          } />
       )}
 
-      {tab === "kcal" && <DiarioKcal clientId={clientId} isAdmin />}
+      {tab === "analisi" && <AnalisiCibo client={client} />}
+      {tab === "ciclo" && <CicloCliente client={client} isAdmin />}
 
       {tab === "notifiche" && <NotificheDellaCliente client={client} />}
 
@@ -6251,7 +8952,7 @@ function NuovoClienteForm({ onCreato, onAnnulla }) {
           <option value="gratuito">gratuito</option>
         </select>
       </div>
-      {errore && <p className="text-rose-500 text-sm">{errore}</p>}
+      {errore && <p className="text-slate-800 text-sm">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -6304,7 +9005,7 @@ function FotoCheck({ checkin }) {
 }
 
 const MESI = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
-const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: "bg-amber-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-orange-500" };
+const COLORE_TIPO = { compleanno: "bg-pink-400", check: "bg-sky-500", scadenza: "bg-slate-500", lezione: "bg-violet-500", call: "bg-teal-500", personale: "bg-fuchsia-500", messaggi: "bg-cyan-400", promemoria: "bg-slate-500" };
 const ORDINE_TIPO_DOT = { compleanno: 7, check: 0, scadenza: 1, lezione: 2, call: 3, personale: 4, promemoria: 5, messaggi: 6 };
 const SUGGERIMENTI_PERSONALE = ["Allenamento", "Impegno personale", "Amministrazione", "Contenuti social"];
 
@@ -6330,14 +9031,32 @@ async function avvisaLezioneCliente(ev, tipoAvviso) {
   } catch (e) { /* non blocca mai il salvataggio */ }
 }
 
+async function prenotaLezioneGruppo(gruppoId, { data, ora, luogo, nota }) {
+  const { data: membri } = await supabase.from("clients").select("id").eq("gruppo_id", gruppoId);
+  for (const m of membri || []) {
+    const { data: creato } = await supabase.from("calendar_events").insert({ client_id: m.id, tipo: "lezione", data, ora: ora || null, nota: nota || null, luogo: luogo || null, stato: "confermato", gruppo_id: gruppoId }).select().single();
+    if (creato) { try { await collegaLezionePacchetto(m.id, creato); await avvisaLezioneCliente(creato, "nuova"); } catch (e) { /* una cliente senza pacchetto/app non blocca le altre */ } }
+  }
+  return (membri || []).length;
+}
+
 function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
   const [f, setF] = useState({
     client_id: clients[0]?.id || "", tipo: "lezione", data: new Date().toISOString().slice(0, 10),
     ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "", titolo: "",
   });
   const [salvando, setSalvando] = useState(false);
+  const [gruppiForm, setGruppiForm] = useState([]);
+  const [gruppoSel, setGruppoSel] = useState("");
+  useEffect(() => { (async () => { try { const { data } = await supabase.from("gruppi_bulb").select("id, nome").order("created_at"); setGruppiForm(data || []); if (data?.length) setGruppoSel((g) => g || data[0].id); } catch (e) { /* ignora */ } })(); }, []);
 
   const salva = async () => {
+    if (f.tipo === "gruppo") {
+      if (!gruppoSel) return;
+      setSalvando(true);
+      await prenotaLezioneGruppo(gruppoSel, { data: f.data, ora: f.ora, luogo: f.luogo, nota: f.nota });
+      setSalvando(false); onSalvato(); return;
+    }
     if (f.tipo === "personale" ? !f.titolo.trim() : !f.client_id) return;
     setSalvando(true);
     const payload = f.tipo === "personale"
@@ -6354,6 +9073,7 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       <p className="text-sm font-medium text-slate-700">Nuovo evento</p>
       <div className="flex gap-2">
         <button onClick={() => setF({ ...f, tipo: "lezione" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "lezione" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Lezione 1:1</button>
+        {gruppiForm.length > 0 && <button onClick={() => setF({ ...f, tipo: "gruppo" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "gruppo" ? "bg-violet-500 text-white" : "bg-slate-100 text-slate-600"}`}>Gruppo</button>}
         <button onClick={() => setF({ ...f, tipo: "call" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "call" ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-600"}`}>Call</button>
         <button onClick={() => setF({ ...f, tipo: "personale" })} className={`flex-1 py-2 rounded-lg text-sm ${f.tipo === "personale" ? "bg-fuchsia-500 text-white" : "bg-slate-100 text-slate-600"}`}>Personale/extra</button>
       </div>
@@ -6368,6 +9088,13 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
             ))}
           </div>
         </div>
+      ) : f.tipo === "gruppo" ? (
+        <div>
+          <label className="text-xs text-slate-500">Gruppo (la lezione viene prenotata per tutte le clienti del gruppo)</label>
+          <select value={gruppoSel} onChange={(e) => setGruppoSel(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1">
+            {gruppiForm.map((g) => <option key={g.id} value={g.id}>{g.nome}</option>)}
+          </select>
+        </div>
       ) : (
         <div>
           <label className="text-xs text-slate-500">Cliente</label>
@@ -6378,11 +9105,9 @@ function NuovoEventoForm({ clients, onSalvato, onAnnulla }) {
       )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
-        <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
-      {f.tipo === "lezione" && (
+      {(f.tipo === "lezione" || f.tipo === "gruppo") && (
         <div>
           <label className="text-xs text-slate-500">Sede</label>
           <SelezionaLuogo value={f.luogo} onChange={(v) => setF({ ...f, luogo: v })} />
@@ -6404,25 +9129,26 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
   });
   const [salvando, setSalvando] = useState(false);
   const isPersonale = evento.tipo === "personale";
+  const tutti = evento.tutti && evento.tutti.length ? evento.tutti : [evento]; // lezione di gruppo: modifica per tutte
 
   const salva = async () => {
     setSalvando(true);
     const payload = isPersonale
       ? { data: f.data, ora: f.ora || null, titolo: f.titolo.trim() || evento.titolo, nota: f.nota || null }
       : { data: f.data, ora: f.ora || null, luogo: f.luogo || null, stato: f.stato };
-    await supabase.from("calendar_events").update(payload).eq("id", evento.id);
-    if (!isPersonale) await sincronizzaLezionePacchetto(evento.id);
+    await supabase.from("calendar_events").update(payload).in("id", tutti.map((x) => x.id));
+    if (!isPersonale) for (const x of tutti) await sincronizzaLezionePacchetto(x.id);
     if (evento.tipo === "lezione" && f.stato === "confermato" && (f.data !== evento.data || (f.ora || "") !== (evento.ora ? evento.ora.slice(0, 5) : "") || (f.luogo || "") !== (evento.luogo || ""))) {
-      await avvisaLezioneCliente({ ...evento, data: f.data, ora: f.ora || null, luogo: f.luogo || null }, "mod");
+      for (const x of tutti) await avvisaLezioneCliente({ ...x, data: f.data, ora: f.ora || null, luogo: f.luogo || null }, "mod");
     }
     setSalvando(false);
     onSalvato();
   };
   const elimina = async () => {
-    if (!confirm("Eliminare definitivamente questo evento?")) return;
+    if (!await confermaApp("Eliminare definitivamente questo evento?")) return;
     setSalvando(true);
-    await scollegaLezionePacchetto(evento.id);
-    await supabase.from("calendar_events").delete().eq("id", evento.id);
+    for (const x of tutti) await scollegaLezionePacchetto(x.id);
+    await supabase.from("calendar_events").delete().in("id", tutti.map((x) => x.id));
     setSalvando(false);
     onSalvato();
   };
@@ -6430,7 +9156,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
   return (
     <Card className="p-4 space-y-3">
       <p className="text-sm font-medium text-slate-700">
-        Modifica evento ({evento.tipo === "lezione" ? "Lezione 1:1" : evento.tipo === "call" ? "Call" : "Personale/extra"})
+        Modifica evento ({evento.tipo === "lezione" ? (evento.tutti && evento.tutti.length > 1 ? `Lezione di gruppo · ${evento.tutti.length} clienti` : "Lezione 1:1") : evento.tipo === "call" ? "Call" : "Personale/extra"})
       </p>
       {isPersonale && (
         <input value={f.titolo} onChange={(e) => setF({ ...f, titolo: e.target.value })} placeholder="Titolo attività"
@@ -6438,10 +9164,7 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
       )}
       <div className="grid grid-cols-2 gap-3">
         <InputData value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} />
-        <select value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">--:--</option>
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={f.ora} onChange={(e) => setF({ ...f, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" vuoto />
       </div>
       {evento.tipo === "lezione" && (
         <SelezionaLuogo value={f.luogo} vuoto="— sede —" onChange={(v) => setF({ ...f, luogo: v })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -6460,7 +9183,78 @@ function EditEventoForm({ evento, onSalvato, onAnnulla }) {
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Salva modifiche"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Chiudi</button>
       </div>
-      <button onClick={elimina} className="w-full text-rose-500 text-xs font-medium">Elimina evento</button>
+      <button onClick={elimina} className="w-full text-slate-800 text-xs font-medium">Elimina evento</button>
+    </Card>
+  );
+}
+
+
+// In fondo al calendario: clienti con pacchetto non rinnovato, check o pagamenti in ritardo da almeno N giorni
+function InRitardoCalendario({ clients, onSelect }) {
+  const [soglia, setSoglia] = useState(14);
+  const [pagDaSaldare, setPagDaSaldare] = useState([]);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data } = await supabase.from("payments").select("client_id, importo, importo_saldato, data_pagamento, scadenza_saldo, tipo_piano").eq("stato", "da_saldare");
+        if (vivo) setPagDaSaldare(data || []);
+      } catch (e) { /* ignora */ }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  const oggi = formatDataLocale(new Date());
+  const giorniDa = (d) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${d}T12:00:00`)) / 86400000);
+  const nomeDi = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const attivi = clients.filter((c) => !c.archiviato && c.stato_pacchetto !== "gratuito");
+  const perId = Object.fromEntries(attivi.map((c) => [c.id, c]));
+  const pacchetti = attivi
+    .filter((c) => c.tipo_servizio !== "presenza" && c.data_scadenza && giorniDa(c.data_scadenza) >= soglia)
+    .map((c) => ({ c, g: giorniDa(c.data_scadenza), testo: `pacchetto non rinnovato da ${giorniDa(c.data_scadenza)} giorni (scaduto il ${c.data_scadenza.split("-").reverse().slice(0, 2).join("/")})` }))
+    .sort((a, b) => b.g - a.g);
+  const check = attivi
+    .filter((c) => c.tipo_servizio !== "presenza" && c.prossimo_check && c.stato_check === "da_compilare" && giorniDa(c.prossimo_check) >= soglia)
+    .map((c) => ({ c, g: giorniDa(c.prossimo_check), testo: `check in ritardo di ${giorniDa(c.prossimo_check)} giorni` }))
+    .sort((a, b) => b.g - a.g);
+  const pagamenti = pagDaSaldare
+    .filter((p) => perId[p.client_id])
+    .map((p) => {
+      const riferimento = p.scadenza_saldo || p.data_pagamento;
+      const g = riferimento ? giorniDa(riferimento) : 0;
+      const resta = p.importo != null ? Math.max(0, Number(p.importo) - (Number(p.importo_saldato) || 0)) : null;
+      return { c: perId[p.client_id], g, testo: `${p.scadenza_saldo ? "saldo seconda rata" : "pagamento da saldare"}${resta ? ` (${resta.toFixed(2).replace(".", ",")}€)` : ""} · ${p.scadenza_saldo ? "scaduto" : "registrato"} da ${g} giorni` };
+    })
+    .filter((x) => x.g >= soglia)
+    .sort((a, b) => b.g - a.g);
+  const tot = pacchetti.length + check.length + pagamenti.length;
+  const Blocco = ({ titolo, righe }) => righe.length === 0 ? null : (
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium pt-2 pb-1">{titolo} · {righe.length}</p>
+      {righe.map((r, i) => (
+        <button key={i} onClick={() => onSelect && onSelect(r.c.id)} className="w-full flex items-center justify-between gap-2 text-left border-t border-slate-100 py-2">
+          <span className="min-w-0"><span className="block text-sm font-medium text-slate-700 truncate">{nomeDi(r.c)}</span><span className="block text-xs text-slate-500">{r.testo}</span></span>
+          <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
+        </button>
+      ))}
+    </div>
+  );
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-sm font-semibold text-slate-700">Pagamenti e check in ritardo{tot ? ` · ${tot}` : ""}</p>
+        <div className="flex gap-1.5">
+          {[[7, "1 sett."], [14, "2 sett."], [21, "3 sett."]].map(([v, l]) => (
+            <button key={v} onClick={() => setSoglia(v)} className={`px-2.5 py-1 rounded-full text-xs font-medium ${soglia === v ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-500"}`}>da {l}</button>
+          ))}
+        </div>
+      </div>
+      {tot === 0 ? <p className="text-xs text-slate-400 mt-2">Nessuno in ritardo da almeno {soglia / 7} {soglia === 7 ? "settimana" : "settimane"} ✨</p> : (
+        <>
+          <Blocco titolo="Pacchetti da rinnovare" righe={pacchetti} />
+          <Blocco titolo="Pagamenti da saldare" righe={pagamenti} />
+          <Blocco titolo="Check in ritardo" righe={check} />
+        </>
+      )}
     </Card>
   );
 }
@@ -6474,10 +9268,13 @@ function CalendarioAgenda({ clients, onSelect }) {
   const [promemoriaRighe, setPromemoriaRighe] = useState([]);
   const [mostraForm, setMostraForm] = useState(false);
   const [eventoInModifica, setEventoInModifica] = useState(null);
+  const [gruppiCal, setGruppiCal] = useState({});
+  const [gruppoAperto, setGruppoAperto] = useState(null);
 
   const caricaEventi = async () => {
     const { data } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").order("data");
     setEventiCalendario(data || []);
+    try { const { data: gg } = await supabase.from("gruppi_bulb").select("*"); setGruppiCal(Object.fromEntries((gg || []).map((g) => [g.id, g]))); } catch (e) { /* ignora */ }
     const { data: pr } = await supabase.from("promemoria_messaggi").select("client_id, settimana, inviato");
     setPromemoriaRighe(pr || []);
   };
@@ -6510,12 +9307,25 @@ function CalendarioAgenda({ clients, onSelect }) {
       });
     }
   });
+  const gruppiViste = {};
   eventiCalendario.forEach((e) => {
     if (e.tipo === "personale") {
       const pezzi = [];
       if (e.stato === "annullata") pezzi.push("annullata");
       if (e.nota) pezzi.push(e.nota);
       eventi.push({ id: e.id, raw: e, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: "personale", nome: e.titolo || "Attività personale", label: pezzi.join(" — "), clientId: null });
+      return;
+    }
+    if (e.gruppo_id && e.tipo === "lezione") {
+      const chiave = `${e.gruppo_id}|${e.data}|${e.ora}|${e.stato}`;
+      const gia = gruppiViste[chiave];
+      if (gia) { gia.tutti.push(e); gia.label = gia.etichetta(gia.tutti.length); return; }
+      const g = gruppiCal[e.gruppo_id];
+      const voce = { id: e.id, raw: e, tutti: [e], gruppoId: e.gruppo_id, data: e.data, ora: e.ora ? e.ora.slice(0, 5) : null, tipo: "lezione", nome: g ? g.nome : "Gruppo Bulb", clientId: null,
+        etichetta: (n) => ["Lezione di gruppo", `${n} client${n === 1 ? "e" : "i"}`, e.luogo, e.stato === "annullata" ? "annullata" : null, e.stato === "persa" ? "persa" : null].filter(Boolean).join(" — ") };
+      voce.label = voce.etichetta(1);
+      gruppiViste[chiave] = voce;
+      eventi.push(voce);
       return;
     }
     const nomeCliente = e.clients ? `${e.clients.nome} ${e.clients.cognome}` : "Cliente";
@@ -6602,11 +9412,11 @@ function CalendarioAgenda({ clients, onSelect }) {
 
       <div className="flex flex-wrap gap-3 px-1 text-xs text-slate-500">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-500" /> Check</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> Scadenza</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Scadenza</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-500" /> Lezione 1:1</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal-500" /> Call</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Personale/extra</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500" /> Promemoria</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-500" /> Promemoria</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-pink-400" /> Compleanni</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-400" /> Messaggi clienti</span>
       </div>
@@ -6619,10 +9429,20 @@ function CalendarioAgenda({ clients, onSelect }) {
           <EditEventoForm evento={eventoInModifica} onAnnulla={() => setEventoInModifica(null)}
             onSalvato={() => { setEventoInModifica(null); caricaEventi(); }} />
         )}
+        {gruppoAperto && <SessioneGruppo gruppo={gruppoAperto} onClose={() => setGruppoAperto(null)} onChanged={caricaEventi} onSelect={onSelect} />}
         {eventiVisibili.length === 0 && <p className="text-slate-400 text-sm px-1">Nessun evento {giornoFiltro ? "in questo giorno" : "in programma"}.</p>}
         {eventiVisibili.map((e, i) => (
           <Card key={i} className="p-3 flex items-center gap-3">
-            {e.clientId ? (
+            {e.gruppoId ? (
+              <button onClick={() => setGruppoAperto(gruppiCal[e.gruppoId] || { id: e.gruppoId, nome: e.nome })} className="flex-1 min-w-0 flex items-center gap-3 text-left">
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
+                {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-700 "><Ic n="users"/> {e.nome}</p>
+                  <p className="text-slate-500 text-xs ">{!giornoFiltro && e.data.split("-").reverse().join("/") + " — "}{e.label}</p>
+                </div>
+              </button>
+            ) : e.clientId ? (
               <button onClick={() => onSelect(e.clientId)} className="flex-1 min-w-0 flex items-center gap-3 text-left">
                 <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${COLORE_TIPO[e.tipo]}`} />
                 {e.ora && <span className="text-slate-500 text-xs font-medium w-10 flex-shrink-0">{e.ora}</span>}
@@ -6642,12 +9462,14 @@ function CalendarioAgenda({ clients, onSelect }) {
               </div>
             )}
             {e.id && (
-              <button onClick={() => setEventoInModifica(e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1">✎</button>
+              <button onClick={() => setEventoInModifica(e.tutti ? { ...e.raw, tutti: e.tutti } : e.raw)} className="text-slate-300 hover:text-slate-600 flex-shrink-0 px-1"><Ic n="edit" bare/></button>
             )}
-            {e.clientId && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
+            {(e.clientId || e.gruppoId) && <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />}
+            
           </Card>
         ))}
       </div>
+      <InRitardoCalendario clients={clients} onSelect={onSelect} />
     </div>
   );
 }
@@ -6675,9 +9497,7 @@ function ProponiOrarioForm({ evento, onFatto, onAnnulla }) {
       <p className="text-sm font-medium text-slate-700">Proponi un altro orario</p>
       <div className="grid grid-cols-2 gap-3">
         <InputData value={data} onChange={(e) => setData(e.target.value)} />
-        <select value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          {SLOT_ORARI.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <OraCoach value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       </div>
       <SelezionaLuogo value={luogo} onChange={setLuogo} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <textarea placeholder="Messaggio (facoltativo)" value={messaggio} onChange={(e) => setMessaggio(e.target.value)} rows={2} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
@@ -6707,6 +9527,91 @@ function SelettoreMessaggiPronti({ nome, onScegli }) {
       <option value="">✨ Messaggi pronti...</option>
       {MESSAGGI_PRONTI.map((m, i) => <option key={m.titolo} value={i}>{m.titolo}</option>)}
     </select>
+  );
+}
+
+// Coach: cosa ha compilato ogni cliente (allenamento, cibo, ciclo, check) e da quanti giorni, con reminder gentile
+function AttivitaClienti({ clients, singola = false }) {
+  const [d, setD] = useState(null);
+  const [aperta, setAperta] = useState(true);
+  const [invio, setInvio] = useState(null);
+  const [inviati, setInviati] = useState({});
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const da = addGiorni(formatDataLocale(new Date()), -120);
+        const tr = await leggiTutto(() => supabase.from("training_entries").select("client_id, data").gte("data", da).order("id"));
+        const kc = await leggiTutto(() => supabase.from("kcal_voci").select("client_id, data").gte("data", da).order("created_at"));
+        const ci = await leggiTutto(() => supabase.from("ciclo_mestruale").select("client_id, data_inizio").order("created_at"));
+        const { data: imp } = await supabase.from("ciclo_impostazioni").select("client_id, attivo");
+        const ultimo = (righe, campo) => { const m = {}; righe.forEach((r) => { const v = r[campo]; if (v && (!m[r.client_id] || v > m[r.client_id])) m[r.client_id] = v; }); return m; };
+        if (vivo) setD({ tr: ultimo(tr, "data"), kc: ultimo(kc, "data"), ci: ultimo(ci, "data_inizio"), imp: Object.fromEntries((imp || []).map((x) => [x.client_id, x.attivo])) });
+      } catch (e) { if (vivo) setD({ tr: {}, kc: {}, ci: {}, imp: {} }); }
+    })();
+    return () => { vivo = false; };
+  }, []);
+  if (!d) return null;
+  const oggi = formatDataLocale(new Date());
+  const giorniFa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
+  const voce = (nome, ds, verde, giallo) => {
+    if (!ds) return { nome, testo: "mai", stato: "r" };
+    const g = giorniFa(ds);
+    return { nome, testo: g <= 0 ? "oggi" : g === 1 ? "ieri" : `${g} gg`, stato: g <= verde ? "g" : g <= giallo ? "a" : "r" };
+  };
+  const righe = clients.filter((c) => singola || (!c.archiviato && c.stato_pacchetto !== "scaduto" && c.tipo_servizio !== "presenza")).map((c) => {
+    const v = [];
+    v.push({ ...voce("Allenamento", d.tr[c.id], 3, 7), chiave: "allenamento", frase: "gli allenamenti nel log", intro: "il Log allenamento 💪🏻 Apri \"Log allenamento\", scegli il giorno e segna carichi e ripetizioni mentre ti alleni: così vediamo insieme come progredisci" });
+    if (c.kcal_attivo !== false && !c.seguita_da_nutrizionista) { const vc = voce("Cibo", d.kc[c.id], 2, 5); v.push({ ...vc, stato: vc.testo === "mai" ? "n" : vc.stato, chiave: "cibo", frase: "l'alimentazione nel diario" }); }
+    if (c.sesso !== "M" && d.imp[c.id] !== false) v.push({ ...voce("Ciclo", d.ci[c.id], 35, 40), chiave: "ciclo", frase: "il ciclo nel calendario", intro: "il calendario del ciclo 🌸 Apri \"Il mio ciclo\" e tocca il giorno in cui arrivano le mestruazioni: l'app ti dice in che fase sei e ti dà consigli su come allenarti e come potresti sentirti" });
+    if (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") v.push({ ...voce("Check", c.ultimo_check, 30, 40), chiave: "check", frase: "il check", intro: "", soloInfo: true });
+    return { c, v, rossi: v.filter((x) => x.stato === "r" && !x.soloInfo) };
+  }).sort((x, y) => y.rossi.length - x.rossi.length || `${x.c.nome}`.localeCompare(`${y.c.nome}`));
+  const colori = { g: "bg-sky-50 text-sky-700", a: "bg-slate-100 text-slate-600", r: "bg-slate-800 text-white", n: "bg-slate-100 text-slate-400" };
+  const manda = async ({ c, rossi }) => {
+    const nuove = rossi.filter((x) => x.testo === "mai");
+    const ferme = rossi.filter((x) => x.testo !== "mai");
+    const nome1 = (c.nome || "").trim().split(" ")[0];
+    let testo = `Ciao ${nome1}! 🫶🏻 `;
+    if (nuove.length) {
+      testo += `L'app ha ${nuove.length > 1 ? "delle funzioni" : "una funzione"} che non hai ancora provato:\n\n` + nuove.map((x) => `• ${x.intro}`).join("\n\n") + `\n\nSfruttale per darmi più dati possibili: io riesco a seguirti meglio e tu hai tutto sotto controllo ✨`;
+    }
+    if (ferme.length) {
+      const el = ferme.map((x) => x.frase);
+      const lista = el.length > 1 ? el.slice(0, -1).join(", ") + " e " + el[el.length - 1] : el[0];
+      testo += `${nuove.length ? "\n\nInoltre " : "Ho visto che "}mancano ${lista} da un po': ti va di segnarli sull'app? Più dati mi dai e più riesco a calibrare tutto su di te 💪🏻`;
+    }
+    testo += `\n\nSe hai dubbi su come fare scrivimi pure, ci sono io 🫶🏻`;
+    if (!await confermaApp(`Mando questo messaggio a ${c.nome}?\n\n${testo}`)) return;
+    setInvio(c.id);
+    try {
+      const { data: nm, error } = await supabase.from("messaggi").insert({ client_id: c.id, mittente: "coach", testo }).select("id").single();
+      if (error) throw error;
+      if (nm?.id) inviaPush({ evento: "messaggio", messaggio_id: nm.id });
+      setInviati((p) => ({ ...p, [c.id]: true }));
+    } catch (e) { alert("Il messaggio non è partito. Controlla la connessione e riprova."); }
+    setInvio(null);
+  };
+  return (
+    <Card className="p-4 space-y-1">
+      <button onClick={() => setAperta((x) => !x)} className="w-full flex items-center justify-between pb-1">
+        <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Cosa hanno compilato</span>
+        <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
+      </button>
+      {aperta && <p className="text-[11px] text-slate-400">Giorni dall'ultima volta · in cima chi ha più bisogno di un reminder</p>}
+      {aperta && righe.map((r) => (
+        <div key={r.c.id} className="py-3 border-b border-slate-100 last:border-0">
+          {!singola && <p className="text-[15px] font-semibold text-slate-800 mb-2"><NomeCl c={r.c} /></p>}
+          <div className="flex flex-wrap gap-1.5">
+            {r.v.map((x) => <span key={x.chiave} className={`${colori[x.stato]} rounded-full px-2.5 py-1 text-xs whitespace-nowrap`}>{x.nome} <b>{x.testo}</b></span>)}
+          </div>
+          {!singola && <MessaggioPronto client={r.c} />}
+          {r.rossi.length > 0 && (inviati[r.c.id]
+            ? <p className="text-sky-700 text-xs mt-2">Reminder inviato ✓</p>
+            : <button onClick={() => manda(r)} disabled={invio === r.c.id} className="mt-2 text-sky-700 text-[13px] font-medium disabled:opacity-50">✨ Manda reminder →</button>)}
+        </div>
+      ))}
+    </Card>
   );
 }
 
@@ -6755,11 +9660,11 @@ function DaCompletareClienti({ clients, onSelect }) {
         <span className="text-xs uppercase tracking-wide text-slate-500 font-medium">Da completare per cliente ({righe.length})</span>
         <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
       </button>
-      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
+      {aperta && righe.length === 0 && <p className="text-sky-600 text-sm">Tutto completo per tutte le clienti online ✓ ✨</p>}
       {aperta && righe.map(({ c, manca }) => (
         <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
-          {manca.map((m) => <span key={m.k} className="block text-xs text-rose-600">• {m.t}</span>)}
+          <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
+          {manca.map((m) => <span key={m.k} className="block text-xs text-slate-800">• {m.t}</span>)}
         </button>
       ))}
       {aperta && <p className="text-[11px] text-slate-400 pt-1">Se una cliente segue la nutrizione con un altro professionista, disattiva "nutrizione" nella sua scheda e non comparirà più qui.</p>}
@@ -6833,12 +9738,12 @@ function EserciziMancantiClienti({ clients, onSelect }) {
         <span className="text-[11px] text-slate-400">{aperta ? "Nascondi" : "Mostra"}</span>
       </button>
       {!aperta && <p className="text-[11px] text-slate-400">{totMancano === 0 ? "Tutto coperto ✓" : `${totMancano} esercizi senza video o spiegazioni`}{totVarianti > 0 ? ` · ${totVarianti} varianti con video generico` : ""}. Include mobilità e attivazione.</p>}
-      {aperta && righe.length === 0 && <p className="text-emerald-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
+      {aperta && righe.length === 0 && <p className="text-sky-600 text-sm">Ogni esercizio ha video e spiegazioni ✓ ✨</p>}
       {aperta && righe.map(({ c, mancano, varianti }) => (
         <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-          <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
-          {mancano.map((m) => <span key={m.t} className="block text-xs text-rose-600">• {m.t}: {m.m}</span>)}
-          {varianti.map((m) => <span key={m.t} className="block text-xs text-amber-600">• {m.t}: {m.m}</span>)}
+          <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
+          {mancano.map((m) => <span key={m.t} className="block text-xs text-slate-800">• {m.t}: {m.m}</span>)}
+          {varianti.map((m) => <span key={m.t} className="block text-xs text-slate-600">• {m.t}: {m.m}</span>)}
         </button>
       ))}
       {aperta && <p className="text-[11px] text-slate-400 pt-1">In rosso manca qualcosa. In arancione c'è un video generico: valuta se serve il video della variante. Le spiegazioni scritte nel programma contano come spiegazioni.</p>}
@@ -6848,6 +9753,7 @@ function EserciziMancantiClienti({ clients, onSelect }) {
 
 function OggiCoach({ clients, onSelect, vai }) {
   const [dati, setDati] = useState(null);
+  const [gruppoAperto, setGruppoAperto] = useState(null);
   const oggi = formatDataLocale(new Date());
   const domani = addGiorni(oggi, 1);
   const giorniDa = (ds) => Math.round((new Date(`${oggi}T12:00:00`) - new Date(`${ds}T12:00:00`)) / 86400000);
@@ -6858,6 +9764,8 @@ function OggiCoach({ clients, onSelect, vai }) {
     (async () => {
       try {
         const { data: ev } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").gte("data", oggi).lte("data", addGiorni(oggi, 7)).order("data").order("ora");
+        let gruppi = {};
+        try { const { data: gg0 } = await supabase.from("gruppi_bulb").select("*"); gruppi = Object.fromEntries((gg0 || []).map((g) => [g.id, g])); } catch (e) { /* ignora */ }
         const { count: richieste } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
         const { count: checkDaEsaminare } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
         const { data: msg } = await supabase.from("messaggi").select("client_id, mittente, created_at").order("created_at", { ascending: false }).limit(1000);
@@ -6877,7 +9785,7 @@ function OggiCoach({ clients, onSelect, vai }) {
         const pag = await leggiTutto(() => supabase.from("payments").select("client_id, stato").order("id"));
         const pagato = {};
         pag.forEach((r) => { if (r.stato === "saldato") pagato[r.client_id] = true; });
-        if (vivo) setDati({ ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico, primoCheck, conGiorni, pagato });
+        if (vivo) setDati({ gruppi, ev: ev || [], richieste: richieste || 0, checkDaEsaminare: checkDaEsaminare || 0, ultimoMsg, ultimoCarico, primoCheck, conGiorni, pagato });
       } catch (e) { if (vivo) setDati({ ev: [], richieste: 0, checkDaEsaminare: 0, ultimoMsg: {}, ultimoCarico: {}, primoCheck: {}, conGiorni: {}, pagato: {} }); }
     })();
     return () => { vivo = false; };
@@ -6894,10 +9802,24 @@ function OggiCoach({ clients, onSelect, vai }) {
   const vociDelGiorno = (data) => {
     const v = [];
     nuoveClienti.filter((n) => n.scad === data).forEach((n) => v.push({ key: `sk-${n.c.id}`, ora: null, titolo: `${n.c.nome} ${n.c.cognome}`, sub: "Ultimo giorno per consegnare la scheda", clientId: n.c.id }));
-    attivi.filter((e) => e.data === data).forEach((e) => v.push({
+    const viste = {};
+    attivi.filter((e) => e.data === data).forEach((e) => {
+      if (e.gruppo_id && e.tipo === "lezione") {
+        // lezione di gruppo: una sola voce per il gruppo, non una per cliente
+        const k = `${e.gruppo_id}|${e.ora}|${e.stato}`;
+        if (viste[k]) { viste[k].n += 1; viste[k].sub = viste[k].mk(viste[k].n); return; }
+        const g = dati.gruppi?.[e.gruppo_id] || { id: e.gruppo_id, nome: "Gruppo Bulb" };
+        const voce = { key: `g-${k}`, ora: e.ora ? e.ora.slice(0, 5) : null, titolo: `👥 ${g.nome}`, clientId: null, gruppo: g, n: 1,
+          mk: (n) => `Lezione di gruppo · ${n} client${n === 1 ? "e" : "i"}${e.luogo ? ` · ${e.luogo}` : ""}${e.stato === "richiesta" ? " · da confermare" : ""}` };
+        voce.sub = voce.mk(1);
+        viste[k] = voce; v.push(voce);
+        return;
+      }
+      v.push({
       key: e.id, ora: e.ora ? e.ora.slice(0, 5) : null, titolo: nomeEv(e), clientId: e.client_id,
       sub: `${e.tipo === "lezione" ? "Lezione 1:1" : e.tipo === "personale" ? "Personale" : "Call"}${e.luogo ? ` · ${e.luogo}` : ""}${e.stato === "richiesta" ? " · da confermare" : ""}`,
-    }));
+      });
+    });
     clients.forEach((c) => {
       if (c.tipo_servizio !== "presenza" && c.prossimo_check === data) v.push({ key: `ck-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Check da fare", clientId: c.id });
       if (c.data_scadenza === data && c.stato_pacchetto !== "gratuito" && c.stato_pacchetto !== "scaduto") v.push({ key: `sc-${c.id}`, ora: null, titolo: `${c.nome} ${c.cognome}`, sub: "Pacchetto in scadenza", clientId: c.id });
@@ -6905,7 +9827,7 @@ function OggiCoach({ clients, onSelect, vai }) {
     return v.sort((x, y) => (x.ora || "").localeCompare(y.ora || ""));
   };
   const RigaVoce = ({ e }) => (
-    <button onClick={() => e.clientId && onSelect(e.clientId)} className="w-full flex items-center gap-3 text-left">
+    <button onClick={() => (e.gruppo ? setGruppoAperto(e.gruppo) : e.clientId && onSelect(e.clientId))} className="w-full flex items-center gap-3 text-left">
       <span className="text-sm font-semibold text-slate-700 w-12 flex-shrink-0">{e.ora || "•"}</span>
       <span className="flex-1 min-w-0">
         <span className="block text-sm text-slate-700 font-medium truncate">{e.titolo}</span>
@@ -6960,12 +9882,13 @@ function OggiCoach({ clients, onSelect, vai }) {
   const Voce = ({ n, label, onClick }) => (
     <button onClick={onClick} className="w-full flex items-center justify-between py-2 text-left">
       <span className="text-sm text-slate-700">{label}</span>
-      <span className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${n > 0 ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-400"}`}>{n}</span>
+      <span className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${n > 0 ? "bg-slate-200 text-slate-800" : "bg-slate-100 text-slate-400"}`}>{n}</span>
     </button>
   );
 
   return (
     <div className="space-y-4">
+      {gruppoAperto && <SessioneGruppo gruppo={gruppoAperto} onClose={() => setGruppoAperto(null)} onChanged={() => {}} onSelect={onSelect} />}
       <Giorno titolo="Oggi" data={oggi} />
       <Giorno titolo="In programma domani" data={domani} />
 
@@ -6980,79 +9903,23 @@ function OggiCoach({ clients, onSelect, vai }) {
         ))}
       </Card>
 
-      {nuoveClienti.length > 0 && (
-        <Card className="p-4 space-y-1">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Nuove clienti: scheda da creare</p>
-          <p className="text-[11px] text-slate-400 pb-1">Entro 7 giorni dall'invio dei dati</p>
-          {nuoveClienti.map((n) => {
-            const g = -giorniDa(n.scad);
-            const testo = g > 0 ? `tra ${g} ${g === 1 ? "giorno" : "giorni"}` : g === 0 ? "scade oggi" : `scaduta da ${-g} ${g === -1 ? "giorno" : "giorni"}`;
-            return (
-              <button key={n.c.id} onClick={() => onSelect(n.c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-                <span className="flex items-center justify-between gap-2">
-                  <span className="text-sm text-slate-700 font-medium truncate">{n.c.nome} {n.c.cognome}</span>
-                  <span className={`text-xs font-semibold flex-shrink-0 ${g < 0 ? "text-rose-600" : g <= 2 ? "text-amber-600" : "text-slate-500"}`}>{testo}</span>
-                </span>
-                <span className="block text-xs text-slate-500">Check inviato il {fmt(n.check)} · scheda entro il {fmt(n.scad)} · {n.pagato ? "pagamento ricevuto ✓" : "pagamento da verificare"}</span>
-              </button>
-            );
-          })}
-        </Card>
-      )}
 
-      <Card className="p-4 divide-y divide-slate-100">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-2">Da fare</p>
-        <Voce n={dati.richieste} label="Richieste di lezione da confermare" onClick={() => vai("notifiche")} />
-        <Voce n={dati.checkDaEsaminare} label="Check ricevuti da esaminare" onClick={() => vai("notifiche")} />
-        <Voce n={msgSenzaRisposta.length} label="Chat in attesa di risposta" onClick={() => vai("chat")} />
-      </Card>
 
-      {scadenze.length > 0 && (
-        <Card className="p-4 space-y-1">
-          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Pacchetti scaduti</p>
-          {scadenze.map((s, i) => (
-            <button key={i} onClick={() => onSelect(s.c.id)} className="w-full flex items-center justify-between py-1.5 text-left">
-              <span className="text-sm text-slate-700 font-medium">{s.c.nome} {s.c.cognome}</span>
-              <span className="text-xs text-amber-600">{s.testo}</span>
-            </button>
-          ))}
-        </Card>
-      )}
 
-      <Card className="p-4 space-y-3">
-        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Reminder rinnovi ✨</p>
-        {mesiRinnovi.map((m) => (
-          <div key={m.k} className="space-y-1">
-            <p className="text-sm font-semibold text-slate-700 capitalize">{m.titolo} <span className="text-slate-400 font-normal">({m.righe.length})</span></p>
-            {m.righe.length === 0 && <p className="text-slate-400 text-sm">Nessun rinnovo in scadenza.</p>}
-            {m.righe.map((c) => {
-              const n = giorniAlla(c.data_scadenza);
-              return (
-                <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-1.5 text-left border-b border-slate-100 last:border-0">
-                  <span>
-                    <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
-                    <span className="block text-[11px] text-slate-400">{c.piano || "—"} · scade il {c.data_scadenza.split("-").reverse().slice(0, 2).join("/")}</span>
-                  </span>
-                  <span className={`text-xs ${n < 0 ? "text-rose-500" : n <= 7 ? "text-amber-600" : "text-slate-500"}`}>{testoGiorni(n)}</span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </Card>
 
       <Card className="p-4 space-y-1">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium pb-1">Clienti da seguire</p>
-        {daSeguire.length === 0 && <p className="text-emerald-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
+        {daSeguire.length === 0 && <p className="text-sky-600 text-sm">Tutto in ordine: nessuna cliente da recuperare ✓</p>}
         {daSeguire.map(({ c, motivi }) => (
           <button key={c.id} onClick={() => onSelect(c.id)} className="w-full py-2 text-left border-b border-slate-100 last:border-0">
-            <span className="block text-sm text-slate-700 font-medium">{c.nome} {c.cognome}</span>
-            <span className="block text-xs text-rose-500">{motivi.join(" · ")}</span>
+            <span className="block text-sm text-slate-700 font-medium"><NomeCl c={c} /></span>
+            <span className="block text-xs text-slate-800">{motivi.join(" · ")}</span>
           </button>
         ))}
       </Card>
 
-      <EserciziMancantiClienti clients={clients} onSelect={onSelect} />
+
+      <AttivitaClienti clients={clients} />
 
       <DaCompletareClienti clients={clients} onSelect={onSelect} />
     </div>
@@ -7085,7 +9952,7 @@ function InviaNotaForm({ clients, onFatto }) {
       <SelettoreMessaggiPronti nome={(() => { const c = clients.find((x) => x.id === clientId); return c ? c.nome : ""; })()} onScegli={(t) => { setMessaggio(t); setFatto(false); }} />
       <textarea placeholder="Scrivi la nota..." value={messaggio} onChange={(e) => { setMessaggio(e.target.value); setFatto(false); }} rows={3} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
       <button onClick={invia} disabled={salvando} className="w-full bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Invio..." : "Invia nota"}</button>
-      {fatto && <p className="text-emerald-600 text-xs">Nota inviata!</p>}
+      {fatto && <p className="text-sky-600 text-xs">Nota inviata!</p>}
     </Card>
   );
 }
@@ -7142,23 +10009,23 @@ function PromemoriaMessaggi({ clients }) {
         </div>
         <Card className="p-1 divide-y divide-slate-100">
           {elenco.length === 0 && <p className="text-center text-slate-400 text-sm py-3">Nessuna cliente in questo gruppo.</p>}
-          {elenco.length > 0 && daContattare.length === 0 && !mostraFatte && <p className="text-center text-emerald-600 text-sm py-3">Tutte le clienti contattate questa settimana ✓</p>}
+          {elenco.length > 0 && daContattare.length === 0 && !mostraFatte && <p className="text-center text-sky-600 text-sm py-3">Tutte le clienti contattate questa settimana ✓</p>}
           {visibili.map((c) => {
             const fatto = !!stato[c.id];
             return (
               <button key={c.id} onClick={() => toggle(c.id, fatto)} className="w-full flex items-center gap-3 px-2 py-2.5 text-left">
-                <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-emerald-500 border-emerald-500" : "border-slate-300"}`}>
+                <span className={`flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center ${fatto ? "bg-sky-500 border-sky-500" : "border-slate-300"}`}>
                   {fatto && <Check size={13} className="text-white" />}
                 </span>
-                <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}>{c.nome} {c.cognome}</span>
-                {!fatto && <span className="text-[10px] font-medium text-amber-600 bg-amber-50 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
+                <span className={`flex-1 text-sm ${fatto ? "text-slate-400 line-through" : "text-slate-700 font-medium"}`}><NomeCl c={c} /></span>
+                {!fatto && <span className="text-[10px] font-medium text-slate-600 bg-slate-100 rounded-full px-2 py-0.5 flex-shrink-0">da scrivere</span>}
               </button>
             );
           })}
         </Card>
         <div className="flex items-center justify-between mt-1 px-1">
           {daContattare.length > 0 ? (
-            <p className="text-[11px] text-amber-600">{daContattare.length} da contattare questa settimana</p>
+            <p className="text-[11px] text-slate-600">{daContattare.length} da contattare questa settimana</p>
           ) : <span />}
           {contattate.length > 0 && (
             <button onClick={() => setMostraFatte((v) => !v)} className="text-[11px] text-slate-400 underline">
@@ -7183,12 +10050,9 @@ function ChatCoach({ clients, onChanged }) {
   const [ultimi, setUltimi] = useState({});
   const [ricerca, setRicerca] = useState("");
   const carica = async () => {
-    const { data } = await supabase.from("messaggi").select("client_id, mittente, testo, foto_path, letto, created_at").order("created_at", { ascending: false }).limit(1000);
+    const { data } = await supabase.from("appunti").select("client_id, testo, ultimo_autore, nuovo_per_coach, updated_at").limit(1000);
     const m = {};
-    (data || []).forEach((x) => {
-      if (!m[x.client_id]) m[x.client_id] = { ultimo: x, nuovi: 0 };
-      if (x.mittente === "cliente" && !x.letto) m[x.client_id].nuovi += 1;
-    });
+    (data || []).forEach((x) => { m[x.client_id] = { ultimo: { mittente: x.ultimo_autore, testo: (x.testo || "").trim().split("\n").filter(Boolean).pop() || "", created_at: x.updated_at }, nuovi: x.nuovo_per_coach ? 1 : 0 }; });
     setUltimi(m);
   };
   useEffect(() => { carica(); }, [aperta]);
@@ -7197,9 +10061,9 @@ function ChatCoach({ clients, onChanged }) {
     const c = clients.find((x) => x.id === aperta);
     return (
       <div className="space-y-3">
-        <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutte le chat</button>
+        <button onClick={() => { setAperta(null); onChanged?.(); }} className="flex items-center gap-1 text-slate-500 text-sm"><ArrowLeft size={16} /> Tutti gli appunti</button>
         <p className="text-lg font-semibold text-slate-800">{c?.nome} {c?.cognome}</p>
-        <ChatMessaggi clientId={aperta} ruolo="coach" nomeCliente={c?.nome || ""} onLetti={() => onChanged?.()} />
+        <AppuntiPagina clientId={aperta} ruolo="coach" nomeCliente={c?.nome || ""} onLetti={() => onChanged?.()} />
       </div>
     );
   }
@@ -7224,12 +10088,12 @@ function ChatCoach({ clients, onChanged }) {
             <Card key={c.id} className="p-3">
               <button onClick={() => setAperta(c.id)} className="w-full text-left flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                  <p className="font-medium text-slate-700 text-sm"><NomeCl c={c} /></p>
                   <p className="text-slate-500 text-xs truncate">
-                    {u ? `${u.ultimo.mittente === "coach" ? "Tu: " : ""}${u.ultimo.testo || "📷 Foto"}` : "Nessun messaggio"}
+                    {u ? (u.ultimo.testo || "Pagina vuota") : "Nessun appunto"}
                   </p>
                 </div>
-                {u?.nuovi > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
+                {u?.nuovi > 0 && <span className="bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">{u.nuovi}</span>}
                 <ChevronRight size={16} className="text-slate-300 flex-shrink-0" />
               </button>
             </Card>
@@ -7281,7 +10145,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   const altro = ruolo === "coach" ? "cliente" : "coach";
 
   const carica = async () => {
-    const { data, error } = await supabase.from("messaggi").select("*").eq("client_id", clientId).order("created_at", { ascending: true });
+    const { data, error } = await supabase.from("messaggi").select("*").eq("client_id", clientId).eq(ruolo === "coach" ? "nascosto_coach" : "nascosto_cliente", false).order("created_at", { ascending: true });
     if (error) { setErrore("La chat non è ancora attiva: serve completare l'attivazione nel database."); setCaricato(true); return; }
     setErrore("");
     setMsgs(data || []);
@@ -7337,8 +10201,15 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
     return `${d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })} ${d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`;
   };
 
+  const cancellaChat = async () => {
+    if (!await confermaApp("Cancello questa chat dalla tua vista? L'altra persona continua a vedere i suoi messaggi.")) return;
+    const { error } = await supabase.rpc("nascondi_chat", { p_client_id: clientId });
+    if (error) { setErrore("Non è stato possibile cancellare la chat, riprova."); return; }
+    setMsgs([]);
+  };
   return (
     <div className="space-y-3">
+      {msgs.length > 0 && <div className="flex justify-end"><button onClick={cancellaChat} className="text-[11px] text-slate-400 hover:text-slate-700">Cancella chat</button></div>}
       <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
         {caricato && msgs.length === 0 && !errore && <Card className="p-4 text-center text-slate-400 text-sm">Nessun messaggio ancora. Scrivi il primo!</Card>}
         {msgs.map((m) => {
@@ -7357,7 +10228,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
         })}
         <div ref={fineRef} />
       </div>
-      {errore && <p className="text-rose-500 text-xs px-1">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs px-1">{errore}</p>}
       {foto && (
         <div className="flex items-center justify-between bg-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600">
           <span className="truncate">Foto: {foto.name}</span>
@@ -7394,7 +10265,7 @@ function CommentoCoach({ n, onSalvato }) {
     setSalvando(true); setErrore("");
     const { error } = await supabase.from("notifiche").update({ commento_coach: t, commento_coach_il: new Date().toISOString(), stato: "inviata" }).eq("id", n.id);
     setSalvando(false);
-    if (error) { setErrore("Non sono riuscita a salvare, riprova 🫶🏻"); return; }
+    if (error) { setErrore("Non siamo riusciti a salvare, riprova 🫶🏻"); return; }
     n.commento_coach = t;
     inviaPush({ evento: "commento", notifica_id: n.id });
     setAperto(false);
@@ -7408,13 +10279,13 @@ function CommentoCoach({ n, onSalvato }) {
         <button onClick={() => { setTesto(n.commento_coach || ""); setAperto(true); }} className="text-[11px] text-sky-600 font-medium mt-1">Modifica</button>
       </div>
     ) : (
-      <button onClick={() => setAperto(true)} className="text-xs text-sky-600 font-medium bg-white border border-sky-100 rounded-lg px-3 py-1.5">💬 Commenta</button>
+      <button onClick={() => setAperto(true)} className="text-xs text-sky-600 font-medium bg-white border border-sky-100 rounded-lg px-3 py-1.5"><Ic n="chat"/> Commenta</button>
     );
   }
   return (
     <div className="space-y-1.5">
       <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={3} placeholder="Scrivi il tuo commento per la cliente..." className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white" />
-      {errore && <p className="text-rose-500 text-[11px]">{errore}</p>}
+      {errore && <p className="text-slate-800 text-[11px]">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando || !testo.trim()} className="flex-1 bg-slate-800 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{salvando ? "Invio..." : "Invia alla cliente"}</button>
         <button onClick={() => setAperto(false)} className="px-3 text-xs text-slate-500">Annulla</button>
@@ -7441,16 +10312,16 @@ function StoricoNotifiche({ clients }) {
   const nomeCliente = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
   const titolo = (n) => n.tipo === "proposta_lezione" ? "Proposta di orario" : n.proposta_luogo === "promemoria_pacchetto" ? "Promemoria: pacchetto in scadenza" : n.proposta_luogo === "promemoria_check" ? "Promemoria: check in arrivo" : "Nota";
   const badge = (n) => {
-    if (n.stato === "inviata") return { t: "Non ancora vista", c: "bg-amber-100 text-amber-700" };
-    if (n.stato === "accettata") return { t: "Accettata", c: "bg-emerald-100 text-emerald-700" };
-    if (n.stato === "rifiutata") return { t: "Rifiutata", c: "bg-rose-100 text-rose-700" };
-    return { t: "Vista", c: "bg-emerald-100 text-emerald-700" };
+    if (n.stato === "inviata") return { t: "Non ancora vista", c: "bg-slate-100 text-slate-700" };
+    if (n.stato === "accettata") return { t: "Accettata", c: "bg-sky-100 text-sky-700" };
+    if (n.stato === "rifiutata") return { t: "Rifiutata", c: "bg-slate-200 text-slate-800" };
+    return { t: "Vista", c: "bg-sky-100 text-sky-700" };
   };
   const filtrate = righe.filter((n) => filtro === "tutte" || (filtro === "non_viste" ? n.stato === "inviata" : n.stato !== "inviata"));
 
   if (caricando) return <Spinner />;
   return (
-    <Sezione id="storico_notifiche" titolo="Storico notifiche inviate alle clienti" conteggio={righe.length}>
+    <Sezione id="storico_notifiche" titolo="Storico notifiche inviate alle clienti">
       <div className="flex gap-1.5 mb-2">
         {[["tutte", "Tutte"], ["non_viste", "Non viste"], ["viste", "Viste"]].map(([k, l]) => (
           <button key={k} onClick={() => { setFiltro(k); setQuante(20); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${filtro === k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>{l}</button>
@@ -7463,7 +10334,7 @@ function StoricoNotifiche({ clients }) {
           return (
             <Card key={n.id} className="p-3 space-y-1">
               <div className="flex items-start justify-between gap-2">
-                <p className="font-medium text-slate-700 text-sm">{nomeCliente(n.client_id)}</p>
+                <p className="font-medium text-slate-700 text-sm"><NomeCl c={clients.find((x) => x.id === n.client_id)} /></p>
                 <span className={`text-[10px] font-medium rounded-full px-2 py-0.5 flex-shrink-0 ${b.c}`}>{b.t}</span>
               </div>
               <p className="text-slate-500 text-xs font-medium">{titolo(n)}</p>
@@ -7504,9 +10375,9 @@ function CompleanniClienti({ clients }) {
       <div className="space-y-2">
         {prossimi.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun compleanno nei prossimi 90 giorni.</Card>}
         {prossimi.map((x) => (
-          <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-amber-50/60 border-amber-200" : ""}`}>
+          <Card key={x.c.id} className={`p-3 flex items-center justify-between gap-3 ${x.giorni === 0 ? "bg-slate-100/60 border-slate-200" : ""}`}>
             <div className="min-w-0">
-              <p className="font-medium text-slate-700 text-sm">{nome(x.c)}</p>
+              <p className="font-medium text-slate-700 text-sm"><NomeCl c={x.c} /></p>
               <p className="text-slate-500 text-xs">Compie {x.prossimo.getFullYear() - x.y} anni · {dm(x.prossimo)}</p>
             </div>
             <span className="text-xs font-medium text-sky-700 bg-sky-50 rounded-full px-2 py-0.5 flex-shrink-0">{quando(x.giorni)}</span>
@@ -7554,14 +10425,14 @@ function StoricoAzioniClienti({ clients }) {
   const nome = (id) => { const c = clients.find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
   if (righe === null) return null;
   return (
-    <Sezione id="storico_azioni" titolo="Storico azioni delle clienti" conteggio={righe.length}>
+    <Sezione id="storico_azioni" titolo="Storico azioni delle clienti">
       <div className="space-y-2">
         {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Ancora nessuna azione registrata: qui vedrai quando le clienti registrano un allenamento o aggiornano il diario alimentare ✨</Card>}
         {righe.slice(0, quante).map((r) => (
           <Card key={r.client_id + r.tipo + r.giorno} className="p-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-medium text-slate-700 text-sm">{nome(r.client_id)}</p>
-              <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? "🍽️ Ha aggiornato il diario alimentare" : "💪🏻 Ha registrato l'allenamento"}</p>
+              <p className="font-medium text-slate-700 text-sm"><NomeCl c={clients.find((x) => x.id === r.client_id)} /></p>
+              <p className="text-slate-500 text-xs">{r.tipo === "nutrizione" ? <><Ic n="meal"/> Ha aggiornato il diario alimentare</> : "💪🏻 Ha registrato l'allenamento"}</p>
             </div>
             <p className="text-slate-400 text-[11px] flex-shrink-0 text-right">{new Date(r.created_at).toLocaleDateString("it-IT")}<br />{new Date(r.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
           </Card>
@@ -7603,7 +10474,7 @@ function ClientiDaRiattivare({ clients, onSelect }) {
   };
   const telefono = (t) => { let x = String(t || "").replace(/[^\d+]/g, ""); if (x.startsWith("+")) x = x.slice(1); else if (x.startsWith("00")) x = x.slice(2); else if (x.length === 10 && x.startsWith("3")) x = "39" + x; return x; };
   return (
-    <Sezione id="da_riattivare" titolo="💤 Clienti da riattivare" conteggio={lista.length}>
+    <Sezione id="da_riattivare" titolo="💤 Clienti da riattivare">
       {true && (
         <div className="space-y-2">
           {lista.map(({ c, giorni }) => {
@@ -7613,10 +10484,10 @@ function ClientiDaRiattivare({ clients, onSelect }) {
             return (
               <Card key={c.id} className="p-3 flex items-center gap-3">
                 <button onClick={() => onSelect?.(c.id)} className="flex-1 min-w-0 text-left">
-                  <p className="font-medium text-slate-700 text-sm truncate">{c.nome} {c.cognome}</p>
+                  <p className="font-medium text-slate-700 text-sm truncate"><NomeCl c={c} /></p>
                   <p className="text-slate-400 text-[11px]">{giorni === null ? "Nessuna attività registrata" : `Ultima attività ${giorni} giorni fa`}{wa !== null ? ` · scritto su WhatsApp ${wa === 0 ? "oggi" : wa + " giorni fa"}` : ""}</p>
                 </button>
-                {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-emerald-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
+                {tel.length >= 9 && <a href={`https://wa.me/${tel}?text=${msg}`} target="_blank" rel="noreferrer" onClick={() => scrivi(c)} className="flex-shrink-0 bg-sky-600 text-white text-xs font-medium rounded-lg px-3 py-2">WhatsApp</a>}
               </Card>
             );
           })}
@@ -7637,7 +10508,7 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
     const n = !aperto; setAperto(n);
     if (ricorda) { try { localStorage.setItem(chiave, n ? "1" : "0"); } catch { /* ignora */ } }
   };
-  const colori = { slate: "text-slate-600", amber: "text-amber-700", sky: "text-sky-700" };
+  const colori = { slate: "text-slate-600", amber: "text-slate-700", sky: "text-sky-700" };
   const acceso = evidenzia && conteggio > 0;
   return (
     <div>
@@ -7645,7 +10516,7 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
         <button onClick={cambia} aria-expanded={aperto} className="flex-1 min-w-0 flex items-center gap-2 px-3 py-3 text-left">
           <ChevronRight size={16} className={`flex-shrink-0 text-slate-400 transition-transform ${aperto ? "rotate-90" : ""}`} />
           <span className={`text-xs uppercase tracking-wide font-medium truncate ${colori[tono] || colori.slate}`}>{titolo}</span>
-          {conteggio !== null && <span className={`flex-shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5 ${acceso ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{conteggio}</span>}
+          {conteggio !== null && <span className={`flex-shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5 ${acceso ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-500"}`}>{conteggio}</span>}
         </button>
         {aperto && destra}
       </div>
@@ -7655,6 +10526,857 @@ function Sezione({ id, titolo, conteggio = null, tono = "slate", aperta = false,
 }
 
 
+/* ------------------------------------------------------------------ */
+/* Richiesta nuovo pacchetto lezioni (cliente) e conferma (coach)     */
+/* ------------------------------------------------------------------ */
+const OFFERTE_GRUPPO = [
+  { n: 4, titolo: "Mensile · 1 volta a settimana", sotto: "4 lezioni" },
+  { n: 8, titolo: "Mensile · 2 volte a settimana", sotto: "8 lezioni" },
+  { n: 12, titolo: "Trimestrale · 1 volta a settimana", sotto: "12 lezioni" },
+  { n: 24, titolo: "Trimestrale · 2 volte a settimana", sotto: "24 lezioni · best choice ✨" },
+];
+function RichiediPacchetto({ client, totaleAttuale }) {
+  const [aperto, setAperto] = useState(false);
+  const [n, setN] = useState(OFFERTE_GRUPPO.some((o) => o.n === Number(totaleAttuale)) ? Number(totaleAttuale) : 4);
+  const [nota, setNota] = useState("");
+  const [inviata, setInviata] = useState(null);
+  const [invio, setInvio] = useState(false);
+  useEffect(() => {
+    supabase.from("richieste_pacchetto").select("id, numero_lezioni, created_at").eq("client_id", client.id).eq("stato", "richiesta").order("created_at", { ascending: false }).limit(1).maybeSingle().then(({ data }) => setInviata(data || null));
+  }, [client.id]);
+  const invia = async () => {
+    setInvio(true);
+    const off = OFFERTE_GRUPPO.find((o) => o.n === n);
+    const notaFinale = [off ? `Offerta: ${off.titolo}` : "", nota.trim()].filter(Boolean).join(" — ") || null;
+    const { data } = await supabase.from("richieste_pacchetto").insert({ client_id: client.id, gruppo_id: client.gruppo_id || null, numero_lezioni: n, nota: notaFinale }).select("id, numero_lezioni, created_at").single();
+    if (data) {
+      setInviata(data); setAperto(false);
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) supabase.functions.invoke("push-richiesta-pacchetto", { body: { richiesta_id: data.id }, headers: { Authorization: `Bearer ${session.access_token}` } }).catch(() => {});
+      }).catch(() => {});
+    }
+    setInvio(false);
+  };
+  if (inviata) return <p className="mt-3 text-xs rounded-lg px-3 py-2" style={{ background: "#E1EEFB", color: "#27466D" }}>Richiesta inviata ✨ Pacchetto da {inviata.numero_lezioni} lezioni{client.gruppo_id ? " per tutto il gruppo" : ""}: Morgana ti risponde presto 🫶🏻</p>;
+  if (!aperto) return <button onClick={() => setAperto(true)} className="w-full mt-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Richiedi un nuovo pacchetto</button>;
+  return (
+    <div className="mt-3 space-y-3 rounded-xl p-3" style={{ background: "#F5FAFE", border: "1.5px solid #C9E0F7" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Nuovo pacchetto lezioni</p>
+      {client.gruppo_id && <p className="text-[11px]" style={{ color: "#3F78B3" }}>La richiesta vale per tutte le ragazze del tuo gruppo 🫶🏻</p>}
+      {true ? (
+        <div className="space-y-2">
+          {OFFERTE_GRUPPO.map((o) => (
+            <button key={o.n} onClick={() => setN(o.n)} className="w-full text-left rounded-xl px-3 py-2.5" style={{ background: n === o.n ? "#27466D" : "#fff", color: n === o.n ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>
+              <p className="text-sm font-semibold">{o.titolo}</p>
+              <p className="text-[11px]" style={{ opacity: 0.8 }}>{o.sotto}</p>
+            </button>
+          ))}
+        </div>
+      ) : (<>
+      <div className="flex items-center justify-center gap-4">
+        <button onClick={() => setN(Math.max(1, n - 1))} className="w-9 h-9 rounded-full text-lg font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D", background: "#fff" }}>−</button>
+        <span className="text-2xl font-semibold w-16 text-center" style={{ color: "#27466D" }}>{n}</span>
+        <button onClick={() => setN(Math.min(100, n + 1))} className="w-9 h-9 rounded-full text-lg font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D", background: "#fff" }}>+</button>
+      </div>
+      <p className="text-center text-[11px] text-slate-500">lezioni</p>
+      </>)}
+      <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Una nota per Morgana (facoltativa)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white" />
+      <div className="flex gap-2">
+        <button onClick={invia} disabled={invio} className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{invio ? "Invio…" : "Invia richiesta"}</button>
+        <button onClick={() => setAperto(false)} className="px-4 rounded-xl text-sm text-slate-500" style={{ border: "1.5px solid #C9E0F7", background: "#fff" }}>Annulla</button>
+      </div>
+    </div>
+  );
+}
+
+function RichiestePacchettoCoach({ onChanged }) {
+  const [righe, setRighe] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [occupato, setOccupato] = useState(null);
+  const carica = async () => {
+    const { data } = await supabase.from("richieste_pacchetto").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("created_at");
+    setRighe(data || []);
+  };
+  useEffect(() => { carica(); }, []);
+  const conferma = async (r) => {
+    setOccupato(r.id); setMsg("");
+    let membri = [r.client_id];
+    if (r.gruppo_id) { const { data } = await supabase.from("clients").select("id").eq("gruppo_id", r.gruppo_id); membri = (data || []).map((c) => c.id); if (!membri.includes(r.client_id)) membri.push(r.client_id); }
+    let creati = 0, saltati = [];
+    for (const id of membri) {
+      const { data: att } = await supabase.from("pacchetti_lezioni").select("id, numero_lezioni").eq("client_id", id).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+      let attivoPieno = false;
+      if (att) { const { count } = await supabase.from("lezioni_svolte").select("id", { count: "exact", head: true }).eq("pacchetto_id", att.id).eq("fatta", true); attivoPieno = (att.numero_lezioni - (count || 0)) > 1; }
+      if (attivoPieno) { const { data: c } = await supabase.from("clients").select("nome").eq("id", id).maybeSingle(); saltati.push(c?.nome || "cliente"); continue; }
+      const quota = r.gruppo_id && PREZZI_GRUPPO[r.numero_lezioni] ? PREZZI_GRUPPO[r.numero_lezioni] / 4 : null;
+      const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: r.numero_lezioni, stato: "attivo", saldato: false, importo_quota: quota }).select().single();
+      if (nuovo) { await supabase.from("clients").update({ pacchetto_lezioni: String(r.numero_lezioni), stato_pacchetto: "attivo" }).eq("id", id); creati += 1; }
+    }
+    await supabase.from("richieste_pacchetto").update({ stato: "confermata" }).eq("id", r.id);
+    setMsg(`Pacchetto da ${r.numero_lezioni} lezioni creato per ${creati} ${creati === 1 ? "cliente" : "clienti"}${saltati.length ? `. Già attivo per: ${saltati.join(", ")}` : ""}. Risultano "da saldare" finché non segni il pagamento ✨`);
+    setOccupato(null); carica(); onChanged && onChanged();
+  };
+  const rifiuta = async (r) => { await supabase.from("richieste_pacchetto").update({ stato: "rifiutata" }).eq("id", r.id); carica(); };
+  if (righe.length === 0 && !msg) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Richieste nuovo pacchetto</p>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      {righe.map((r) => (
+        <Card key={r.id} className="p-3 space-y-2">
+          <p className="font-medium text-slate-700 text-sm">{r.gruppo_id ? <><Ic n="users"/> Gruppo · </> : ""}{r.clients?.nome} {r.clients?.cognome} · pacchetto da {r.numero_lezioni} lezioni</p>
+          {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
+          <p className="text-[11px] text-slate-400">Confermando, il pacchetto parte {r.gruppo_id ? "per tutte le clienti del gruppo" : "per la cliente"}. Resta "da saldare" finché non segni il pagamento{r.gruppo_id && PREZZI_GRUPPO[r.numero_lezioni] ? ` (${fmtEuro(PREZZI_GRUPPO[r.numero_lezioni])} totali, ${fmtEuro(PREZZI_GRUPPO[r.numero_lezioni] / 4)} a persona)` : ""}.</p>
+          <div className="flex gap-2">
+            <button onClick={() => conferma(r)} disabled={occupato === r.id} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{r.gruppo_id ? "Conferma per tutte" : "Conferma"}</button>
+            <button onClick={() => rifiuta(r)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// Notifica "Carico in calo": la coach indica il motivo e sceglie se vale per l'esercizio o per tutta la sessione
+function CaricheInCaloCoach({ onChanged }) {
+  const [righe, setRighe] = useState(null);
+  const [ambito, setAmbito] = useState({}); // chiave riga -> "esercizio" | "sessione"
+  const [occupato, setOccupato] = useState(null);
+  const dd = (d) => d.split("-").reverse().slice(0, 2).join("/");
+  const fmt = (n) => String(Number(n)).replace(".", ",");
+  const carica = async () => {
+    const da = addGiorni(formatDataLocale(new Date()), -21);
+    const { data: log } = await supabase.from("carichi_calo_log").select("*").gte("data", da).order("data", { ascending: false });
+    const lista = log || [];
+    if (!lista.length) { setRighe([]); return; }
+    const { data: ent } = await supabase.from("training_entries").select("client_id, exercise_id, data, numero_serie, motivo_calo").in("exercise_id", lista.map((x) => x.exercise_id)).in("data", [...new Set(lista.map((x) => x.data))]);
+    const conMotivo = new Set((ent || []).filter((e) => e.motivo_calo).map((e) => `${e.exercise_id}|${e.data}`));
+    const { data: cl } = await supabase.from("clients").select("id, nome, cognome").in("id", [...new Set(lista.map((x) => x.client_id))]);
+    const nomi = Object.fromEntries((cl || []).map((c) => [c.id, `${c.nome || ""} ${c.cognome || ""}`.trim()]));
+    // gli scarichi programmati non vanno motivati
+    const { data: scar } = await supabase.from("scarichi").select("client_id, dal, al").in("client_id", [...new Set(lista.map((x) => x.client_id))]);
+    const inScar = (r) => (scar || []).some((s) => s.client_id === r.client_id && r.data >= s.dal && r.data <= s.al);
+    let cambiAll = [];
+    try { const { data: cp } = await supabase.from("cambi_palestra").select("client_id, dal").in("client_id", [...new Set(lista.map((x) => x.client_id))]); cambiAll = cp || []; } catch (e) { /* senza tabella: nessun filtro */ }
+    // allenamento segnato come "altra palestra o attrezzi diversi": il calo è strumentale, non va motivato
+    const primaDopoCambio = (r) => cambiAll.some((c) => c.client_id === r.client_id && c.dal === r.data);
+    setRighe(lista.filter((r) => !conMotivo.has(`${r.exercise_id}|${r.data}`) && !inScar(r) && !primaDopoCambio(r)).map((r) => ({ ...r, nome: nomi[r.client_id] || "Cliente" })));
+  };
+  useEffect(() => { carica(); }, []);
+  if (!righe || righe.length === 0) return null;
+  const scegli = async (r, codice) => {
+    const k = `${r.exercise_id}|${r.data}`;
+    setOccupato(k);
+    const lista = (ambito[k] || "esercizio") === "sessione" ? righe.filter((x) => x.client_id === r.client_id && x.data === r.data) : [r];
+    try { for (const x of lista) await salvaMotivoRiduzione(x.client_id, { exId: x.exercise_id, data: x.data }, [codice]); } catch (e) { /* ignora */ }
+    setOccupato(null); await carica(); onChanged && onChanged();
+  };
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Carichi in calo da motivare ({righe.length})</p>
+      {righe.map((r) => {
+        const k = `${r.exercise_id}|${r.data}`; const amb = ambito[k] || "esercizio";
+        const stessaSess = righe.filter((x) => x.client_id === r.client_id && x.data === r.data).length;
+        return (
+          <Card key={r.id} className="p-3 space-y-2" style={{ opacity: occupato === k ? 0.5 : 1 }}>
+            <p className="text-sm font-semibold" style={{ color: "#27466D" }}>{r.nome} · {r.esercizio}</p>
+            <p className="text-xs text-slate-600">{fmt(r.kg_prima)} kg → <span className="font-semibold">{fmt(r.kg_oggi)} kg</span> · {dd(r.data)}</p>
+            <div className="flex gap-1.5">
+              {[["esercizio", "Solo questo esercizio"], ["sessione", `Tutta la sessione${stessaSess > 1 ? ` (${stessaSess})` : ""}`]].map(([v, l]) => (
+                <button key={v} onClick={() => setAmbito({ ...ambito, [k]: v })} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: amb === v ? "#27466D" : "#fff", color: amb === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {MOTIVI_CALO.filter((m) => m[0] !== "scarico").map(([c, l]) => (
+                <button key={c} onClick={() => scegli(r, c)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
+              ))}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// Trend clienti: confronto degli ultimi 28 giorni con i 28 precedenti (carico massimo per esercizio) e costanza settimanale
+function TrendClientiCoach({ clients, onSelect }) {
+  const [righe, setRighe] = useState(null);
+  const [filtro, setFiltro] = useState("tutti");
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const oggi = formatDataLocale(new Date());
+        const da = addGiorni(oggi, -56);
+        const dati = await leggiTutto(() => supabase.from("training_entries").select("client_id, data, kg, exercise_id").gte("data", da).order("data").order("id"));
+        const altrove = new Set();
+        try { const { data: cpa } = await supabase.from("cambi_palestra").select("client_id, dal").gte("dal", da); (cpa || []).forEach((x) => altrove.add(`${x.client_id}|${x.dal}`)); } catch (e) { /* senza tabella */ }
+        const per = {};
+        dati.forEach((r) => { const kg = Number(r.kg); if (!r.client_id || !r.data || altrove.has(`${r.client_id}|${r.data}`)) return; (per[r.client_id] = per[r.client_id] || []).push({ d: r.data, kg, ex: r.exercise_id }); });
+        const lim = addGiorni(oggi, -28);
+        const lista = clients.filter((c) => !c.gruppo_id).map((c) => {
+          const e = per[c.id] || [];
+          const rec = {}, prev = {};
+          e.forEach((x) => { if (!(x.kg > 0) || !x.ex) return; const t = x.d > lim ? rec : prev; t[x.ex] = Math.max(t[x.ex] || 0, x.kg); });
+          const comuni = Object.keys(rec).filter((k) => prev[k]);
+          const pct = comuni.length >= 2 ? comuni.reduce((a, k) => a + (rec[k] / prev[k] - 1), 0) / comuni.length * 100 : null;
+          // allenamenti (giorni distinti) per settimana, ultime 8 settimane
+          const sett = Array(8).fill(0);
+          const visti = new Set();
+          e.forEach((x) => { if (visti.has(x.d)) return; visti.add(x.d); const i = 7 - Math.floor((new Date(`${oggi}T12:00:00`) - new Date(`${x.d}T12:00:00`)) / 86400000 / 7); if (i >= 0 && i < 8) sett[i] += 1; });
+          const ultimo = e.length ? e[e.length - 1].d : null;
+          const stato = pct == null ? "senza" : pct > 2 ? "crescita" : pct < -2 ? "calo" : "stabile";
+          return { c, pct, sett, ultimo, stato, n: visti.size };
+        });
+        if (vivo) setRighe(lista);
+      } catch (e) { if (vivo) setRighe([]); }
+    })();
+    return () => { vivo = false; };
+  }, [clients.length]);
+  if (!righe) return <Spinner />;
+  const visibili = righe.filter((r) => filtro === "tutti" ? true : r.stato === filtro).sort((a, b) => (b.pct ?? -999) - (a.pct ?? -999));
+  const conDati = righe.filter((r) => r.pct != null);
+  const media = conDati.length ? conDati.reduce((a, r) => a + r.pct, 0) / conDati.length : null;
+  const f1 = (n) => String(Math.round(n * 10) / 10).replace(".", ",");
+  const FILTRI = [["tutti", "Tutte"], ["crescita", "In crescita"], ["stabile", "Stabili"], ["calo", "In calo"], ["senza", "Senza dati"]];
+  const maxS = Math.max(1, ...righe.flatMap((r) => r.sett));
+  return (
+    <div className="space-y-2">
+      <p className="text-slate-500 text-xs">Carico massimo per esercizio, ultimi 28 giorni rispetto ai 28 precedenti (servono almeno 2 esercizi in comune). Le barrette sono gli allenamenti registrati nelle ultime 8 settimane. Gli allenamenti segnati in un'altra palestra o con attrezzi diversi non entrano nel confronto.{media != null ? ` Media generale: ${media > 0 ? "+" : ""}${f1(media)}%.` : ""}</p>
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {FILTRI.map(([k, l]) => <button key={k} onClick={() => setFiltro(k)} className="text-[11px] rounded-full px-3 py-1 flex-shrink-0 font-medium" style={filtro === k ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{l}</button>)}
+      </div>
+      {visibili.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna cliente in questo gruppo.</Card>}
+      {visibili.map((r) => (
+        <Card key={r.c.id} className="p-3">
+          <button onClick={() => onSelect(r.c.id)} className="w-full flex items-center gap-3 text-left">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-slate-700 text-sm truncate">{r.c.nome} {r.c.cognome}</p>
+              <p className="text-slate-400 text-[11px]">{r.ultimo ? `ultimo allenamento ${r.ultimo.split("-").reverse().slice(0, 2).join("/")}` : "nessun allenamento negli ultimi 56 giorni"}</p>
+            </div>
+            <svg width="56" height="24" viewBox="0 0 56 24" className="flex-shrink-0">
+              {r.sett.map((v, i) => <rect key={i} x={i * 7} y={24 - Math.max(2, (v / maxS) * 22)} width="5" height={Math.max(2, (v / maxS) * 22)} rx="1.5" fill={v ? "#4F8FD0" : "#C9E0F7"} />)}
+            </svg>
+            <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0 w-16 text-center" style={r.stato === "crescita" ? { background: "#C9E0F7", color: "#27466D" } : r.stato === "calo" ? { background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" } : { background: "#F5FAFE", color: "#7a8da3" }}>
+              {r.pct == null ? "—" : `${r.pct > 0 ? "+" : ""}${f1(r.pct)}%`}
+            </span>
+          </button>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ---------- Lista d'attesa pubblica (link nelle storie: /?lista=1) ----------
+const PROMO_ATTESA = { fine: "2026-12-31", testo: "Iscriviti entro il 31 dicembre 2026: il posto è riservato, non paghi nulla adesso e hai 1 mese in regalo in qualsiasi pacchetto ✨" };
+
+function ListaAttesaPubblica() {
+  const [f, setF] = useState({ nome: "", email: "", whatsapp: "", servizio: "non_so", obiettivo: "", consenso: false, sito: "" });
+  const [stato, setStato] = useState("form"); // form | invio | fatto | doppia
+  const [errore, setErrore] = useState("");
+  const promoAttiva = formatDataLocale(new Date()) <= PROMO_ATTESA.fine;
+  useEffect(() => { document.title = "Lista d'attesa · Coaching by Morgana"; }, []);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const invia = async (e) => {
+    e.preventDefault();
+    setErrore("");
+    if (f.sito) { setStato("fatto"); return; } // campo trappola per i bot
+    if (!f.nome.trim() || !/^\S+@\S+\.\S+$/.test(f.email.trim())) { setErrore("Controlla nome ed email 🫶🏻"); return; }
+    if (!f.consenso) { setErrore("Per iscriverti serve il consenso al trattamento dei dati 🫶🏻"); return; }
+    setStato("invio");
+    const { error } = await supabase.from("lista_attesa").insert({
+      nome: f.nome.trim(), email: f.email.trim(), whatsapp: f.whatsapp.trim() || null, servizio: f.servizio,
+      obiettivo: f.obiettivo.trim() || null, consenso: true, promo_mese_gratis: promoAttiva,
+    });
+    if (error) {
+      if (error.code === "23505") { setStato("doppia"); return; }
+      setErrore("Non siamo riusciti a iscriverti, riprova tra un attimo 🫶🏻"); setStato("form"); return;
+    }
+    setStato("fatto");
+  };
+  const campo = "w-full border rounded-xl px-3 py-2.5 text-sm bg-white";
+  const stile = { borderColor: "#C9E0F7", color: "#27466D" };
+  return (
+    <div className="min-h-screen px-5 py-8 flex justify-center" style={{ background: "#F5FAFE" }}>
+      <div className="w-full max-w-md space-y-5">
+        <div className="text-center space-y-1">
+          <p className="text-xs tracking-widest uppercase" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
+          <h1 className="text-3xl font-semibold" style={{ color: "#27466D" }}>Lista d'attesa</h1>
+          <p className="text-sm" style={{ color: "#7a8da3" }}>Prenota il tuo posto per iniziare il coaching online a gennaio: lasciami i tuoi dati e ti scrivo io 🫶🏻</p>
+        </div>
+        {promoAttiva && (
+          <div className="rounded-2xl px-4 py-3 text-center text-sm font-medium" style={{ background: "#FFFBEF", color: "#27466D", border: "1.5px solid #F7E9BE" }}>{PROMO_ATTESA.testo}</div>
+        )}
+        {stato === "fatto" || stato === "doppia" ? (
+          <div className="rounded-2xl p-6 text-center space-y-2 bg-white" style={{ border: "1.5px solid #C9E0F7" }}>
+            <p className="text-lg font-semibold" style={{ color: "#27466D" }}>{stato === "doppia" ? "Sei già in lista ✨" : "Sei in lista! ✨"}</p>
+            <p className="text-sm" style={{ color: "#7a8da3" }}>{stato === "doppia" ? "Questa email è già iscritta: non devi fare altro, ti scrivo io." : `Grazie ${f.nome.trim().split(" ")[0] || ""}! Ti contatto personalmente appena possibile.${promoAttiva ? " Il tuo mese in regalo è segnato 💪🏻" : ""}`}</p>
+          </div>
+        ) : (
+          <form onSubmit={invia} className="rounded-2xl p-5 space-y-3.5 bg-white" style={{ border: "1.5px solid #C9E0F7" }}>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>Nome</label><input value={f.nome} onChange={set("nome")} maxLength={80} autoComplete="given-name" className={campo} style={stile} /></div>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>Email</label><input type="email" value={f.email} onChange={set("email")} maxLength={120} autoComplete="email" className={campo} style={stile} /></div>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>WhatsApp (facoltativo)</label><input type="tel" value={f.whatsapp} onChange={set("whatsapp")} maxLength={30} autoComplete="tel" className={campo} style={stile} /></div>
+            <div>
+              <label className="text-xs" style={{ color: "#7a8da3" }}>Come vorresti allenarti?</label>
+              <select value={f.servizio} onChange={set("servizio")} className={campo} style={stile}>
+                <option value="online">Online</option><option value="presenza">In presenza (Torino)</option><option value="non_so">Non lo so ancora</option>
+              </select>
+            </div>
+            <div><label className="text-xs" style={{ color: "#7a8da3" }}>Il tuo obiettivo (facoltativo)</label><textarea value={f.obiettivo} onChange={set("obiettivo")} maxLength={400} rows={3} className={campo} style={stile} /></div>
+            <input value={f.sito} onChange={set("sito")} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", height: 0, width: 0, opacity: 0 }} />
+            <label className="flex items-start gap-2 text-[11px] leading-snug" style={{ color: "#7a8da3" }}>
+              <input type="checkbox" checked={f.consenso} onChange={(e) => setF((x) => ({ ...x, consenso: e.target.checked }))} className="mt-0.5" />
+              <span>Acconsento al trattamento dei miei dati per essere ricontattata da Morgana Tarquino riguardo ai percorsi di coaching. Posso chiedere in qualsiasi momento la cancellazione scrivendole.</span>
+            </label>
+            {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+            <button disabled={stato === "invio"} className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{stato === "invio" ? "Ti iscrivo..." : "Iscrivimi alla lista"}</button>
+          </form>
+        )}
+        <p className="text-center text-[11px]" style={{ color: "#7a8da3" }}>@morgana_workout</p>
+      </div>
+    </div>
+  );
+}
+
+// Coach: iscritte alla lista d'attesa (coaching online da gennaio: posto riservato senza pagamento anticipato, 1 mese gratuito se iscritte entro il 31/12)
+function ListaAttesaCoach({ onChanged, aperta = false }) {
+  const [righe, setRighe] = useState(null);
+  const [aggiungi, setAggiungi] = useState(false);
+  const [incolla, setIncolla] = useState(false);
+  const [testo, setTesto] = useState("");
+  const [f, setF] = useState({ nome: "", email: "", whatsapp: "", pacchetto: "Mensile", data: formatDataLocale(new Date()), nota: "" });
+  const [avvia, setAvvia] = useState(null);
+  const [msg, setMsg] = useState("");
+  const carica = async () => { const { data } = await supabase.from("lista_attesa").select("*").order("created_at", { ascending: false }); setRighe(data || []); };
+  useEffect(() => { carica(); }, []);
+  if (!righe) return null;
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 4000); };
+  const nuove = righe.filter((r) => !r.contattata && !r.client_id).length;
+  const servTxt = { online: "Online", presenza: "In presenza", non_so: "Non sa ancora" };
+  const inp = "border border-slate-200 rounded-lg px-3 py-2 text-sm w-full";
+  const promoDi = (data) => data <= PROMO_ATTESA.fine;
+  const segna = async (r) => { await supabase.from("lista_attesa").update({ contattata: !r.contattata }).eq("id", r.id); carica(); };
+  const elimina = async (r) => { if (!await confermaApp(`Elimino ${r.nome} dalla lista? Non si può annullare.`)) return; await supabase.from("lista_attesa").delete().eq("id", r.id); carica(); };
+  const messaggio = (r) => `Ciao ${r.nome.split(" ")[0]}! ✨ Il tuo posto per il coaching online di gennaio è riservato 🫶🏻 Non devi pagare nulla adesso: partiremo a gennaio, dopo il pagamento${r.promo_mese_gratis ? ", e avrai 1 mese in regalo 🎁" : ""}. Ti scrivo appena sono pronta a iniziare 💪🏻`;
+  const wa = (r) => { const n = String(r.whatsapp || "").replace(/[^\d]/g, ""); const num = n.length > 10 ? n : "39" + n; window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio(r))}`, "_blank"); };
+  const csv = () => {
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const righeCsv = [["Data", "Nome", "Email", "WhatsApp", "Servizio", "Pacchetto", "Obiettivo", "Mese gratis", "Contattata"].map(q).join(";"), ...righe.map((r) => [r.created_at.slice(0, 10), r.nome, r.email, r.whatsapp, servTxt[r.servizio] || "", r.pacchetto, r.obiettivo, r.promo_mese_gratis ? "sì" : "no", r.contattata ? "sì" : "no"].map(q).join(";"))];
+    scaricaFile(`lista-attesa-${formatDataLocale(new Date())}.csv`, "\uFEFF" + righeCsv.join("\n"), "text/csv");
+  };
+  const salva = async () => {
+    if (!f.nome.trim()) return;
+    const { error } = await supabase.from("lista_attesa").insert({ nome: f.nome.trim(), email: f.email.trim() || null, whatsapp: f.whatsapp.trim() || null, servizio: "online", pacchetto: f.pacchetto || null, obiettivo: f.nota.trim() || null, consenso: true, promo_mese_gratis: promoDi(f.data), created_at: `${f.data}T12:00:00Z` });
+    if (error) { avviso(error.code === "23505" ? "Questa email è già in lista 🫶🏻" : "Non è stato possibile salvare, riprova."); return; }
+    setF({ ...f, nome: "", email: "", whatsapp: "", nota: "" }); setAggiungi(false); carica();
+  };
+  const importa = async () => {
+    const oggi = formatDataLocale(new Date());
+    const nuoveR = testo.split("\n").map((riga) => riga.split(/[;\t]/).map((x) => x.trim())).filter((c) => c[0]).map((c) => {
+      const m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(c[4] || "");
+      const d = m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : oggi;
+      return { nome: c[0], email: c[1] || null, whatsapp: c[2] || null, servizio: "online", pacchetto: ["Mensile", "Trimestrale", "Semestrale"].find((x) => x.toLowerCase() === (c[3] || "").toLowerCase()) || null, consenso: true, promo_mese_gratis: promoDi(d), created_at: `${d}T12:00:00Z` };
+    });
+    if (!nuoveR.length) return;
+    const { error } = await supabase.from("lista_attesa").insert(nuoveR);
+    if (error) { avviso(error.code === "23505" ? "Una delle email è già in lista: controlla e riprova." : "Import non riuscito: controlla l'elenco e riprova."); return; }
+    setTesto(""); setIncolla(false); avviso(`Aggiunte ${nuoveR.length} persone ✨`); carica();
+  };
+  const avviaCliente = async () => {
+    const r = avvia.r;
+    if (!avvia.codice.trim()) { avviso("Serve un codice per la cliente."); return; }
+    const parti = r.nome.trim().split(/\s+/);
+    const { data: cl, error } = await supabase.from("clients").insert({
+      codice: avvia.codice.trim(), nome: parti[0], cognome: parti.slice(1).join(" "), email: r.email || null, telefono: r.whatsapp || null,
+      tipo_servizio: "online", piano: avvia.piano || "", data_inizio: avvia.data_inizio || null, stato_pacchetto: "in attivazione", mesi_omaggio: r.promo_mese_gratis ? 1 : 0,
+    }).select("id").single();
+    if (error || !cl) { avviso("Non è stato possibile creare la cliente: " + (error?.message || "riprova")); return; }
+    await supabase.from("lista_attesa").update({ client_id: cl.id, contattata: true }).eq("id", r.id);
+    setAvvia(null); avviso(`${parti[0]} è ora tra le tue clienti ✨`); carica(); onChanged && onChanged();
+  };
+  return (
+    <Sezione id="lista_attesa" titolo="Lista d'attesa" conteggio={nuove} aperta={aperta} ricorda={!aperta} destra={righe.length ? <button onClick={csv} className="text-[11px] text-sky-600 font-medium">Scarica CSV</button> : null}>
+      <div className="space-y-2">
+        <p className="text-slate-400 text-[11px]">Link da mettere nelle storie: <span className="font-medium text-slate-600">{window.location.origin}/?lista=1</span></p>
+        <p className="text-slate-500 text-xs">Posto riservato senza pagamento anticipato. Chi si iscrive entro il 31/12 ha 1 mese gratuito: si aggiunge da solo alla scadenza quando registri il primo pagamento.</p>
+        <div className="flex gap-2">
+          <button onClick={() => { setAggiungi(!aggiungi); setIncolla(false); }} className="flex-1 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>+ Aggiungi</button>
+          <button onClick={() => { setIncolla(!incolla); setAggiungi(false); }} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Incolla elenco</button>
+        </div>
+        {aggiungi && (
+          <Card className="p-3 space-y-1.5">
+            <input value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Nome e cognome" className={inp} />
+            <div className="grid grid-cols-2 gap-1.5"><input value={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.value })} placeholder="WhatsApp" className={inp} /><input value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} placeholder="Email" className={inp} /></div>
+            <div className="grid grid-cols-2 gap-1.5"><select value={f.pacchetto} onChange={(e) => setF({ ...f, pacchetto: e.target.value })} className={inp}><option>Mensile</option><option>Trimestrale</option><option>Semestrale</option></select><input type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} className={inp} /></div>
+            <input value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} placeholder="Obiettivo o nota (facoltativo)" className={inp} />
+            <button onClick={salva} disabled={!f.nome.trim()} className="w-full py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Salva in lista</button>
+          </Card>
+        )}
+        {incolla && (
+          <Card className="p-3 space-y-1.5">
+            <p className="text-[11px] text-slate-500">Una persona per riga, separando con punto e virgola: <b>Nome Cognome; email; whatsapp; pacchetto; data iscrizione</b>. Solo il nome è obbligatorio. Data come 15/12/2026 (se manca metto oggi).</p>
+            <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={6} className={inp} placeholder={"Giulia Rossi; giulia@mail.it; 3331234567; Trimestrale; 10/12/2026"} />
+            <button onClick={importa} disabled={!testo.trim()} className="w-full py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Aggiungi alla lista</button>
+          </Card>
+        )}
+        {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+        {righe.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna iscritta per ora.</Card>}
+        {righe.map((r) => (
+          <Card key={r.id} className={`p-3 space-y-1 ${r.contattata || r.client_id ? "opacity-70" : ""}`}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-medium text-slate-700 text-sm">{r.nome}</p>
+              <span className="text-[11px] text-slate-400">{new Date(r.created_at).toLocaleDateString("it-IT")}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#E1EEFB", color: "#27466D" }}>{r.client_id ? "Avviata" : "Posto riservato"}</span>
+              {r.promo_mese_gratis && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}><Ic n="gift"/> 1 mese gratuito</span>}
+              <span className="text-xs text-slate-500">{[servTxt[r.servizio], r.pacchetto].filter(Boolean).join(" · ")}</span>
+            </div>
+            <p className="text-xs">{r.email && <a href={`mailto:${r.email}`} className="text-sky-600">{r.email}</a>}{r.whatsapp ? <>{r.email ? " · " : ""}<span className="text-slate-500">{r.whatsapp}</span></> : null}</p>
+            {r.obiettivo && <p className="text-xs text-slate-500 italic">«{r.obiettivo}»</p>}
+            {avvia?.r.id === r.id ? (
+              <div className="rounded-xl p-2 space-y-1.5" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+                <p className="text-[11px] text-slate-500">Crea la cliente online{r.promo_mese_gratis ? ": il mese gratuito si aggiunge da solo alla scadenza dopo il primo pagamento" : ""}.</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input value={avvia.codice} onChange={(e) => setAvvia({ ...avvia, codice: e.target.value })} placeholder="Codice cliente" className={inp} />
+                  <select value={avvia.piano} onChange={(e) => setAvvia({ ...avvia, piano: e.target.value })} className={inp}><option value="">Piano…</option><option>Mensile</option><option>Trimestrale</option><option>Semestrale</option></select>
+                </div>
+                <div><label className="text-[11px] text-slate-500">Data di inizio</label><input type="date" value={avvia.data_inizio} onChange={(e) => setAvvia({ ...avvia, data_inizio: e.target.value })} className={inp} /></div>
+                <div className="flex gap-2"><button onClick={avviaCliente} className="flex-1 py-2 rounded-lg text-xs font-semibold text-white" style={{ background: "#27466D" }}>Crea cliente</button><button onClick={() => setAvvia(null)} className="px-3 text-xs text-slate-500">Annulla</button></div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-3 pt-1 items-center">
+                {!r.client_id && r.whatsapp && <button onClick={() => wa(r)} className="text-xs font-medium text-sky-700">Messaggio WhatsApp</button>}
+                {!r.client_id && <button onClick={() => setAvvia({ r, codice: "", piano: r.pacchetto || "", data_inizio: "" })} className="text-xs font-semibold" style={{ color: "#27466D" }}>Avvia (dopo il pagamento)</button>}
+                <button onClick={() => segna(r)} className="text-xs font-medium text-sky-700">{r.contattata ? "↩ Da ricontattare" : "✓ Contattata"}</button>
+                <button onClick={() => elimina(r)} className="text-xs text-slate-400">Elimina</button>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </Sezione>
+  );
+}
+// ───────────────────────────────────────────────────────────────────────────
+// Bilancio settimanale (solo coach): le risposte che le clienti mandano su WhatsApp il lunedì
+// ───────────────────────────────────────────────────────────────────────────
+const AREE_BILANCIO = ["Allenamenti", "Alimentazione", "Passi", "Acqua", "Sonno", "Stress"];
+const MESI_BREVI = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
+function lunediDi(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+function spostaGiorni(str, n) { const [y, m, g] = str.split("-").map(Number); const x = new Date(y, m - 1, g); x.setDate(x.getDate() + n); return formatDataLocale(x); }
+// La settimana "di riferimento" è l'ultima conclusa (lunedì–domenica); con offset si scorre indietro/avanti.
+function settimanaRiferimento(offset = 0) { return spostaGiorni(formatDataLocale(lunediDi(new Date())), -7 + offset * 7); }
+function etichettaSettimana(lun) {
+  const [y, m, g] = lun.split("-").map(Number); const a = new Date(y, m - 1, g); const b = new Date(y, m - 1, g + 6);
+  return a.getMonth() === b.getMonth() ? `${a.getDate()}–${b.getDate()} ${MESI_BREVI[b.getMonth()]}` : `${a.getDate()} ${MESI_BREVI[a.getMonth()]} – ${b.getDate()} ${MESI_BREVI[b.getMonth()]}`;
+}
+const EMOJI_ESITO = { sistemato: "✅", meta: "🔸", no: "❌" };
+function testoLunedi(nome, daSistemare) {
+  const n = (nome || "").split(" ")[0];
+  if (daSistemare) return `Buongiorno ${n}! ✨ Settimana scorsa volevi sistemare «${daSistemare}». Com'è andata?\n✅ Sistemato\n🔸 A metà\n❌ Non ci sono riuscita\nDimmelo senza problemi, serve solo a capire come aiutarti 🫶🏻\n\nPoi, come sempre:\n1️⃣ Com'è andata la settimana, da 1 a 10?\n2️⃣ Cosa hai rispettato di più e di meno?\n3️⃣ Cosa vuoi sistemare questa settimana?`;
+  return `Buongiorno ${n}! ✨ Nuova settimana, nuove occasioni 💪🏻 Mi dedichi 1 minuto? Così capisco come stai andando e come aiutarti al meglio 🫶🏻\n\nCom'è andata la settimana appena finita:\n1️⃣ Da 1 a 10, com'è andata?\n2️⃣ Cosa hai rispettato di più?\n3️⃣ Cosa hai rispettato di meno?\n\nE per questa che inizia:\n4️⃣ Una cosa che vuoi sistemare o migliorare?\n5️⃣ Ci sono giorni o impegni in cui serve organizzarsi meglio? (viaggi, lavoro, cene…)\n\nBastano anche due righe, poi ti rispondo io ✨`;
+}
+function testoLinkBilancio(nome, token) {
+  return `Ciao ${(nome || "").split(" ")[0]} ✨ come stai? Ti lascio il bilancio della settimana precedente da compilare ✨\n${window.location.origin}/?bilancio=${token}`;
+}
+function linkWhatsappTesto(telefono, testo) {
+  const n = String(telefono || "").replace(/[^\d]/g, "");
+  if (!n) return `https://wa.me/?text=${encodeURIComponent(testo)}`; // numero non salvato: WhatsApp si apre e scegli tu la chat
+  return `https://wa.me/${n.length > 10 ? n : "39" + n}?text=${encodeURIComponent(testo)}`;
+}
+
+function BilancioSettimanaleCliente({ client }) {
+  const [offset, setOffset] = useState(0);
+  const [righe, setRighe] = useState(null);
+  const [f, setF] = useState({ voto: null, rispettato: [], rispettato_meno: [], da_sistemare: "", impegni: "", esito_precedente: null });
+  const [stato, setStato] = useState("");
+  const sett = settimanaRiferimento(offset);
+  const prec = spostaGiorni(sett, -7);
+  const carica = async () => {
+    const { data } = await supabase.from("bilanci_settimanali").select("*").eq("client_id", client.id).order("settimana", { ascending: false });
+    setRighe(data || []);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+  useEffect(() => {
+    const r = (righe || []).find((x) => x.settimana === sett);
+    setF({ voto: r?.voto ?? null, rispettato: r?.rispettato || [], rispettato_meno: r?.rispettato_meno || [], da_sistemare: r?.da_sistemare || "", impegni: r?.impegni || "", esito_precedente: r?.esito_precedente || null });
+    setStato("");
+  }, [righe, sett]);
+  if (!righe) return null;
+  const daPrec = righe.find((x) => x.settimana === prec)?.da_sistemare || "";
+  const toggle = (k, v) => setF((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const salva = async () => {
+    setStato("salvo…");
+    const { error } = await supabase.from("bilanci_settimanali").upsert({
+      client_id: client.id, settimana: sett, voto: f.voto, rispettato: f.rispettato, rispettato_meno: f.rispettato_meno,
+      da_sistemare: f.da_sistemare.trim() || null, impegni: f.impegni.trim() || null, esito_precedente: f.esito_precedente, updated_at: new Date().toISOString(),
+    }, { onConflict: "client_id,settimana" });
+    if (error) { setStato("Non è stato possibile salvare, riprova."); return; }
+    setStato("Salvato ✨"); carica();
+  };
+  const chip = (attivo, onClick, testo) => (
+    <button key={testo} onClick={onClick} className="px-3 py-1.5 rounded-full text-xs font-medium" style={attivo ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{testo}</button>
+  );
+  const ultime = [...righe].filter((x) => x.voto != null).sort((a, b) => a.settimana.localeCompare(b.settimana)).slice(-6);
+  const storico = righe.filter((x) => x.da_sistemare).slice(0, 6).map((x) => ({ ...x, esito: righe.find((y) => y.settimana === spostaGiorni(x.settimana, 7))?.esito_precedente || null }));
+  const nomeEsito = { sistemato: "Sistemato", meta: "A metà", no: "Non riuscita" };
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Bilancio settimanale</p>
+          <p className="text-[11px]" style={{ color: "#7a8da3" }}>Settimana {etichettaSettimana(sett)}{offset === 0 ? " (appena conclusa)" : ""}</p>
+        </div>
+        <div className="flex gap-1">
+          <button onClick={() => setOffset(offset - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>‹</button>
+          <button onClick={() => setOffset(Math.min(0, offset + 1))} disabled={offset >= 0} className="w-7 h-7 rounded-full text-sm disabled:opacity-30" style={{ background: "#E1EEFB", color: "#27466D" }}>›</button>
+        </div>
+      </div>
+      {daPrec && (
+        <div className="rounded-xl p-2.5 space-y-1.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
+          <p className="text-xs" style={{ color: "#6b5d2e" }}>Settimana scorsa voleva sistemare: <b>«{daPrec}»</b></p>
+          <div className="flex flex-wrap gap-1.5">
+            {[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ No"]].map(([v, l]) => chip(f.esito_precedente === v, () => setF({ ...f, esito_precedente: f.esito_precedente === v ? null : v }), l))}
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Com'è andata (1–10)</p>
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+            <button key={n} onClick={() => setF({ ...f, voto: f.voto === n ? null : n })} className="w-7 h-7 rounded-full text-xs font-semibold" style={f.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>
+          ))}
+        </div>
+      </div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Ha rispettato di più</p><div className="flex flex-wrap gap-1.5 mt-1.5">{AREE_BILANCIO.map((a) => chip(f.rispettato.includes(a), () => toggle("rispettato", a), a))}</div></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Ha rispettato di meno</p><div className="flex flex-wrap gap-1.5 mt-1.5">{AREE_BILANCIO.map((a) => chip(f.rispettato_meno.includes(a), () => toggle("rispettato_meno", a), a))}</div></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Da sistemare questa settimana</p><input value={f.da_sistemare} onChange={(e) => setF({ ...f, da_sistemare: e.target.value })} placeholder="es. Cena fuori: scegliere un piatto proteico" className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Impegni da organizzare</p><input value={f.impegni} onChange={(e) => setF({ ...f, impegni: e.target.value })} placeholder="es. Viaggio di lavoro mer-gio" className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" /></div>
+      <button onClick={salva} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva bilancio</button>
+      {client.token_bilancio && (
+        <div className="flex gap-2">
+          <a href={linkWhatsappTesto(client.telefono, testoLinkBilancio(client.nome, client.token_bilancio)) || undefined} target="_blank" rel="noreferrer" className="flex-1 py-2 rounded-xl text-xs font-semibold text-center" style={{ background: "#E1EEFB", color: "#27466D" }}>Invia link su WhatsApp</a>
+          <button onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/?bilancio=${client.token_bilancio}`); setStato("Link copiato ✨"); }} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Copia link</button>
+        </div>
+      )}
+      {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
+      {ultime.length > 0 && (
+        <div className="pt-1">
+          <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Andamento</p>
+          <p className="text-[11px]" style={{ color: "#7a8da3" }}>Voto settimanale · ultime {ultime.length} settimane</p>
+          <div className="flex items-end gap-1.5 h-14 mt-2">
+            {ultime.map((x) => <div key={x.id} className="flex-1 rounded-t-md text-[9px] text-center pt-0.5" style={{ height: `${x.voto * 10}%`, background: x.settimana === sett ? "#4F8FD0" : "#C9E0F7", color: x.settimana === sett ? "#fff" : "#27466D" }}>{x.voto}</div>)}
+          </div>
+        </div>
+      )}
+      {storico.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Cosa voleva sistemare</p>
+          {storico.map((x) => (
+            <div key={x.id} className="flex items-center justify-between gap-2 py-2 border-b border-slate-100 last:border-0">
+              <span className="text-sm" style={{ color: "#27466D" }}>{x.da_sistemare}<span className="block text-[10px] text-slate-400">settimana {etichettaSettimana(spostaGiorni(x.settimana, 7))}</span></span>
+              {x.esito ? <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: x.esito === "sistemato" ? "#C9E0F7" : "#FFFBEF", color: x.esito === "sistemato" ? "#27466D" : "#7a6a3a", border: x.esito === "sistemato" ? "none" : "1px solid #F7E9BE" }}>{nomeEsito[x.esito]}</span> : <span className="text-[10px] text-slate-400">da verificare</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Bilancio AVANZATO (percorso di preparazione atletica): punti 1–5, numeri della settimana, medie ponderate
+// ───────────────────────────────────────────────────────────────────────────
+const VOCI_ADERENZA = [["piano", "Piano alimentare"], ["allenamenti", "Allenamenti"], ["cardio", "Cardio e passi"], ["prestazioni", "Prestazioni in sala"]];
+const VOCI_RECUPERO = [["sonno", "Qualità del sonno"], ["energia", "Energia"], ["fame", "Fame"], ["stress", "Stress"], ["dolori", "Dolori muscolari"], ["digestione", "Digestione e gonfiore"]];
+const DIFFICOLTA_AV = ["Fame", "Stanchezza", "Sonno", "Dolori", "Cene fuori", "Lavoro", "Motivazione", "Ciclo"];
+const PESI_MEDIA = [4, 3, 2, 1];
+function testoLinkAvanzato(nome, token) {
+  return `Ciao ${(nome || "").split(" ")[0]} ✨ come stai? Ti lascio il bilancio della settimana precedente da compilare ✨\n${window.location.origin}/?bilancio=${token}`;
+}
+function mediaConPesi(valori) { // valori: dal più recente al più vecchio, null se mancante
+  let s = 0, p = 0;
+  valori.slice(0, 4).forEach((v, i) => { if (v != null && !isNaN(v)) { s += v * PESI_MEDIA[i]; p += PESI_MEDIA[i]; } });
+  return p ? s / p : null;
+}
+function valoreRiga(r, k) {
+  if (k === "aderenza") { const v = VOCI_ADERENZA.map(([c]) => r.punti?.[c]).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+  if (k === "recupero") {
+    const v = [r.punti?.sonno, r.punti?.energia, r.punti?.digestione, r.punti?.fame != null ? 6 - r.punti.fame : null, r.punti?.stress != null ? 6 - r.punti.stress : null, r.punti?.dolori != null ? 6 - r.punti.dolori : null].filter((x) => x != null);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  }
+  if (k === "voto") return r.voto != null ? Number(r.voto) : null;
+  if (["peso_medio", "vita", "passi", "ore_sonno"].includes(k)) return r[k] != null ? Number(r[k]) : null;
+  return r.punti?.[k] ?? null;
+}
+const fmt1 = (n) => (n == null ? "–" : n.toFixed(1).replace(".", ","));
+function FormBilancioCoach({ riga, clientId, sett, onFatto, onAnnulla }) {
+  const [f, setF] = useState({
+    voto: riga?.voto ?? null, punti: riga?.punti || {}, peso: riga?.peso_medio != null ? String(riga.peso_medio).replace(".", ",") : "",
+    passi: riga?.passi != null ? String(riga.passi) : "", ore: riga?.ore_sonno != null ? String(riga.ore_sonno).replace(".", ",") : "",
+    dif: riga?.difficolta || [], note: riga?.difficolta_note || "", obiettivo: riga?.obiettivo || "", impegni: riga?.impegni || "",
+    rispettato: riga?.rispettato || [], meno: riga?.rispettato_meno || [], esito: riga?.esito_precedente || null,
+  });
+  const [stato, setStato] = useState("");
+  const tg = (k, v) => setF((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const chip = (on, fn, t) => <button key={t} onClick={fn} className="px-2.5 py-1 rounded-full text-[11px] font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
+  const num = (t, intero) => { const x = String(t || "").trim(); if (!x) return null; const n = intero ? Number(x.replace(/[.\s]/g, "")) : Number(x.replace(/\s/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
+  const salva = async () => {
+    setStato("salvo…");
+    const punti = {}; Object.entries(f.punti).forEach(([k, v]) => { if (v >= 1 && v <= 5) punti[k] = v; });
+    const riga2 = { client_id: clientId, settimana: sett, voto: f.voto, punti, peso_medio: num(f.peso), passi: num(f.passi, true), ore_sonno: num(f.ore), difficolta: f.dif, difficolta_note: f.note.trim() || null, obiettivo: f.obiettivo.trim() || null, impegni: f.impegni.trim() || null, rispettato: f.rispettato, rispettato_meno: f.meno, esito_precedente: f.esito, updated_at: new Date().toISOString() };
+    const { error } = await supabase.from("bilanci_avanzati").upsert(riga2, { onConflict: "client_id,settimana" });
+    if (error) { setStato("Non è stato possibile salvare, riprova."); return; }
+    onFatto();
+  };
+  const scala = (k, l) => (
+    <div key={k} className="flex items-center justify-between gap-2">
+      <span className="text-xs" style={{ color: "#27466D" }}>{l}</span>
+      <div className="flex gap-1">{[1, 2, 3, 4, 5].map((n) => <button key={n} onClick={() => setF((o) => ({ ...o, punti: { ...o.punti, [k]: o.punti[k] === n ? null : n } }))} className="w-7 h-7 rounded-full text-xs font-semibold" style={f.punti[k] === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div>
+    </div>
+  );
+  const input = "w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm";
+  return (
+    <div className="space-y-3 rounded-xl p-3" style={{ background: "#F5FAFE", border: "1px solid #C9E0F7" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>{riga ? "Modifica bilancio" : "Inserisci bilancio a mano"} · settimana {etichettaSettimana(sett)}</p>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Voto (1–10)</p><div className="flex flex-wrap gap-1.5 mt-1">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <button key={n} onClick={() => setF({ ...f, voto: f.voto === n ? null : n })} className="w-7 h-7 rounded-full text-xs font-semibold" style={f.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div></div>
+      <div className="space-y-1.5">{VOCI_ADERENZA.map(([k, l]) => scala(k, l))}</div>
+      <div className="space-y-1.5">{VOCI_RECUPERO.map(([k, l]) => scala(k, l))}</div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Rispettato di più</p><div className="flex flex-wrap gap-1.5 mt-1">{AREE_BILANCIO.map((a) => chip(f.rispettato.includes(a), () => tg("rispettato", a), a))}</div></div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Rispettato di meno</p><div className="flex flex-wrap gap-1.5 mt-1">{AREE_BILANCIO.map((a) => chip(f.meno.includes(a), () => tg("meno", a), a))}</div></div>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="text-[11px] text-slate-500">Peso medio kg<input value={f.peso} onChange={(e) => setF({ ...f, peso: e.target.value })} inputMode="decimal" className={input} /></label>
+        <label className="text-[11px] text-slate-500">Passi medi<input value={f.passi} onChange={(e) => setF({ ...f, passi: e.target.value })} inputMode="numeric" className={input} /></label>
+        <label className="text-[11px] text-slate-500">Ore sonno<input value={f.ore} onChange={(e) => setF({ ...f, ore: e.target.value })} inputMode="decimal" className={input} /></label>
+      </div>
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Difficoltà</p><div className="flex flex-wrap gap-1.5 mt-1">{DIFFICOLTA_AV.map((d) => chip(f.dif.includes(d), () => tg("dif", d), d))}</div></div>
+      <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Nota sulle difficoltà" className={input} />
+      <input value={f.obiettivo} onChange={(e) => setF({ ...f, obiettivo: e.target.value })} placeholder="Obiettivo per la nuova settimana" className={input} />
+      <input value={f.impegni} onChange={(e) => setF({ ...f, impegni: e.target.value })} placeholder="Impegni da organizzare" className={input} />
+      <div><p className="text-xs font-semibold" style={{ color: "#27466D" }}>Esito dell'obiettivo precedente</p><div className="flex flex-wrap gap-1.5 mt-1">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ No"]].map(([v, l]) => chip(f.esito === v, () => setF({ ...f, esito: f.esito === v ? null : v }), l))}</div></div>
+      <div className="flex gap-2">
+        <button onClick={onAnnulla} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Annulla</button>
+        <button onClick={salva} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva</button>
+      </div>
+      {stato && <p className="text-xs text-center" style={{ color: "#7a6a3a" }}>{stato}</p>}
+    </div>
+  );
+}
+function BilancioAvanzatoCliente({ client }) {
+  const [righe, setRighe] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const [stato, setStato] = useState("");
+  const [modifica, setModifica] = useState(false);
+  const carica = () => supabase.from("bilanci_avanzati").select("*").eq("client_id", client.id).order("settimana", { ascending: false }).then(({ data }) => setRighe(data || []));
+  useEffect(() => { carica(); }, [client.id]);
+  if (!righe) return null;
+  const sett = settimanaRiferimento(offset);
+  const fino = righe.filter((r) => r.settimana <= sett); // dal più recente
+  const finestra = (da) => Array.from({ length: 4 }, (_, i) => righe.find((r) => r.settimana === spostaGiorni(sett, -7 * (da + i))) || null);
+  const att = finestra(0), prv = finestra(4);
+  const med = (k, w) => mediaConPesi(w.map((r) => (r ? valoreRiga(r, k) : null)));
+  const delta = (k) => { const a = med(k, att), b = med(k, prv); return a != null && b != null ? a - b : null; };
+  const freccia = (d, invertito) => (d == null || Math.abs(d) < 0.15 ? "" : d > 0 ? " ↑" : " ↓");
+  const coloreVoce = (d, invertito) => { if (d == null || Math.abs(d) < 0.15) return "#27466D"; const bene = invertito ? d < 0 : d > 0; return bene ? "#3F78B3" : "#7a6a3a"; };
+  const n = att.filter(Boolean).length;
+  const rigaSett = att[0];
+  const aderenza = med("aderenza", att), recupero = med("recupero", att);
+  // Peso: variazione settimanale media sulle ultime settimane disponibili
+  const pesi = att.map((r) => (r?.peso_medio != null ? { s: r.settimana, v: Number(r.peso_medio) } : null)).filter(Boolean); // recente → vecchio
+  let pesoKg = null, pesoPct = null;
+  if (pesi.length >= 2) {
+    const a = pesi[0], b = pesi[pesi.length - 1];
+    const sett_diff = (new Date(a.s) - new Date(b.s)) / (7 * 86400000);
+    if (sett_diff > 0) { pesoKg = (a.v - b.v) / sett_diff; pesoPct = (pesoKg / b.v) * 100; }
+  }
+  const segnali = [];
+  const sonnoSerie = att.map((r) => r?.punti?.sonno ?? null), fameSerie = att.map((r) => r?.punti?.fame ?? null);
+  if (sonnoSerie[0] != null && sonnoSerie[1] != null && sonnoSerie[2] != null && sonnoSerie[0] < sonnoSerie[1] && sonnoSerie[1] < sonnoSerie[2] && fameSerie[0] != null && fameSerie[2] != null && fameSerie[0] > fameSerie[2])
+    segnali.push("Qualità del sonno in calo da 2 settimane con fame in aumento: possibile accumulo di fatica (overreaching funzionale), valuta un deload o un refeed.");
+  const dRec = delta("recupero");
+  if (dRec != null && dRec <= -0.4) segnali.push("Indice di recupero in calo rispetto alle 4 settimane precedenti: monitorare carico allenante e disponibilità energetica.");
+  const dAd = delta("aderenza");
+  if (dAd != null && dAd <= -0.5) segnali.push("Aderenza in calo rispetto al blocco precedente: indagare le barriere (organizzazione, motivazione, carico di lavoro).");
+  const prest = med("prestazioni", att);
+  if (prest != null && prest <= 2.5) segnali.push("Prestazioni in sala percepite sotto il previsto: possibile fatica residua o stimolo/carichi da rivedere.");
+  const dol = med("dolori", att);
+  if (dol != null && dol >= 3.8) segnali.push("Dolori muscolari persistentemente elevati (DOMS): valuta volume, frequenza per gruppo muscolare e qualità del recupero.");
+  const ore = med("ore_sonno", att);
+  if (ore != null && ore < 6.5) segnali.push(`Durata media del sonno ${fmt1(ore)} h: debito di sonno che può limitare recupero, ipertrofia e controllo dell'appetito.`);
+  if (pesoPct != null) {
+    if (Math.abs(pesoPct) < 0.15 && pesi.length >= 3) segnali.push("Peso stabile da 3 o più settimane: se l'obiettivo è variare la composizione corporea, valuta un aggiustamento dell'apporto energetico.");
+    else if (pesoPct <= -1) segnali.push(`Calo ponderale ${fmt1(Math.abs(pesoPct))}%/settimana: velocità elevata, rischio di perdita di massa magra, valuta di rallentare.`);
+    else if (pesoPct < -0.15) segnali.push(`Calo ponderale ${fmt1(Math.abs(pesoPct))}%/settimana: nel range atteso (0,3–1% a settimana) per una fase di definizione.`);
+    else if (pesoPct >= 0.5) segnali.push(`Aumento ponderale ${fmt1(pesoPct)}%/settimana: verifica che sia in linea con la fase (surplus controllato).`);
+  }
+  const conta = {};
+  att.forEach((r) => (r?.difficolta || []).forEach((d) => { conta[d] = (conta[d] || 0) + 1; }));
+  const ricorrenti = Object.entries(conta).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]);
+  const obiettivoPrec = righe.find((r) => r.settimana === spostaGiorni(sett, -7))?.obiettivo || null;
+  const esito = rigaSett?.esito_precedente || null;
+  const nomeEsito = { sistemato: "✅ Sistemato", meta: "🔸 A metà", no: "❌ Non riuscita" };
+  const voci = [...VOCI_ADERENZA.map(([k, l]) => [k, l, false]), ...VOCI_RECUPERO.map(([k, l]) => [k, l, k === "fame" || k === "stress" || k === "dolori"])];
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Bilancio settimanale</p>
+          <p className="text-[11px]" style={{ color: "#7a8da3" }}>Media ponderata (pesi 4·3·2·1, la settimana più recente conta di più) · fino a {etichettaSettimana(sett)}</p>
+        </div>
+        <div className="flex gap-1">
+          <button onClick={() => setOffset(offset - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>‹</button>
+          <button onClick={() => setOffset(Math.min(0, offset + 1))} disabled={offset >= 0} className="w-7 h-7 rounded-full text-sm disabled:opacity-30" style={{ background: "#E1EEFB", color: "#27466D" }}>›</button>
+        </div>
+      </div>
+      {client.token_bilancio && (
+        <div className="flex gap-2">
+          <a href={linkWhatsappTesto(client.telefono, testoLinkBilancio(client.nome, client.token_bilancio)) || undefined} target="_blank" rel="noreferrer" className="flex-1 py-2 rounded-xl text-xs font-semibold text-center" style={{ background: "#E1EEFB", color: "#27466D" }}>Invia link su WhatsApp</a>
+          <button onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/?bilancio=${client.token_bilancio}`); setStato("Link copiato ✨"); }} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>Copia link</button>
+        </div>
+      )}
+      {stato && <p className="text-xs text-center" style={{ color: "#3F78B3" }}>{stato}</p>}
+      {modifica ? (
+        <FormBilancioCoach key={sett} riga={rigaSett} clientId={client.id} sett={sett} onAnnulla={() => setModifica(false)} onFatto={() => { setModifica(false); setStato("Salvato ✨"); carica(); }} />
+      ) : (
+        <div className="flex gap-2">
+          <button onClick={() => setModifica(true)} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>{rigaSett ? "Modifica questo bilancio" : "Inserisci a mano"}</button>
+          {rigaSett && <button onClick={async () => { if (!await confermaApp(`Eliminare il bilancio della settimana ${etichettaSettimana(sett)}? Non si può annullare.`)) return; const { error } = await supabase.from("bilanci_avanzati").delete().eq("id", rigaSett.id); setStato(error ? "Non siamo riusciti a eliminarlo, riprova." : "Bilancio eliminato ✨"); carica(); }} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>Elimina</button>}
+        </div>
+      )}
+      {n === 0 ? (
+        <p className="text-xs" style={{ color: "#7a8da3" }}>Nessun bilancio avanzato ricevuto per questo periodo. Appena {String(client.nome || "").split(" ")[0]} compila il link, qui compaiono medie, tendenze e segnali.</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-4 gap-2">
+            {[["Voto", med("voto", att), delta("voto"), "/10"], ["Aderenza", aderenza, delta("aderenza"), "/5"], ["Recupero", recupero, delta("recupero"), "/5"]].map(([l, v, d, u]) => (
+              <div key={l} className="rounded-xl p-2 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
+                <p className="text-base font-semibold" style={{ color: "#27466D" }}>{fmt1(v)}<span className="text-[9px]" style={{ color: "#7a8da3" }}>{u}</span></p>
+                <p className="text-[10px]" style={{ color: "#7a8da3" }}>{l}{d != null && Math.abs(d) >= 0.15 ? ` ${d > 0 ? "+" : "−"}${fmt1(Math.abs(d))}` : ""}</p>
+              </div>
+            ))}
+            <div className="rounded-xl p-2 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
+              <p className="text-base font-semibold" style={{ color: "#27466D" }}>{n}<span className="text-[9px]" style={{ color: "#7a8da3" }}>/4</span></p>
+              <p className="text-[10px]" style={{ color: "#7a8da3" }}>Bilanci</p>
+            </div>
+          </div>
+          <div>
+            {voci.map(([k, l, inv]) => { const v = med(k, att); if (v == null) return null; const d = delta(k); return (
+              <div key={k} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0 text-sm" style={{ color: "#27466D" }}>
+                <span>{l}</span><span className="font-semibold" style={{ color: coloreVoce(d, inv) }}>{fmt1(v)}{freccia(d, inv)}</span>
+              </div>
+            ); })}
+            {pesi.length > 0 && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Peso medio</span><span className="font-semibold">{fmt1(pesi[0].v)} kg{pesoKg != null ? ` · ${pesoKg > 0 ? "+" : "−"}${fmt1(Math.abs(pesoKg)).replace(",", ",")} kg/sett (${pesoPct > 0 ? "+" : "−"}${fmt1(Math.abs(pesoPct))}%)` : ""}</span></div>}
+            {med("passi", att) != null && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Passi medi</span><span className="font-semibold">{Math.round(med("passi", att)).toLocaleString("it-IT")}</span></div>}
+            {ore != null && <div className="flex justify-between py-1.5 text-sm" style={{ color: "#27466D" }}><span>Ore di sonno medie</span><span className="font-semibold">{fmt1(ore)} h</span></div>}
+          </div>
+          {segnali.length > 0 && (
+            <div className="rounded-xl p-3 space-y-1.5" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE" }}>
+              <p className="text-xs font-semibold" style={{ color: "#6b5d2e" }}>Segnali</p>
+              {segnali.map((s, i) => <p key={i} className="text-xs leading-snug" style={{ color: "#6b5d2e" }}>• {s}</p>)}
+            </div>
+          )}
+          {(ricorrenti.length > 0 || rigaSett?.difficolta_note) && (
+            <p className="text-xs" style={{ color: "#27466D" }}>
+              {ricorrenti.length > 0 && <><b>Difficoltà ricorrenti:</b> {ricorrenti.map(([d, c]) => `${d.toLowerCase()} (${c} sett.)`).join(", ")}<br /></>}
+              {rigaSett?.difficolta_note && <><b>Nota della settimana:</b> «{rigaSett.difficolta_note}»</>}
+            </p>
+          )}
+          {(() => {
+            const conta2 = (campo) => { const m = {}; att.forEach((r) => (r?.[campo] || []).forEach((x) => { m[x] = (m[x] || 0) + 1; })); return Object.entries(m).sort((a, b) => b[1] - a[1]).map(([x, c]) => `${x.toLowerCase()} (${c})`).join(", "); };
+            const piu = conta2("rispettato"), meno = conta2("rispettato_meno");
+            return (piu || meno || rigaSett?.impegni) ? (
+              <p className="text-xs" style={{ color: "#27466D" }}>
+                {piu && <><b>Rispettato di più (4 sett.):</b> {piu}<br /></>}
+                {meno && <><b>Rispettato di meno (4 sett.):</b> {meno}<br /></>}
+                {rigaSett?.impegni && <><b>Impegni da organizzare:</b> «{rigaSett.impegni}»</>}
+              </p>
+            ) : null;
+          })()}
+          {(rigaSett?.obiettivo || obiettivoPrec) && (
+            <div className="text-xs space-y-0.5" style={{ color: "#27466D" }}>
+              {obiettivoPrec && <p><b>Obiettivo della settimana prima:</b> «{obiettivoPrec}» {esito ? `· ${nomeEsito[esito]}` : "· da verificare"}</p>}
+              {rigaSett?.obiettivo && <p><b>Obiettivo per la nuova settimana:</b> «{rigaSett.obiettivo}»</p>}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function BilanciLunediCoach({ clients, onSelect }) {
+  const [offset, setOffset] = useState(0);
+  const [righe, setRighe] = useState(null);
+  const sett = settimanaRiferimento(offset);
+  const prec = spostaGiorni(sett, -7);
+  useEffect(() => {
+    supabase.from("bilanci_avanzati").select("client_id, settimana, voto, punti, obiettivo, esito_precedente").in("settimana", [sett, prec]).then(({ data }) => setRighe(data || []), () => setRighe([]));
+  }, [sett]);
+  if (!righe) return null;
+  const attive = (clients || []).filter((c) => !c.archiviato);
+  const risposte = new Map(righe.filter((r) => r.settimana === sett).map((r) => [r.client_id, r]));
+  const daSistemarePrec = new Map(righe.filter((r) => r.settimana === prec && r.obiettivo).map((r) => [r.client_id, r.obiettivo]));
+  const risposto = attive.filter((c) => risposte.has(c.id));
+  const daSentire = attive.filter((c) => !risposto.includes(c));
+  const pct = attive.length ? Math.round((risposto.length / attive.length) * 100) : 0;
+  return (
+    <Sezione id="bilanci_lunedi" titolo="Bilanci del lunedì" conteggio={daSentire.length} aperta={false}>
+      <div className="space-y-3">
+        <Card className="p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs" style={{ color: "#7a8da3" }}>Settimana {etichettaSettimana(sett)} · hanno risposto {risposto.length} su {attive.length}</p>
+            </div>
+            <div className="flex gap-1">
+              <button onClick={() => setOffset(offset - 1)} className="w-7 h-7 rounded-full text-sm" style={{ background: "#E1EEFB", color: "#27466D" }}>‹</button>
+              <button onClick={() => setOffset(Math.min(0, offset + 1))} disabled={offset >= 0} className="w-7 h-7 rounded-full text-sm disabled:opacity-30" style={{ background: "#E1EEFB", color: "#27466D" }}>›</button>
+            </div>
+          </div>
+          <div className="h-2 rounded-full mt-2" style={{ background: "#E1EEFB" }}><div className="h-2 rounded-full" style={{ width: `${pct}%`, background: "#4F8FD0" }} /></div>
+        </Card>
+        {daSentire.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide font-medium mb-1.5" style={{ color: "#7a8da3" }}>Da sentire ({daSentire.length})</p>
+            <Card className="px-3.5 py-1">
+              {daSentire.map((c) => {
+                const x = daSistemarePrec.get(c.id);
+                const link = linkWhatsappTesto(c.telefono, c.token_bilancio ? testoLinkBilancio(c.nome, c.token_bilancio) : testoLunedi(c.nome, x));
+                return (
+                  <div key={c.id} className="flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0">
+                    <button onClick={() => onSelect && onSelect(c.id)} className="text-left min-w-0">
+                      <span className="block text-sm font-medium" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}</span>
+                      <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>{x ? `ultima volta: ${x}` : "nessun obiettivo ancora"}</span>
+                    </button>
+                    {link ? <a href={link} target="_blank" rel="noreferrer" className="text-xs font-semibold flex-shrink-0" style={{ color: "#3F78B3" }}>Messaggio ›</a> : <span className="text-[10px] text-slate-400 flex-shrink-0">senza numero</span>}
+                  </div>
+                );
+              })}
+            </Card>
+          </div>
+        )}
+        {risposto.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wide font-medium mb-1.5" style={{ color: "#7a8da3" }}>Hanno risposto ({risposto.length})</p>
+            <Card className="px-3.5 py-1">
+              {risposto.map((c) => {
+                const r = risposte.get(c.id);
+                return (
+                  <button key={c.id} onClick={() => onSelect && onSelect(c.id)} className="w-full flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0 text-left">
+                    <span className="text-sm" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}{r.obiettivo && <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>obiettivo: {r.obiettivo}</span>}</span>
+                    <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0" style={{ background: "#C9E0F7", color: "#27466D" }}>{r.voto != null ? `${r.voto}/10` : "ricevuto"}{r.esito_precedente ? ` · ${EMOJI_ESITO[r.esito_precedente]}` : ""}</span>
+                  </button>
+                );
+              })}
+            </Card>
+          </div>
+        )}
+      </div>
+    </Sezione>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
   const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
@@ -7663,18 +11385,44 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
-    const { data: au } = await supabase.from("notifiche").select("*, clients(nome, cognome)").eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%").order("created_at", { ascending: false });
+    const { data: au } = await supabase.from("notifiche").select("*, clients(nome, cognome)").eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%,proposta_luogo.like.lez_%").order("created_at", { ascending: false });
     setAutoNuove(au || []);
     const { data: r } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("data");
-    setRichieste(r || []);
+    const idOrig = (r || []).map((x) => x.sostituisce_id).filter(Boolean);
+    let orig = {};
+    if (idOrig.length) { const { data: o } = await supabase.from("calendar_events").select("id, data, ora, luogo").in("id", idOrig); (o || []).forEach((x) => { orig[x.id] = x; }); }
+    const grezze = (r || []).map((x) => ({ ...x, originale: x.sostituisce_id ? orig[x.sostituisce_id] || null : null }));
+    const gruppiR = {}; const rich = [];
+    grezze.forEach((x) => {
+      if (x.gruppo_id && !x.sostituisce_id) {
+        const k = `${x.gruppo_id}|${x.data}|${x.ora}`;
+        if (!gruppiR[k]) { gruppiR[k] = { ...x, tutti: [x.id], nomi: [x.clients?.nome || "Cliente"] }; rich.push(gruppiR[k]); }
+        else { gruppiR[k].tutti.push(x.id); gruppiR[k].nomi.push(x.clients?.nome || "Cliente"); }
+      } else rich.push(x);
+    });
+    setRichieste(rich);
     const { data: c } = await supabase.from("checkins").select("*, clients(nome, cognome)").eq("stato", "ricevuto").order("data_check", { ascending: false });
     setCheckDaRivedere(c || []);
     setCaricando(false);
   };
   useEffect(() => { carica(); }, []);
 
-  const approva = async (id) => { await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id); await sincronizzaLezionePacchetto(id); carica(); };
-  const rifiuta = async (id) => { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); carica(); };
+  const approva = async (idOIds) => {
+    const lista = Array.isArray(idOIds) ? idOIds : [idOIds];
+    for (const id of lista) {
+      const { data: ev } = await supabase.from("calendar_events").select("sostituisce_id").eq("id", id).maybeSingle();
+      await supabase.from("calendar_events").update({ stato: "confermato" }).eq("id", id);
+      await sincronizzaLezionePacchetto(id);
+      // se era una richiesta di spostamento, la lezione di prima viene liberata
+      if (ev?.sostituisce_id) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", ev.sostituisce_id); await scollegaLezionePacchetto(ev.sostituisce_id); }
+    }
+    if (lista.length > 1) { // gruppo: avvisa tutte le clienti della lezione confermata
+      const { data: evs } = await supabase.from("calendar_events").select("*").in("id", lista);
+      for (const e of evs || []) { try { await avvisaLezioneCliente(e, "nuova"); } catch (err) { /* ignora */ } }
+    }
+    carica();
+  };
+  const rifiuta = async (idOIds) => { const lista = Array.isArray(idOIds) ? idOIds : [idOIds]; for (const id of lista) { await supabase.from("calendar_events").update({ stato: "annullata" }).eq("id", id); await scollegaLezionePacchetto(id); } carica(); };
   const segnaRevisionato = async (id) => {
     await supabase.from("checkins").update({ stato: "revisionato" }).eq("id", id);
     try {
@@ -7690,35 +11438,33 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
   };
   const titoloAuto = (m) => (m || "").startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : (m || "").startsWith("promemoria_check") ? "Promemoria: check in arrivo" : (m || "").startsWith("auto_check") ? "Check ricevuto ✨" : (m || "").startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : (m || "").startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : (m || "").startsWith("auto_traguardo_streak") ? "Costanza 🔥" : "Messaggio automatico";
 
+  const eLezAuto = (n) => /^(lez_|promemoria_pacchetto|auto_pacchetto)/.test(n.proposta_luogo || "");
+  const autoLezioni = autoNuove.filter(eLezAuto);
+  const autoCheck = autoNuove.filter((n) => !eLezAuto(n));
+  const cardAuto = (n) => (
+    <Card key={n.id} className="p-3 space-y-1 bg-sky-50/60 border-sky-100">
+      <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
+      <p className="text-slate-500 text-xs font-medium">{(n.proposta_luogo || "").startsWith("lez_prom") ? "Promemoria lezione inviato" : (n.proposta_luogo || "").startsWith("lez_mod") ? "Lezione spostata (avviso inviato)" : (n.proposta_luogo || "").startsWith("lez_nuova") ? "Nuova lezione (avviso inviato)" : titoloAuto(n.proposta_luogo)}</p>
+      <p className="text-slate-600 text-xs">{n.messaggio}</p>
+      <CommentoCoach n={n} onSalvato={carica} />
+      <div className="flex items-center justify-between pt-1">
+        <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
+        <button onClick={() => segnaAutoViste([n.id])} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
+      </div>
+    </Card>
+  );
+
   if (caricando) return <Spinner />;
 
   return (
     <div className="space-y-5">
-      {autoNuove.length > 0 && (
-        <Sezione id="auto_inviati" titolo="Messaggi automatici inviati" conteggio={autoNuove.length} aperta={autoNuove.length>0} ricorda={false}  tono="sky" evidenzia destra={<button onClick={() => segnaAutoViste(autoNuove.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button>}>
-          <div className="space-y-2">
-            {autoNuove.map((n) => (
-              <Card key={n.id} className="p-3 space-y-1 bg-sky-50/60 border-sky-100">
-                <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
-                <p className="text-slate-500 text-xs font-medium">{titoloAuto(n.proposta_luogo)}</p>
-                <p className="text-slate-600 text-xs">{n.messaggio}</p>
-                <CommentoCoach n={n} onSalvato={carica} />
-                <div className="flex items-center justify-between pt-1">
-                  <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
-                  <button onClick={() => segnaAutoViste([n.id])} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </Sezione>
-      )}
       {promemoriaDomani.length > 0 && (
         <Sezione id="promemoria_domani" titolo="Promemoria di domani" conteggio={promemoriaDomani.length} aperta={promemoriaDomani.length>0} ricorda={false}  tono="amber" evidenzia>
           <div className="space-y-2">
             {promemoriaDomani.map((v) => (
               <Card key={v.cliente.id + v.marker} className="p-3">
                 <button onClick={() => onSelect(v.cliente.id)} className="w-full text-left">
-                  <p className="font-medium text-slate-700 text-sm">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="font-medium text-slate-700 text-sm"><NomeCl c={v.cliente} /></p>
                   <p className="text-slate-500 text-xs">{v.marker === "promemoria_pacchetto" ? "Pacchetto in scadenza il " : "Check previsto il "}{v.data.split("-").reverse().join("/")}</p>
                 </button>
               </Card>
@@ -7730,53 +11476,77 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
         <Sezione id="nuove_clienti" titolo="Nuove clienti da completare" conteggio={nuoveDaCompletare.length} aperta={nuoveDaCompletare.length>0} ricorda={false}  tono="amber" evidenzia>
           <div className="space-y-2">
             {nuoveDaCompletare.map((c) => (
-              <Card key={c.id} className="p-3 flex items-center gap-3 bg-amber-50/60 border-amber-200">
+              <Card key={c.id} className="p-3 flex items-center gap-3 bg-slate-100/60 border-slate-200">
                 <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 text-left">
-                    <p className="font-medium text-slate-700 text-sm">{c.nome} {c.cognome}</p>
+                    <p className="font-medium text-slate-700 text-sm"><NomeCl c={c} /></p>
                     <p className="text-slate-500 text-xs">Si è registrata da sola — manca ancora pacchetto e prezzo</p>
                 </button>
-                <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
+                <button onClick={async () => { await supabase.from("clients").update({ notifica_vista: true }).eq("id", c.id); onChanged?.(); }} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna vista</button>
               </Card>
             ))}
           </div>
         </Sezione>
       )}
 
-      <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length} aperta={richieste.length>0} ricorda={false}  evidenzia>
+ <RichiestePacchettoCoach onChanged={onChanged} />
+      <CaricheInCaloCoach onChanged={onChanged} />
+
+      <BilanciLunediCoach clients={clients} onSelect={onSelect} />
+
+      <Sezione id="trend_clienti" titolo="Trend clienti" aperta={false}>
+        <TrendClientiCoach clients={clients} onSelect={onSelect} />
+      </Sezione>
+
+      <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length + autoLezioni.length} aperta={richieste.length + autoLezioni.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
-          {richieste.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
+          {richieste.length === 0 && autoLezioni.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
           {richieste.map((r) => (
             <Card key={r.id} className="p-3 space-y-2">
-              <button onClick={() => onSelect(r.client_id)} className="w-full text-left">
-                <p className="font-medium text-slate-700 text-sm">{r.clients?.nome} {r.clients?.cognome}</p>
-                <p className="text-slate-500 text-xs">{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
+              <button onClick={() => !r.tutti && onSelect(r.client_id)} className="w-full text-left">
+                <p className="font-medium text-slate-700 text-sm">{r.tutti ? <><Ic n="users"/> Gruppo · {r.nomi.join(", ")}</> : `${r.clients?.nome || ""} ${r.clients?.cognome || ""}`}</p>
+                {r.sostituisce_id && <p className="text-slate-600 text-xs font-medium"><Ic n="repeat"/> Richiesta di spostamento{r.originale ? ` della lezione del ${r.originale.data.split("-").reverse().join("/")} · ${r.originale.ora?.slice(0, 5)}` : ""}</p>}
+                <p className="text-slate-500 text-xs">{r.sostituisce_id ? "Nuova data: " : ""}{r.data?.split("-").reverse().join("/")} {r.ora?.slice(0, 5)} — {r.tipo === "lezione" ? "Lezione 1:1" : "Call"}{r.luogo ? ` — ${r.luogo}` : ""}{r.extra_euro ? " — costo aggiuntivo" : ""}</p>
+                {r.nota && <p className="text-slate-400 text-xs italic">«{r.nota}»</p>}
               </button>
               {proponiPer === r.id ? (
-                <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
+                r.tutti ? <CambiaOrarioGruppo ids={r.tutti} evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
+                  : <ProponiOrarioForm evento={r} onAnnulla={() => setProponiPer(null)} onFatto={() => { setProponiPer(null); carica(); }} />
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={() => approva(r.id)} className="flex-1 bg-emerald-500 text-white text-xs font-medium rounded-lg py-2">Approva</button>
-                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-amber-500 text-white text-xs font-medium rounded-lg py-2">Proponi altro</button>
-                  <button onClick={() => rifiuta(r.id)} className="flex-1 bg-rose-100 text-rose-700 text-xs font-medium rounded-lg py-2">Rifiuta</button>
+                  <button onClick={() => approva(r.tutti || r.id)} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">{r.tutti ? "Approva per tutte" : "Approva"}</button>
+                  <button onClick={() => setProponiPer(r.id)} className="flex-1 bg-slate-500 text-white text-xs font-medium rounded-lg py-2">{r.tutti ? "Cambia orario" : "Proponi altro"}</button>
+                  <button onClick={() => rifiuta(r.tutti || r.id)} className="flex-1 bg-slate-200 text-slate-800 text-xs font-medium rounded-lg py-2">Rifiuta</button>
                 </div>
               )}
             </Card>
           ))}
+          {autoLezioni.length > 0 && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between"><p className="text-[11px] text-slate-400">Messaggi automatici inviati</p><button onClick={() => segnaAutoViste(autoLezioni.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button></div>
+              {autoLezioni.map(cardAuto)}
+            </div>
+          )}
         </div>
       </Sezione>
 
-      <Sezione id="check_rivedere" titolo="Check da rivedere" conteggio={checkDaRivedere.length} aperta={checkDaRivedere.length>0} ricorda={false}  evidenzia>
+      <Sezione id="check_rivedere" titolo="Check da rivedere" conteggio={checkDaRivedere.length + autoCheck.length} aperta={checkDaRivedere.length + autoCheck.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
-          {checkDaRivedere.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun check da rivedere.</Card>}
+          {checkDaRivedere.length === 0 && autoCheck.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun check da rivedere.</Card>}
           {checkDaRivedere.map((c) => (
             <Card key={c.id} className="p-3 flex items-center gap-3">
               <button onClick={() => onSelect(c.client_id)} className="flex-1 min-w-0 text-left">
                 <p className="font-medium text-slate-700 text-sm">{c.clients?.nome} {c.clients?.cognome}</p>
                 <p className="text-slate-500 text-xs">{c.data_check?.split("-").reverse().join("/")} — {c.peso_kg ? `${c.peso_kg} kg` : "check inviato"}</p>
               </button>
-              <button onClick={() => segnaRevisionato(c.id)} className="bg-emerald-50 text-emerald-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna rivisto</button>
+              <button onClick={() => segnaRevisionato(c.id)} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna rivisto</button>
             </Card>
           ))}
+          {autoCheck.length > 0 && (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between"><p className="text-[11px] text-slate-400">Messaggi automatici inviati</p><button onClick={() => segnaAutoViste(autoCheck.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button></div>
+              {autoCheck.map(cardAuto)}
+            </div>
+          )}
         </div>
       </Sezione>
 
@@ -7835,7 +11605,7 @@ async function esportaExcelCompleto(clientId = null) {
 
   const fogli = [];
   fogli.push(["Clienti", [["Codice", "Nome", "Cognome", "Email", "Tipo servizio", "Piano", "Pacchetto lezioni", "Stato pacchetto", "Data inizio", "Data scadenza", "Altezza (cm)", "Peso iniziale (kg)", "Obiettivo"],
-    ...clienti.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, dt(c.data_inizio), dt(c.data_scadenza), num(c.altezza_cm), num(c.peso_kg), c.obiettivo_attuale || ""])]]);
+    ...clienti.map((c) => [c.codice, c.nome, c.cognome, c.email, c.tipo_servizio, c.piano, c.pacchetto_lezioni, c.stato_pacchetto, dt(c.data_inizio), dt(c.data_scadenza), num(c.altezza_cm), num(c.peso_kg), labelObiettivo(c.obiettivo_attuale) || ""])]]);
 
   const checkOrd = [...checks].sort((a, b) => ordNome(a, b) || String(a.data_check).localeCompare(String(b.data_check)));
   fogli.push(["Check e misure", [["Cliente", "Data check", "Peso (kg)", "Spalle (cm)", "Petto (cm)", "Sopra ombelico (cm)", "Ombelico (cm)", "Sotto ombelico (cm)", "Glutei (cm)", "Coscia dx (cm)", "Braccio dx (cm)", "Collo (cm)", "Energia (1-5)", "Sonno (1-5)", "Aderenza cibo (1-5)", "Aderenza allenamento (1-5)", "Fase mestruale", "Stato", "Note cliente"],
@@ -7946,7 +11716,7 @@ async function esportaStoricoCompletoCliente(clientId, avanzamento = () => {}, o
     ["Nome", nomeCl], ["Codice", cl.codice], ["Email", cl.email], ["Telefono", cl.telefono], ["Sesso", cl.sesso],
     ["Data di nascita", dt(cl.data_nascita)], ["Altezza (cm)", num(cl.altezza_cm)], ["Peso iniziale (kg)", num(cl.peso_kg)], ["Città", cl.citta],
     ["Tipo servizio", cl.tipo_servizio], ["Piano", cl.piano], ["Pacchetto lezioni", cl.pacchetto_lezioni], ["Data inizio", dt(cl.data_inizio)], ["Data scadenza", dt(cl.data_scadenza)],
-    ["Livello allenamento", cl.livello_allenamento], ["Fase", cl.fase_allenamento], ["Obiettivo attuale", cl.obiettivo_attuale],
+    ["Livello allenamento", cl.livello_allenamento], ["Fase", cl.fase_allenamento], ["Obiettivo attuale", labelObiettivo(cl.obiettivo_attuale)],
     ["Focus di crescita", (cl.focus_crescita || []).join(", ")], ["Salute", [(cl.problematiche_salute || []).join(", "), cl.problematiche_salute_note].filter(Boolean).join(" — ")],
     ["Note particolari", cl.note_particolari], ["Esportato il", new Date()],
   ];
@@ -8065,7 +11835,7 @@ async function esportaCartelleClienti(clients, avanzamento = () => {}) {
       });
       zip.file(`${cartella}/Storico completo.xlsx`, r.buf);
       nErrori += r.fotoMancanti;
-    } catch (e) { nErrori++; zip.file(`${cartella}/ERRORE.txt`, `Non sono riuscita a esportare questa cliente: ${e?.message || e}`); }
+    } catch (e) { nErrori++; zip.file(`${cartella}/ERRORE.txt`, `Non è stato possibile esportare questa cliente: ${e?.message || e}`); }
   }
   avanzamento("Preparo il file ZIP (può servire un minuto)...");
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (m) => avanzamento(`Preparo il file ZIP... ${Math.round(m.percent)}%`));
@@ -8088,7 +11858,7 @@ function BottoneCartelleClienti({ clients, className = "" }) {
   };
   return (
     <div className={className}>
-      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : "⬇ Cartelle di tutte le clienti (ZIP con storico e foto)"}</button>
+      <button onClick={vai} disabled={inCorso} className="w-full bg-slate-800 text-white text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le cartelle..." : <><Ic n="download"/> Cartelle di tutte le clienti (ZIP con storico e foto)</>}</button>
       {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
       {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
     </div>
@@ -8148,7 +11918,7 @@ function BottoneSoloFoto({ clients, className = "" }) {
   };
   return (
     <div className={className}>
-      <button onClick={vai} disabled={inCorso} className="w-full border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le foto..." : "⬇ Solo foto delle clienti (ZIP, una cartella per cliente)"}</button>
+      <button onClick={vai} disabled={inCorso} className="w-full border border-slate-300 bg-white text-slate-700 text-xs font-medium rounded-lg py-2.5 disabled:opacity-50">{inCorso ? "Preparo le foto..." : <><Ic n="download"/> Solo foto delle clienti (ZIP, una cartella per cliente)</>}</button>
       {msg && <p className="text-[11px] text-slate-500 text-center mt-1">{msg}</p>}
       {inCorso && <p className="text-[11px] text-slate-400 text-center">Tieni aperta questa pagina finché non parte il download.</p>}
     </div>
@@ -8327,7 +12097,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
         <button onClick={() => apri("guadagno")} className="flex items-center justify-center gap-2 bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium">
           <Plus size={16} /> Nuovo pagamento
         </button>
-        <button onClick={() => apri("spesa")} className="flex items-center justify-center gap-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl py-2.5 text-sm font-medium">
+        <button onClick={() => apri("spesa")} className="flex items-center justify-center gap-2 bg-slate-100 text-slate-800 border border-slate-300 rounded-xl py-2.5 text-sm font-medium">
           <Plus size={16} /> Nuova spesa
         </button>
       </div>
@@ -8340,7 +12110,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
         <button onClick={() => setModo("guadagno")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "guadagno" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
           + Guadagno
         </button>
-        <button onClick={() => setModo("spesa")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "spesa" ? "bg-white text-rose-600 shadow-sm" : "text-slate-500"}`}>
+        <button onClick={() => setModo("spesa")} className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${modo === "spesa" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
           − Spesa
         </button>
       </div>
@@ -8411,7 +12181,7 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
               <option value="Lezione singola Bulb">Lezione singola Bulb (non tocca la scadenza)</option>
               <option value="Altro">Altro (non tocca la scadenza)</option>
             </select>
-            {aggiornaScadenza && <p className="text-[11px] text-emerald-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
+            {aggiornaScadenza && <p className="text-[11px] text-sky-600 mt-1">La scadenza del pacchetto si aggiorna in automatico di conseguenza.</p>}
           </div>
           {tipoPiano === "Altro" && (
             <div>
@@ -8425,10 +12195,10 @@ function NuovoPagamentoGuadagni({ clients, onSalvato, onClientiCambiati }) {
           </div>
         </>
       )}
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={() => { setAperto(false); setErrore(""); }} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
-        <button onClick={salva} disabled={salvando} className={`flex-1 text-white rounded-xl py-2 text-sm font-medium ${modo === "spesa" ? "bg-rose-600" : "bg-slate-800"}`}>
+        <button onClick={salva} disabled={salvando} className={`flex-1 text-white rounded-xl py-2 text-sm font-medium ${modo === "spesa" ? "bg-slate-800" : "bg-slate-800"}`}>
           {salvando ? "Salvo..." : modo === "spesa" ? "Salva spesa" : "Salva"}
         </button>
       </div>
@@ -8553,7 +12323,7 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
     // Se cambia qualcosa che riguarda un pacchetto a cadenza fissa, la scadenza si riallinea allo storico
     if (!error && !spesa && pag.client_id && (MESI_PER_TIPO_PAGAMENTO[pag.tipo_piano] || MESI_PER_TIPO_PAGAMENTO[upd.tipo_piano])) await ricalcolaEAggiornaScadenza(pag.client_id);
     setSalvandoMod(false);
-    if (error) { setErroreMod("Non sono riuscita a salvare, riprova."); return; }
+    if (error) { setErroreMod("Non è stato possibile salvare, riprova."); return; }
     setPag({ ...pag, ...upd });
     setModifica(false);
     onSalvato?.();
@@ -8609,7 +12379,7 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
               <label className="text-xs text-slate-500">{pag.stato === "spesa" ? "Descrizione" : "Nota"}</label>
               <input value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mt-1" />
             </div>
-            {erroreMod && <p className="text-rose-500 text-xs">{erroreMod}</p>}
+            {erroreMod && <p className="text-slate-800 text-xs">{erroreMod}</p>}
             <div className="flex gap-2">
               <button onClick={() => setModifica(false)} className="flex-1 bg-slate-100 text-slate-600 rounded-xl py-2 text-sm font-medium">Annulla</button>
               <button onClick={salvaModifiche} disabled={salvandoMod} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium disabled:opacity-50">{salvandoMod ? "Salvo..." : "Salva modifiche"}</button>
@@ -8623,18 +12393,18 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
           <div className="flex justify-between"><span className="text-slate-400">Importo totale</span><span className="text-slate-800 font-semibold">{pag.importo != null ? `${Number(pag.importo).toFixed(2)}€` : "—"}</span></div>
           {pag.stato === "da_saldare" && giaSaldato > 0 && (
             <>
-              <div className="flex justify-between"><span className="text-slate-400">Già saldato</span><span className="text-emerald-600 font-medium">{giaSaldato.toFixed(2)}€</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Ancora da saldare</span><span className="text-amber-600 font-medium">{residuo.toFixed(2)}€</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Già saldato</span><span className="text-sky-600 font-medium">{giaSaldato.toFixed(2)}€</span></div>
+              <div className="flex justify-between"><span className="text-slate-400">Ancora da saldare</span><span className="text-slate-600 font-medium">{residuo.toFixed(2)}€</span></div>
             </>
           )}
-          <div className="flex justify-between"><span className="text-slate-400">Metodo</span>{pag.metodo_pagamento ? <span className="text-slate-700">{labelMetodo(pag.metodo_pagamento)}</span> : <span className="text-amber-600 font-medium">da indicare</span>}</div>
+          <div className="flex justify-between"><span className="text-slate-400">Metodo</span>{pag.metodo_pagamento ? <span className="text-slate-700">{labelMetodo(pag.metodo_pagamento)}</span> : <span className="text-slate-600 font-medium">da indicare</span>}</div>
           <div className="flex justify-between"><span className="text-slate-400">Stato</span><span className="text-slate-700 capitalize">{pag.stato === "spesa" ? "Spesa" : pag.stato === "saldato" ? "Saldato" : "Da saldare"}</span></div>
           {pag.note && <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">Nota</span><span className="text-slate-700 text-right">{pag.note}</span></div>}
         </div>
         )}
 
         {!modifica && (
-          <button onClick={apriModifica} className="w-full border border-slate-200 text-slate-600 rounded-xl py-2 text-sm font-medium">✏️ Modifica pagamento</button>
+          <button onClick={apriModifica} className="w-full border border-slate-200 text-slate-600 rounded-xl py-2 text-sm font-medium"><Ic n="edit"/> Modifica pagamento</button>
         )}
 
         {!modifica && pag.stato === "da_saldare" && pag.importo != null && (
@@ -8643,11 +12413,11 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
             <div className="flex gap-2">
               <input type="number" step="0.01" value={acconto} onChange={(e) => setAcconto(e.target.value)} placeholder={`es. ${Math.min(residuo, 20).toFixed(0)}`}
                 className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-              <button onClick={registraAcconto} disabled={salvandoAcconto} className="bg-emerald-600 text-white text-sm font-medium rounded-lg px-4 disabled:opacity-50">
+              <button onClick={registraAcconto} disabled={salvandoAcconto} className="bg-sky-600 text-white text-sm font-medium rounded-lg px-4 disabled:opacity-50">
                 {salvandoAcconto ? "..." : "Registra"}
               </button>
             </div>
-            {erroreAcconto && <p className="text-rose-500 text-xs">{erroreAcconto}</p>}
+            {erroreAcconto && <p className="text-slate-800 text-xs">{erroreAcconto}</p>}
             <p className="text-[11px] text-slate-400">L'importo totale resta {Number(pag.importo).toFixed(2)}€ — qui aggiorni solo quanto è già stato incassato, e "da saldare" si ricalcola da solo.</p>
           </div>
         )}
@@ -8681,8 +12451,8 @@ function ImportoMancante({ p, onSalvato }) {
   return (
     <div className="flex items-center gap-1 flex-shrink-0">
       <input type="number" step="0.01" value={valore} onChange={(e) => setValore(e.target.value)} placeholder="€"
-        className="w-16 border border-amber-300 rounded-lg px-1.5 py-1 text-xs" />
-      <button onClick={salva} disabled={salvando} className="text-emerald-600 flex-shrink-0"><Check size={16} /></button>
+        className="w-16 border border-slate-300 rounded-lg px-1.5 py-1 text-xs" />
+      <button onClick={salva} disabled={salvando} className="text-sky-600 flex-shrink-0"><Check size={16} /></button>
     </div>
   );
 }
@@ -8697,7 +12467,7 @@ function MetodoMancante({ p, onSalvato }) {
     onSalvato();
   };
   return (
-    <select defaultValue="" disabled={salvando} onChange={(e) => imposta(e.target.value)} className="border border-amber-300 rounded-lg px-2 py-1 text-xs bg-white flex-shrink-0">
+    <select defaultValue="" disabled={salvando} onChange={(e) => imposta(e.target.value)} className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white flex-shrink-0">
       <option value="">Metodo…</option>
       {METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
     </select>
@@ -8714,6 +12484,79 @@ const categoriaPagamento = (p) => {
 const METODI_ELETTRONICI_STAT = ["satispay", "hype", "sella", "bonifico"];
 
 // Righe di incasso reali (saldati + acconti) e spese, con importo sempre positivo
+// Fidelizzazione dall'inizio: per ogni cliente ricostruisce i mesi in cui è stata attiva (online: copertura 1/3/6 mesi dei
+// pagamenti; Bulb: pacchetti e lezioni) e i rinnovi fatti. Un rinnovo è contato una volta per cliente e per mese.
+function calcolaFidelizzazione(pagamenti, pacchetti, clients, oggiStr) {
+  const meseOggi = oggiStr.slice(0, 7);
+  const mese = (d) => (d || "").slice(0, 7);
+  const succ = (k, n = 1) => { const [a, m] = k.split("-").map(Number); const d = new Date(a, m - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const intervallo = (da, a) => { const out = []; for (let k = da, i = 0; k <= a && i < 600; k = succ(k), i++) out.push(k); return out; };
+  const info = {};
+  const get = (cid) => (info[cid] = info[cid] || { onl: new Set(), bulb: new Set(), evOnl: new Set(), evBulb: new Set() });
+  const piano = (cid) => (clients.find((c) => c.id === cid) || {}).piano;
+
+  // Coaching online
+  const perCli = {};
+  pagamenti.filter((p) => p.client_id && p.stato === "saldato" && p.data_pagamento).forEach((p) => {
+    let m = mesiDelPagamento(p, piano(p.client_id));
+    if (!m && /coaching online/i.test(p.tipo_piano || "")) m = 1; // storico senza durata scritta: conto 1 mese
+    if (m > 0) (perCli[p.client_id] = perCli[p.client_id] || []).push({ d: p.data_pagamento, m });
+  });
+  Object.entries(perCli).forEach(([cid, l]) => {
+    l.sort((a, b) => a.d.localeCompare(b.d));
+    const x = get(cid); let fine = null;
+    l.forEach((q) => {
+      let base = q.d; if (fine && fine > base) base = fine;
+      fine = addMesi(base, q.m);
+      intervallo(mese(base), mese(addGiorni(fine, -1))).forEach((k) => x.onl.add(k));
+      x.evOnl.add(mese(q.d));
+    });
+  });
+
+  // Bulb: pacchetti registrati + pagamenti di pacchetti (se non già coperti da un pacchetto registrato)
+  const isPacchettoPag = (p) => (/bulb/i.test(p.tipo_piano || "") && /pacchetto/i.test(p.tipo_piano || "")) || (/1:1/.test(p.tipo_piano || "") && /\d+\s*lezion/i.test(p.note || ""));
+  const pagatoBulb = (p) => p.client_id && p.data_pagamento && (p.stato === "saldato" || (p.stato === "da_saldare" && Number(p.importo_saldato) > 0)) && (/bulb/i.test(p.tipo_piano || "") || /1:1/.test(p.tipo_piano || ""));
+  pagamenti.filter(pagatoBulb).forEach((p) => { const x = get(p.client_id); x.bulb.add(mese(p.data_pagamento)); x.evBulb.add(mese(p.data_pagamento)); }); // gli eventi vengono dai pagamenti, che sono i dati più completi
+  pacchetti.filter((pk) => pk.client_id && pk.creato_il).forEach((pk) => {
+    const x = get(pk.client_id);
+    const fine = pk.completato_il ? mese(pk.completato_il) : meseOggi;
+    intervallo(mese(pk.creato_il), fine < mese(pk.creato_il) ? mese(pk.creato_il) : fine).forEach((k) => x.bulb.add(k));
+  });
+  // Mesi dall'inizio ad oggi
+  let primo = meseOggi;
+  Object.values(info).forEach((x) => [...x.onl, ...x.bulb].forEach((k) => { if (k < primo) primo = k; }));
+  const mesi = intervallo(primo, meseOggi);
+  const righe = mesi.map((k) => {
+    let onl = 0, bulb = 0, tot = 0, rinnOnl = 0, rinnBulb = 0;
+    Object.values(info).forEach((x) => {
+      const a = x.onl.has(k), b = x.bulb.has(k);
+      if (a) onl++; if (b) bulb++; if (a || b) tot++;
+      const primoOnl = [...x.evOnl].sort()[0], primoBulb = [...x.evBulb].sort()[0];
+      if (x.evOnl.has(k) && k !== primoOnl) rinnOnl++;
+      if (x.evBulb.has(k) && k !== primoBulb) rinnBulb++;
+    });
+    return { k, onl, bulb, tot, rinn: rinnOnl + rinnBulb };
+  });
+  const media = (campo) => (righe.length ? Math.round((righe.reduce((s, r) => s + r[campo], 0) / righe.length) * 10) / 10 : 0);
+
+  // Clienti con almeno un rinnovo
+  const lista = [];
+  let sommaDurate = 0, nConDurata = 0;
+  Object.entries(info).forEach(([cid, x]) => {
+    const attivi = [...x.onl, ...x.bulb].filter((k) => k <= meseOggi).sort();
+    if (!attivi.length) return;
+    const durata = intervallo(attivi[0], attivi[attivi.length - 1]).length;
+    sommaDurate += durata; nConDurata += 1;
+    const rO = Math.max(0, x.evOnl.size - 1), rB = Math.max(0, x.evBulb.size - 1);
+    if (rO + rB === 0) return;
+    const c = clients.find((q) => q.id === cid);
+    lista.push({ cid, nome: c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente", archiviata: !!(c && c.archiviato), rO, rB, durata, da: attivi[0], a: attivi[attivi.length - 1], inCorso: attivi[attivi.length - 1] >= meseOggi });
+  });
+  lista.sort((p, q) => (q.rO + q.rB) - (p.rO + p.rB) || q.durata - p.durata);
+  const durataMediaRinnovate = lista.length ? Math.round((lista.reduce((s, l) => s + l.durata, 0) / lista.length) * 10) / 10 : 0;
+  return { righe, mediaOnl: media("onl"), mediaBulb: media("bulb"), mediaTot: media("tot"), lista, durataMediaRinnovate, durataMediaTutte: nConDurata ? Math.round((sommaDurate / nConDurata) * 10) / 10 : 0, nClientiTotali: nConDurata };
+}
+
 function righeContabili(pagamenti) {
   const out = [];
   pagamenti.forEach((p) => {
@@ -8847,6 +12690,27 @@ function StatisticheCoach({ clients }) {
   const rinnovatiTot = rinnovatiOnline + rinnovatiLez;
   const retention = attesiTot > 0 ? Math.round((rinnovatiTot / attesiTot) * 100) : null;
 
+  // Rinnovi FATTI nel mese, contati una volta per cliente e per mese (anche se pagati a rate):
+  // online = pagamento di coaching nel mese di chi aveva già pagato prima; Bulb = nuovo pacchetto lezioni nel mese di chi ne aveva già avuto uno.
+  const pianoDi = (cid) => (clients.find((c) => c.id === cid) || {}).piano;
+  const onlineDelPag = (p) => p.stato === "saldato" && p.data_pagamento && mesiDelPagamento(p, pianoDi(p.client_id)) > 0;
+  const bulbPacchettoPag = (p) => p.stato !== "spesa" && p.data_pagamento && p.client_id && ((/bulb/i.test(p.tipo_piano || "") && /pacchetto/i.test(p.tipo_piano || "")) || (/1:1/.test(p.tipo_piano || "") && /\d+\s*lezion/i.test(p.note || "")));
+  const rinnOnlineSet = new Set(), nuoveOnlineSet = new Set(), rinnBulbSet = new Set(), nuoveBulbSet = new Set();
+  dati.pagamenti.filter((p) => onlineDelPag(p) && nelMese(p.data_pagamento)).forEach((p) => {
+    const prima = dati.pagamenti.some((q) => q.client_id === p.client_id && q.id !== p.id && onlineDelPag(q) && q.data_pagamento < `${mese}-01`);
+    (prima ? rinnOnlineSet : nuoveOnlineSet).add(p.client_id);
+  });
+  const eventiBulb = dati.pagamenti
+    .filter((p) => p.client_id && p.data_pagamento && (p.stato === "saldato" || (p.stato === "da_saldare" && Number(p.importo_saldato) > 0)) && (/bulb/i.test(p.tipo_piano || "") || /1:1/.test(p.tipo_piano || "")))
+    .map((p) => ({ cid: p.client_id, d: p.data_pagamento }));
+  eventiBulb.filter((e) => nelMese(e.d)).forEach((e) => {
+    const prima = eventiBulb.some((q) => q.cid === e.cid && q.d < `${mese}-01`);
+    (prima ? rinnBulbSet : nuoveBulbSet).add(e.cid);
+  });
+  const rinnFatti = rinnOnlineSet.size + rinnBulbSet.size;
+  const fid = calcolaFidelizzazione(dati.pagamenti, dati.pacchetti, clients, formatDataLocale(new Date()));
+  const labMese = (k) => { const [a, m] = k.split('-').map(Number); return new Date(a, m - 1, 1).toLocaleDateString('it-IT', { month: 'short', year: '2-digit' }); };
+
   const attive = clients.filter((c) => !c.archiviato);
   const nOnline = attive.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length;
   const nBulb = attive.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length;
@@ -8884,19 +12748,68 @@ function StatisticheCoach({ clients }) {
 
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi e fidelizzazione</p>
-        {attesiTot === 0 ? <p className="text-slate-400 text-sm">Nessun rinnovo previsto in questo mese.</p> : (
+        <p className="text-2xl font-semibold text-slate-800">{rinnFatti} <span className="text-base font-normal text-slate-400">rinnovi fatti questo mese</span></p>
+        <p className="text-xs text-slate-500">Coaching online: {rinnOnlineSet.size} · Bulb: {rinnBulbSet.size}{(nuoveOnlineSet.size + nuoveBulbSet.size) > 0 ? ` · Nuove partenze (primo pagamento): ${nuoveOnlineSet.size + nuoveBulbSet.size}` : ""}</p>
+        <p className="text-[11px] text-slate-400">Contati una volta per cliente al mese, anche se paga a rate. Per Bulb conta il mese in cui torna a pagare lezioni o pacchetti, non ogni singolo pagamento.</p>
+        {attesiTot === 0 ? <p className="text-slate-400 text-sm pt-1">Nessuna scadenza prevista in questo mese.</p> : (
           <>
-            <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-emerald-600 ml-2">{retention}%</span>}</p>
+            <p className="text-2xl font-semibold text-slate-800">{rinnovatiTot} <span className="text-base font-normal text-slate-400">su {attesiTot} rinnovi</span>{retention !== null && <span className="text-sm font-medium text-sky-600 ml-2">{retention}%</span>}</p>
             <p className="text-xs text-slate-500">Coaching online: {rinnovatiOnline} su {attesiOnline} · Pacchetti lezioni: {rinnovatiLez} su {completati.length}</p>
           </>
         )}
         <p className="text-xs text-slate-500 pt-1">Clienti attive: {attive.length} (online {nOnline} · Bulb {nBulb})</p>
       </Card>
+      <Sezione id="fidelizzazione" titolo="Fidelizzazione dall'inizio" tono="slate">
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-lg font-semibold text-slate-800">{fid.mediaTot}</p><p className="text-[10px] text-slate-500 leading-tight">clienti al mese (media)</p></div>
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-lg font-semibold text-slate-800">{fid.mediaOnl}</p><p className="text-[10px] text-slate-500 leading-tight">online al mese (media)</p></div>
+            <div className="bg-slate-50 rounded-lg p-2"><p className="text-lg font-semibold text-slate-800">{fid.mediaBulb}</p><p className="text-[10px] text-slate-500 leading-tight">Bulb al mese (media)</p></div>
+          </div>
+          <p className="text-xs text-slate-500">{fid.lista.length} clienti su {fid.nClientiTotali} hanno rinnovato almeno una volta. Restano con te in media {String(fid.durataMediaTutte).replace(".", ",")} mesi (chi ha rinnovato: {String(fid.durataMediaRinnovate).replace(".", ",")} mesi).</p>
+          {fid.righe.length > 1 && (
+            <div style={{ width: "100%", height: 170 }}>
+              <ResponsiveContainer>
+                <LineChart data={fid.righe.map((r) => ({ ...r, lab: labMese(r.k) }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="lab" tick={{ fontSize: 10 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 10 }} width={28} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="tot" name="Totale" stroke="#334155" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="onl" name="Online" stroke="#4F8FD0" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line type="monotone" dataKey="bulb" name="Bulb" stroke="#27466D" strokeWidth={2} dot={{ r: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr className="text-slate-400 text-left"><th className="py-1 font-medium">Mese</th><th className="font-medium text-right">Online</th><th className="font-medium text-right">Bulb</th><th className="font-medium text-right">Totale</th><th className="font-medium text-right">Rinnovi</th></tr></thead>
+              <tbody>{fid.righe.slice().reverse().map((r) => (
+                <tr key={r.k} className="border-t border-slate-100 text-slate-700"><td className="py-1">{labMese(r.k)}</td><td className="text-right">{r.onl}</td><td className="text-right">{r.bulb}</td><td className="text-right font-medium">{r.tot}</td><td className="text-right">{r.rinn}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Clienti che hanno rinnovato</p>
+            {fid.lista.length === 0 ? <p className="text-slate-400 text-sm">Ancora nessun rinnovo registrato.</p> : fid.lista.map((l) => (
+              <div key={l.cid} className="flex items-start justify-between gap-2 border-t border-slate-100 py-1.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-slate-700 font-medium">{l.nome}{l.archiviata ? " (archiviata)" : ""}</p>
+                  <p className="text-[11px] text-slate-500">{labMese(l.da)} → {l.inCorso ? "oggi" : labMese(l.a)} · {l.durata} {l.durata === 1 ? "mese" : "mesi"} con te</p>
+                </div>
+                <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-sky-100 text-sky-700 flex-shrink-0">{l.rO + l.rB} {l.rO + l.rB === 1 ? "rinnovo" : "rinnovi"}{l.rO > 0 && l.rB > 0 ? ` (${l.rO} online, ${l.rB} Bulb)` : l.rB > 0 ? " Bulb" : " online"}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400">Online: un cliente è attivo per tutta la durata coperta dai pagamenti (1, 3 o 6 mesi; i pagamenti storici senza durata contano 1 mese). Bulb: attivo nei mesi con pagamenti di lezioni o pacchetti (o con un pacchetto in corso); il rinnovo è ogni mese in cui torna a pagare dopo il primo. I rinnovi sono contati una volta per cliente e per mese.</p>
+        </div>
+      </Sezione>
 
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
         <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, più un foglio con i pagamenti raggruppati per cliente (rinnovi vicini). Senza i pagamenti in contanti.</p>
-        <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : `⬇ Scarica riepilogo ${labelMese(mese)}`}</button>
+        <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : <><Ic n="download"/> Scarica riepilogo {labelMese(mese)}</>}</button>
         {msg && <p className="text-xs text-slate-500">{msg}</p>}
       </Card>
     </div>
@@ -9087,11 +13000,12 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const cambiaStato = async (p) => {
     if (p.stato === "spesa") return; // le spese non si alternano tra saldato/da saldare
     await supabase.from("payments").update({ stato: p.stato === "saldato" ? "da_saldare" : "saldato" }).eq("id", p.id);
+    if (p.stato !== "saldato") await chiudiEventoSaldo(p.id);
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano] && p.client_id) await ricalcolaEAggiornaScadenza(p.client_id);
     carica();
   };
   const elimina = async (p) => {
-    if (!confirm(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
+    if (!await confermaApp(`Eliminare il pagamento del ${p.data_pagamento}? L'operazione non è reversibile.`)) return;
     await supabase.from("payments").delete().eq("id", p.id);
     // Se il pagamento cancellato aveva fatto avanzare la scadenza, la riallinea allo storico rimasto
     if (MESI_PER_TIPO_PAGAMENTO[p.tipo_piano]) {
@@ -9110,7 +13024,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Totale netto da inizio anno</p>
-          <p className="text-lg font-semibold text-emerald-600 mt-0.5">{totaleNetto.toFixed(2)}€</p>
+          <p className="text-lg font-semibold text-sky-600 mt-0.5">{totaleNetto.toFixed(2)}€</p>
         </Card>
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -9120,11 +13034,11 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Spese (affitto ecc.)</p>
-          <p className="text-base font-semibold text-rose-600 mt-0.5">{totaleSpese.toFixed(2)}€</p>
+          <p className="text-base font-semibold text-slate-800 mt-0.5">{totaleSpese.toFixed(2)}€</p>
         </Card>
         <Card className="p-3">
           <p className="text-[11px] text-slate-400">Da saldare</p>
-          <p className="text-base font-semibold text-amber-600 mt-0.5">{totaleDaSaldareConPrevisti.toFixed(2)}€</p>
+          <p className="text-base font-semibold text-slate-600 mt-0.5">{totaleDaSaldareConPrevisti.toFixed(2)}€</p>
           {totalePrevisti > 0 && <p className="text-[10px] text-slate-400 leading-tight">di cui {totalePrevisti.toFixed(2)}€ rinnovi previsti</p>}
         </Card>
       </div>
@@ -9132,16 +13046,16 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
         <Card className="p-4">
           <div className="flex items-baseline justify-between mb-2">
             <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Rinnovi previsti questo mese</p>
-            <span className="text-xs font-semibold text-amber-600">{totalePrevisti.toFixed(2)}€</span>
+            <span className="text-xs font-semibold text-slate-600">{totalePrevisti.toFixed(2)}€</span>
           </div>
           <div className="divide-y divide-slate-100">
             {previsti.map((v) => (
               <button key={v.chiave} onClick={() => onSelect(v.cliente.id)} className="w-full flex items-center justify-between py-2 text-left gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm text-slate-700 font-medium truncate">{v.cliente.nome} {v.cliente.cognome}</p>
+                  <p className="text-sm text-slate-700 font-medium truncate"><NomeCl c={v.cliente} /></p>
                   <p className="text-xs text-slate-400">{v.titolo}{v.data ? ` · ${v.data.split("-").reverse().join("/")}` : ""}</p>
                 </div>
-                {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-amber-600 flex-shrink-0">importo da definire</span>}
+                {v.importo != null ? <span className="text-sm font-medium text-slate-700 flex-shrink-0">{v.importo.toFixed(2)}€</span> : <span className="text-[11px] text-slate-600 flex-shrink-0">importo da definire</span>}
               </button>
             ))}
           </div>
@@ -9154,21 +13068,21 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           <div className="flex justify-between"><span className="text-slate-500">Già incassato nel mese</span><span className="font-medium text-slate-700">{incassatoMese.toFixed(2)}€</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Da saldare (già registrati)</span><span className="font-medium text-slate-700">{totaleDaSaldare.toFixed(2)}€</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Rinnovi previsti</span><span className="font-medium text-slate-700">{totalePrevisti.toFixed(2)}€</span></div>
-          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Entrate previste</span><span className="font-semibold text-emerald-600">{previsioneEntrate.toFixed(2)}€</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Spese del mese</span><span className="font-medium text-rose-600">{speseMese.toFixed(2)}€</span></div>
+          <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Entrate previste</span><span className="font-semibold text-sky-600">{previsioneEntrate.toFixed(2)}€</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Spese del mese</span><span className="font-medium text-slate-800">{speseMese.toFixed(2)}€</span></div>
           <div className="flex justify-between border-t border-slate-100 pt-1.5"><span className="text-slate-700 font-medium">Previsione netta</span><span className="font-semibold text-slate-800">{(previsioneEntrate + speseMese).toFixed(2)}€</span></div>
         </div>
-        {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-amber-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
+        {previsti.some((v) => v.importo == null) && <p className="text-[11px] text-slate-600 mt-2">Alcuni rinnovi non hanno un importo e non sono sommati.</p>}
       </Card>
 
       {senzaMetodo.length > 0 && (
-        <Card className="p-4 border border-amber-200 bg-amber-50/40">
+        <Card className="p-4 border border-slate-200 bg-slate-100/40">
           <div className="flex items-baseline justify-between mb-1">
-            <p className="text-xs uppercase tracking-wide text-amber-700 font-medium">Metodo di pagamento mancante</p>
-            <span className="text-xs font-semibold text-amber-700">{totaleSenzaMetodo.toFixed(2)}€</span>
+            <p className="text-xs uppercase tracking-wide text-slate-700 font-medium">Metodo di pagamento mancante</p>
+            <span className="text-xs font-semibold text-slate-700">{totaleSenzaMetodo.toFixed(2)}€</span>
           </div>
           <p className="text-[11px] text-slate-500 mb-2">{senzaMetodo.length} pagament{senzaMetodo.length === 1 ? "o" : "i"} senza metodo. Scegli il metodo qui e si salva subito: poi le statistiche e il file si aggiornano da soli.</p>
-          <div className="divide-y divide-amber-100">
+          <div className="divide-y divide-slate-100">
             {senzaMetodo.map(({ p, imp }) => (
               <div key={p.id} className="flex items-center gap-2 py-2">
                 <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
@@ -9202,7 +13116,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
       <button
         onClick={() => esportaProspettoGuadagniCsv({ oggi, guadagnoMese: guadagnoMeseSC, totaleNetto: totaleNettoSC, totaleIncassato: totaleIncassatoSC, totaleSpese, totaleDaSaldare: totaleDaSaldareSC + totalePrevisti, mesi: mesiSC, metodiOrdinati: metodiOrdinatiSC })}
         className="w-full border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">
-        ⬇ Scarica prospetto guadagni (CSV, senza contanti)
+        <Ic n="download"/> Scarica prospetto guadagni (CSV, senza contanti)
       </button>
 
       <NuovoPagamentoGuadagni clients={clients} onSalvato={carica} onClientiCambiati={onClientiCambiati} />
@@ -9222,7 +13136,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           {mesi.map((m) => (
             <div key={m.chiave} className="flex justify-between text-xs">
               <span className="text-slate-500 capitalize">{new Date(m.chiave + "-01").toLocaleDateString("it-IT", { month: "long", year: "numeric" })}</span>
-              <span className={`font-medium ${m.totale < 0 ? "text-rose-600" : "text-slate-700"}`}>{m.totale.toFixed(2)}€</span>
+              <span className={`font-medium ${m.totale < 0 ? "text-slate-800" : "text-slate-700"}`}>{m.totale.toFixed(2)}€</span>
             </div>
           ))}
         </div>
@@ -9251,14 +13165,14 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
               return (
                 <button key={c.id} onClick={() => onSelect(c.id)} className="w-full flex items-center justify-between py-2 text-left">
                   <div className="min-w-0">
-                    <p className="text-sm text-slate-700 font-medium truncate">{c.nome} {c.cognome}</p>
+                    <p className="text-sm text-slate-700 font-medium truncate"><NomeCl c={c} /></p>
                     <p className="text-xs text-slate-400">
                       {b?.importo_ricorrente != null ? `${Number(b.importo_ricorrente).toFixed(2)}€` : "Importo non impostato"}
                       {b?.frequenza_pagamento ? ` · ${labelFrequenza(b.frequenza_pagamento)}` : ""}
                       {b?.metodo_pagamento_abituale ? ` · ${labelMetodo(b.metodo_pagamento_abituale)}` : ""}
                     </p>
                   </div>
-                  <span className={`text-xs font-medium flex-shrink-0 ${c.stato_pacchetto === "in scadenza" ? "text-amber-600" : "text-slate-400"}`}>{c.data_scadenza?.split("-").reverse().join("/")}</span>
+                  <span className={`text-xs font-medium flex-shrink-0 ${c.stato_pacchetto === "in scadenza" ? "text-slate-600" : "text-slate-400"}`}>{c.data_scadenza?.split("-").reverse().join("/")}</span>
                 </button>
               );
             })}
@@ -9278,30 +13192,30 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
             <div key={p.id} className="flex items-center gap-2 px-3 py-2.5">
               <button onClick={() => setPagamentoAperto(p)} className="flex-1 min-w-0 text-left">
                 <p className="text-sm text-slate-700 font-medium truncate">{p.stato === "spesa" ? (p.note || "Spesa") : p.clients ? `${p.clients.nome} ${p.clients.cognome}` : "—"}</p>
-                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" ? <span className="text-amber-600"> · metodo mancante</span> : "")}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
+                <p className="text-xs text-slate-400">{p.data_pagamento} · {p.tipo_piano}{p.metodo_pagamento ? ` · ${labelMetodo(p.metodo_pagamento)}` : (p.stato === "saldato" ? <span className="text-slate-600"> · metodo mancante</span> : "")}{p.stato !== "spesa" && p.note ? ` · ${p.note}` : ""}</p>
                 {p.stato === "da_saldare" && Number(p.importo_saldato) > 0 && (
-                  <p className="text-[11px] text-emerald-600">Acconto ricevuto: {Number(p.importo_saldato).toFixed(2)}€</p>
+                  <p className="text-[11px] text-sky-600">Acconto ricevuto: {Number(p.importo_saldato).toFixed(2)}€</p>
                 )}
               </button>
               {p.importo != null ? (
                 p.stato === "da_saldare" && Number(p.importo_saldato) > 0 ? (
-                  <span className="text-sm font-medium flex-shrink-0 text-amber-600">{(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€ <span className="text-slate-300 font-normal">/ {Number(p.importo).toFixed(2)}€</span></span>
+                  <span className="text-sm font-medium flex-shrink-0 text-slate-600">{(Number(p.importo) - Number(p.importo_saldato)).toFixed(2)}€ <span className="text-slate-300 font-normal">/ {Number(p.importo).toFixed(2)}€</span></span>
                 ) : (
-                  <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-rose-600" : "text-slate-700"}`}>{Number(p.importo).toFixed(2)}€</span>
+                  <span className={`text-sm font-medium flex-shrink-0 ${p.stato === "spesa" ? "text-slate-800" : "text-slate-700"}`}>{Number(p.importo).toFixed(2)}€</span>
                 )
               ) : (
                 <ImportoMancante p={p} onSalvato={carica} />
               )}
               {p.stato && (
                 p.stato === "spesa" ? (
-                  <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-rose-100 text-rose-700">Spesa</span>
+                  <span className="flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 bg-slate-200 text-slate-800">Spesa</span>
                 ) : (
-                  <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  <button onClick={() => cambiaStato(p)} className={`flex-shrink-0 text-[10px] font-medium rounded-full px-2 py-0.5 ${p.stato === "saldato" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-700"}`}>
                     {p.stato === "saldato" ? "Saldato" : "Da saldare"}
                   </button>
                 )
               )}
-              <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-rose-500 px-0.5"><X size={13} /></button>
+              <button onClick={() => elimina(p)} className="flex-shrink-0 text-slate-300 hover:text-slate-800 px-0.5"><X size={13} /></button>
             </div>
           ))}
         </Card>
@@ -9317,6 +13231,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
 function GrigliaCompletezza({ clients, onSelect }) {
   const [nutrizione, setNutrizione] = useState({});
   const [allenamento, setAllenamento] = useState({});
+  const [azioni, setAzioni] = useState({ programma: {}, nutrizione: {}, commento: {}, messaggio: {} });
   const [caricando, setCaricando] = useState(true);
 
   useEffect(() => {
@@ -9339,6 +13254,22 @@ function GrigliaCompletezza({ clients, onSelect }) {
       });
       setAllenamento(teMap);
 
+      // Le MIE ultime azioni per cliente (data più recente di ciascuna)
+      const piuRecente = (mappa, cid, v) => { const d = v ? String(v).slice(0, 10) : ""; if (cid && d && (!mappa[cid] || d > mappa[cid])) mappa[cid] = d; };
+      const az = { programma: {}, nutrizione: {}, commento: {}, messaggio: {} };
+      try {
+        const gg = await leggiTutto(() => supabase.from("training_days").select("id, client_id, created_at, scheda_archiviata").order("id"));
+        const attivi = new Set();
+        gg.forEach((g) => { if (!g.scheda_archiviata) { attivi.add(g.id); piuRecente(az.programma, g.client_id, g.created_at); } });
+        const ee = await leggiTutto(() => supabase.from("training_exercises").select("id, client_id, training_day_id, created_at").order("id"));
+        ee.forEach((x) => { if (attivi.has(x.training_day_id)) piuRecente(az.programma, x.client_id, x.created_at); });
+      } catch (e) { /* ignora */ }
+      (nu || []).forEach((r) => { piuRecente(az.nutrizione, r.client_id, r.data_aggiornamento); });
+      try { const { data: np } = await supabase.from("nutrition_plans").select("client_id, created_at"); (np || []).forEach((r) => piuRecente(az.nutrizione, r.client_id, r.created_at)); } catch (e) { /* ignora */ }
+      try { const { data: cc } = await supabase.from("commenti_check").select("client_id, created_at, updated_at"); (cc || []).forEach((r) => { piuRecente(az.commento, r.client_id, r.created_at); piuRecente(az.commento, r.client_id, r.updated_at); }); } catch (e) { /* ignora */ }
+      try { const { data: mm } = await supabase.from("messaggi").select("client_id, created_at").eq("mittente", "coach"); (mm || []).forEach((r) => piuRecente(az.messaggio, r.client_id, r.created_at)); } catch (e) { /* ignora */ }
+      setAzioni(az);
+
       setCaricando(false);
     })();
   }, []);
@@ -9354,7 +13285,7 @@ function GrigliaCompletezza({ clients, onSelect }) {
   const Pallino = ({ stato }) => {
     // stato: true = presente, false = mancante, null = non applicabile a questo cliente
     if (stato === null) return <span className="text-slate-300 text-xs">n/d</span>;
-    return <span className={stato ? "text-emerald-500" : "text-rose-400"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
+    return <span className={stato ? "text-sky-500" : "text-slate-600"} style={{ fontSize: 15, lineHeight: 1 }}>{stato ? "●" : "○"}</span>;
   };
 
   // Solo clienti online/ibrido: i clienti BULB (in presenza) non seguono scadenze a cadenza
@@ -9371,9 +13302,11 @@ function GrigliaCompletezza({ clients, onSelect }) {
             <tr className="bg-slate-50 text-slate-500 text-left">
               <th className="sticky left-0 bg-slate-50 px-3 py-2 font-medium whitespace-nowrap">Cliente</th>
               <th className="px-2 py-2 font-medium text-center">Scadenza</th>
-              <th className="px-2 py-2 font-medium text-center">Scheda</th>
-              <th className="px-2 py-2 font-medium text-center">Log allen.</th>
+              <th className="px-2 py-2 font-medium text-center">Programma</th>
               <th className="px-2 py-2 font-medium text-center">Nutrizione</th>
+              <th className="px-2 py-2 font-medium text-center">Commento check</th>
+              <th className="px-2 py-2 font-medium text-center">Messaggio</th>
+              <th className="px-2 py-2 font-medium text-center">Log cliente</th>
               <th className="px-2 py-2 font-medium text-center">Prossimo check</th>
             </tr>
           </thead>
@@ -9393,22 +13326,24 @@ function GrigliaCompletezza({ clients, onSelect }) {
                     ) : c.data_scadenza ? (
                       <span className="text-slate-600 whitespace-nowrap">{formattaDataBreve(c.data_scadenza)}</span>
                     ) : (
-                      <span className="text-rose-400">○ mancante</span>
+                      <span className="text-slate-600">○ mancante</span>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-center"><Pallino stato={schedaStato} /></td>
+                  {[azioni.programma[c.id] || (schedaStato ? "link" : null), nutData || azioni.nutrizione[c.id], azioni.commento[c.id], azioni.messaggio[c.id]].map((d, i) => (
+                    <td key={i} className="px-2 py-2 text-center">
+                      <Pallino stato={!!d} />
+                      {d && d !== "link" && <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(d).slice(0, 5)} · {giorniDa(d)}g fa</div>}
+                      {d === "link" && <div className="text-[10px] text-slate-400 whitespace-nowrap">link/PDF</div>}
+                    </td>
+                  ))}
                   <td className="px-2 py-2 text-center">
                     <Pallino stato={!!logData} />
-                    {logData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(logData)}g fa</div>}
-                  </td>
-                  <td className="px-2 py-2 text-center">
-                    <Pallino stato={!!nutData} />
-                    {nutData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{giorniDa(nutData)}g fa</div>}
+                    {logData && <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(logData).slice(0, 5)} · {giorniDa(logData)}g fa</div>}
                   </td>
                   <td className="px-2 py-2 text-center">
                     {c.prossimo_check ? (
                       <>
-                        <span className={`font-medium whitespace-nowrap ${giorniMancantiCheck < 0 ? "text-rose-500" : giorniMancantiCheck <= 3 ? "text-amber-500" : "text-slate-600"}`}>
+                        <span className={`font-medium whitespace-nowrap ${giorniMancantiCheck < 0 ? "text-slate-800" : giorniMancantiCheck <= 3 ? "text-slate-500" : "text-slate-600"}`}>
                           {giorniMancantiCheck < 0 ? `${Math.abs(giorniMancantiCheck)}g di ritardo` : giorniMancantiCheck === 0 ? "oggi" : `tra ${giorniMancantiCheck}g`}
                         </span>
                         <div className="text-[10px] text-slate-400 whitespace-nowrap">{formattaDataBreve(c.prossimo_check)}</div>
@@ -9421,15 +13356,16 @@ function GrigliaCompletezza({ clients, onSelect }) {
               );
             })}
             {righe.length === 0 && (
-              <tr><td colSpan={6} className="text-center text-slate-400 py-6">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
+              <tr><td colSpan={8} className="text-center text-slate-400 py-6">Nessun cliente corrisponde alla ricerca/filtro.</td></tr>
             )}
           </tbody>
         </table>
       </div>
       <div className="flex flex-wrap gap-3 text-[11px] text-slate-400 px-3 py-2 border-t border-slate-100">
-        <span className="flex items-center gap-1 text-emerald-500">● presente</span>
-        <span className="flex items-center gap-1 text-rose-400">○ mancante</span>
+        <span className="flex items-center gap-1 text-sky-500">● presente</span>
+        <span className="flex items-center gap-1 text-slate-600">○ mancante</span>
         <span>n/d = non si applica (pacchetto senza scadenza fissa)</span>
+        <span>Sotto il pallino: data e giorni dall'ultima mia azione (programma inserito, piano nutrizione, commento al check, messaggio). “Log cliente” = ultimo allenamento segnato da lei.</span>
       </div>
     </Card>
   );
@@ -9464,7 +13400,6 @@ function CandidatureCoach({ onClientiCambiati }) {
   };
   const etichettaCondizione = (value) => (value === "altro" ? "Altro" : CONDIZIONI_SALUTE.find((c) => c.value === value)?.label || value);
   const ETICHETTE_SERVIZIO = { online: "Online", presenza: "In presenza", ibrido: "Ibrido" };
-  const ETICHETTE_OBIETTIVO = { definizione: "Definizione", mantenimento: "Ricomposizione corporea", massa: "Aumento massa" };
   const ETICHETTE_LIVELLO = { base: "Alle prime armi", intermedia: "Intermedia", avanzata: "Avanzata" };
   const ETICHETTE_ATTIVITA = { sedentario: "Sedentaria", intermedio: "Moderatamente attiva", attivo: "Molto attiva" };
 
@@ -9491,7 +13426,7 @@ function CandidatureCoach({ onClientiCambiati }) {
         <Card key={c.id} className="p-4 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="font-medium text-slate-800">{c.nome} {c.cognome}</p>
+              <p className="font-medium text-slate-800"><NomeCl c={c} /></p>
               <p className="text-xs text-slate-500">
                 {calcolaEta(c.data_nascita) ? `${calcolaEta(c.data_nascita)} anni · ` : ""}
                 {ETICHETTE_SERVIZIO[c.tipo_servizio] || c.tipo_servizio}
@@ -9499,7 +13434,7 @@ function CandidatureCoach({ onClientiCambiati }) {
               </p>
             </div>
             {c.stato === "contattata" && <Badge className="bg-sky-50 text-sky-600">Contattata</Badge>}
-            {c.stato === "convertita" && <Badge className="bg-emerald-50 text-emerald-600">Diventata cliente</Badge>}
+            {c.stato === "convertita" && <Badge className="bg-sky-50 text-sky-600">Diventata cliente</Badge>}
             {c.stato === "archiviata" && <Badge className="bg-slate-100 text-slate-500">Archiviata</Badge>}
           </div>
 
@@ -9509,7 +13444,7 @@ function CandidatureCoach({ onClientiCambiati }) {
               {c.telefono ? " · " : ""}
               {c.telefono && <a href={`tel:${c.telefono}`} className="text-sky-600">{c.telefono}</a>}
             </p>
-            {c.obiettivo_attuale && <p>Obiettivo: {ETICHETTE_OBIETTIVO[c.obiettivo_attuale] || c.obiettivo_attuale}</p>}
+            {c.obiettivo_attuale && <p>Obiettivo: {labelObiettivo(c.obiettivo_attuale)}</p>}
             {c.livello_allenamento && <p>Livello: {ETICHETTE_LIVELLO[c.livello_allenamento] || c.livello_allenamento}</p>}
             {c.livello_attivita && <p>Attività quotidiana: {ETICHETTE_ATTIVITA[c.livello_attivita] || c.livello_attivita}</p>}
             {(c.altezza_cm || c.peso_kg) && (
@@ -9518,7 +13453,7 @@ function CandidatureCoach({ onClientiCambiati }) {
             {c.citta && <p>Città: {c.citta}</p>}
             {c.tipo_lavoro && <p>Lavoro: {c.tipo_lavoro}</p>}
             {c.problematiche_salute?.length > 0 && (
-              <p className="text-amber-700">⚠ {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
+              <p className="text-slate-700"><Ic n="warn"/> {c.problematiche_salute.map(etichettaCondizione).join(", ")}{c.problematiche_salute_note ? ` — ${c.problematiche_salute_note}` : ""}</p>
             )}
             {c.note && <p className="italic text-slate-500">"{c.note}"</p>}
             <p className="text-[11px] text-slate-400">Candidatura del {new Date(c.created_at).toLocaleDateString("it-IT")}</p>
@@ -9577,7 +13512,7 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
       altezza_cm: candidatura.altezza_cm || null, peso_kg: candidatura.peso_kg || null,
       citta: candidatura.citta || null, tipo_lavoro: candidatura.tipo_lavoro || null,
       livello_attivita: candidatura.livello_attivita || null, livello_allenamento: candidatura.livello_allenamento || null,
-      obiettivo_attuale: candidatura.obiettivo_attuale || null, sede_abituale: candidatura.sede_abituale || null,
+      obiettivo_attuale: normalizzaObiettivo(candidatura.obiettivo_attuale), sede_abituale: candidatura.sede_abituale || null,
       problematiche_salute: candidatura.problematiche_salute || null,
       problematiche_salute_note: candidatura.problematiche_salute_note || null,
       note_particolari: candidatura.note || null,
@@ -9630,7 +13565,7 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
           <option value="gratuito">gratuito</option>
         </select>
       </div>
-      {errore && <p className="text-rose-500 text-xs">{errore}</p>}
+      {errore && <p className="text-slate-800 text-xs">{errore}</p>}
       <div className="flex gap-2">
         <button onClick={salva} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Crea cliente"}</button>
         <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
@@ -9639,8 +13574,1757 @@ function AccettaCandidaturaForm({ candidatura, onCreato, onAnnulla }) {
   );
 }
 
+function CercaClienti({ clienti, onSelect }) {
+  const [q, setQ] = useState("");
+  const t = q.trim().toLowerCase();
+  const [gruppi, setGruppi] = useState([]);
+  const [gruppoAperto, setGruppoAperto] = useState(null);
+  useEffect(() => { (async () => { try { const { data } = await supabase.from("gruppi_bulb").select("*").order("created_at"); setGruppi(data || []); } catch (e) { /* ignora */ } })(); }, []);
+  const nomiGruppo = (g) => clienti.filter((c) => c.gruppo_id === g.id).map((c) => c.nome);
+  const gruppiTrovati = t ? gruppi.filter((g) => "gruppo".startsWith(t) || t.startsWith("gruppo") && (`${g.nome} ${nomiGruppo(g).join(" ")}`.toLowerCase().includes(t) || "gruppo".includes(t)) || `${g.nome} ${nomiGruppo(g).join(" ")}`.toLowerCase().includes(t)) : [];
+  const risultati = t ? clienti.filter((c) => `${c.nome} ${c.cognome || ""}`.toLowerCase().includes(t)).slice(0, 8) : [];
+  const [aperta, setAperta] = useState(false);
+  const leggiRecenti = () => { try { return JSON.parse(localStorage.getItem("ultime_cercate") || "[]"); } catch (e) { return []; } };
+  const [recenti, setRecenti] = useState(leggiRecenti);
+  const recentiClienti = recenti.map((id) => clienti.find((c) => c.id === id)).filter(Boolean).slice(0, 3);
+  const scegli = (c) => {
+    const nuovi = [c.id, ...recenti.filter((id) => id !== c.id)].slice(0, 3);
+    setRecenti(nuovi);
+    try { localStorage.setItem("ultime_cercate", JSON.stringify(nuovi)); } catch (e) { /* ignora */ }
+    onSelect(c.id); setQ(""); setAperta(false);
+  };
+  return (
+    <div className="relative z-30">
+      <div className="bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2">
+        <Search size={17} strokeWidth={1.75} className="text-sky-500 flex-shrink-0" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} onFocus={() => setAperta(true)} onBlur={() => setTimeout(() => setAperta(false), 150)} placeholder="Cerca una cliente..." className="flex-1 min-w-0 text-sm text-slate-800 bg-transparent outline-none" />
+        {q && <button onClick={() => setQ("")} className="text-slate-400 text-sm px-1" aria-label="Cancella">×</button>}
+      </div>
+      {!t && aperta && recentiClienti.length > 0 && (
+        <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          <p className="px-4 pt-2.5 pb-1 text-[10px] uppercase tracking-wide text-slate-400 font-medium">Cercate di recente</p>
+          {recentiClienti.map((c) => (
+            <button key={c.id} onMouseDown={(e) => e.preventDefault()} onClick={() => scegli(c)} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100">
+              <span className="text-sm text-slate-800">{c.nome} {c.cognome}</span>
+              <span className="text-[11px] text-slate-400 capitalize">{c.tipo_servizio || ""}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {gruppoAperto && <SessioneGruppo gruppo={gruppoAperto} onClose={() => setGruppoAperto(null)} onChanged={() => {}} onSelect={onSelect} />}
+      {t && (
+        <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+          {gruppiTrovati.map((g) => (
+            <button key={g.id} onMouseDown={(e) => e.preventDefault()} onClick={() => { setGruppoAperto(g); setQ(""); setAperta(false); }} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0" style={{ background: "#F5FAFE" }}>
+              <span className="text-sm font-medium" style={{ color: "#27466D" }}><Ic n="users"/> {g.nome}</span>
+              <span className="text-[11px] text-slate-500 truncate ml-2">{nomiGruppo(g).join(", ")}</span>
+            </button>
+          ))}
+          {risultati.length === 0 && gruppiTrovati.length === 0 && <p className="px-4 py-3 text-sm text-slate-400">Nessuna cliente trovata</p>}
+          {risultati.map((c) => (
+            <button key={c.id} onMouseDown={(e) => e.preventDefault()} onClick={() => scegli(c)} className="w-full flex items-center justify-between px-4 py-2.5 text-left border-t border-slate-100 first:border-0">
+              <span className="text-sm text-slate-800">{c.nome} {c.cognome}</span>
+              <span className="text-[11px] text-slate-400 capitalize">{c.tipo_servizio || ""}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* GRUPPI BULB — più clienti che si allenano insieme, in una schermata */
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* VALUTAZIONE BULB — anamnesi, test funzionali, restrizioni, foto     */
+/* ------------------------------------------------------------------ */
+const TEST_BASE = ["Overhead squat", "Mobilità caviglia", "Mobilità anche", "Mobilità spalle", "Plank / core", "Equilibrio monopodalico"];
+const ESITI_TEST = [["ok", "ok"], ["migliorare", "da migliorare"], ["limite", "limite"]];
+const RANGO_ESITO = { ok: 2, migliorare: 1, limite: 0 };
+const SLOT_FOTO_VAL = [["frontale", "Frontale"], ["laterale_dx", "Laterale dx"], ["posteriore", "Posteriore"], ["laterale_sx", "Laterale sx"]];
+const fmtDataIt = (d) => (d ? d.split("-").reverse().join("/") : "");
+
+function useUrlFirmato(path) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let vivo = true; setUrl(null);
+    if (!path) return;
+    supabase.storage.from("progress-photos").createSignedUrl(path, 3600).then(({ data }) => { if (vivo) setUrl(data?.signedUrl || null); });
+    return () => { vivo = false; };
+  }, [path]);
+  return url;
+}
+
+function FotoValutazione({ path, etichetta, onFile, onRimuovi, sola = false }) {
+  const url = useUrlFirmato(path);
+  return (
+    <div>
+      <div className="aspect-[3/4] rounded-xl overflow-hidden flex items-center justify-center text-center" style={{ background: "#F5FAFE", border: path ? "1px solid #C9E0F7" : "1.5px dashed #C9E0F7" }}>
+        {path ? (url ? <img src={url} alt={etichetta} className="w-full h-full object-cover" /> : <span className="text-[10px] text-slate-400">carico…</span>)
+          : sola ? <span className="text-[10px] text-slate-400">nessuna foto</span>
+          : <label className="text-[11px] cursor-pointer px-1" style={{ color: "#3F78B3" }}>+ {etichetta}<input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} /></label>}
+      </div>
+      <p className="text-[10px] text-slate-500 text-center mt-1">{etichetta}{path && !sola && <button onClick={onRimuovi} className="ml-1 underline text-slate-400">togli</button>}</p>
+    </div>
+  );
+}
+
+function Box({ titolo: t, children }) { return <Card className="p-3 space-y-2"><p className="text-xs uppercase tracking-wide text-slate-500 font-medium">{t}</p>{children}</Card>; }
+
+function ModificaValutazione({ client, val, nPrecedenti, onFatto, onAnnulla }) {
+  const [titolo, setTitolo] = useState(val?.titolo || (nPrecedenti === 0 ? "1ª valutazione" : `Rivalutazione ${nPrecedenti}`));
+  const [data, setData] = useState(val?.data || formatDataLocale(new Date()));
+  const [an, setAn] = useState({ infortuni: "", patologie: "", stile: "", obiettivi: "", ...(val?.anamnesi || {}) });
+  const [test, setTest] = useState(() => {
+    const salvati = val?.test || [];
+    return salvati.length ? salvati : TEST_BASE.map((nome) => ({ nome, esito: null, nota: "" }));
+  });
+  const [restr, setRestr] = useState(val?.restrizioni || []);
+  const [nuovaRestr, setNuovaRestr] = useState("");
+  const [lavorare, setLavorare] = useState(val?.lavorare || "");
+  const [note, setNote] = useState(val?.note || "");
+  const [foto, setFoto] = useState(val?.foto || {});
+  const [nuovoTest, setNuovoTest] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [errore, setErrore] = useState("");
+  const campo = (label, k, ph) => (
+    <label className="block text-xs text-slate-500">{label}
+      <textarea value={an[k]} onChange={(e) => setAn({ ...an, [k]: e.target.value })} rows={2} placeholder={ph} className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800" />
+    </label>
+  );
+  const caricaFoto = async (slot, file) => {
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `${client.id}/valutazione/${data}-${slot}-${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from("progress-photos").upload(path, file, { upsert: true });
+      if (error) throw error;
+      setFoto((f) => ({ ...f, [slot]: path }));
+    } catch (e) { setErrore("Non siamo riusciti a caricare la foto, riprova 🫶🏻"); }
+  };
+  const salva = async () => {
+    setSalvando(true); setErrore("");
+    const riga = { client_id: client.id, data, titolo: titolo.trim() || null, anamnesi: an, test, restrizioni: restr, lavorare: lavorare.trim() || null, note: note.trim() || null, foto };
+    const { error } = val ? await supabase.from("valutazioni_bulb").update(riga).eq("id", val.id) : await supabase.from("valutazioni_bulb").insert(riga);
+    setSalvando(false);
+    if (error) { setErrore("Non siamo riusciti a salvare, riprova."); return; }
+    onFatto();
+  };
+  return (
+    <div className="space-y-3">
+      <button onClick={onAnnulla} className="text-sm font-semibold flex items-center gap-1" style={{ color: "#3F78B3" }}><ArrowLeft size={16} /> Valutazioni</button>
+      <div className="grid grid-cols-2 gap-3">
+        <input value={titolo} onChange={(e) => setTitolo(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800" />
+        <InputData value={data} onChange={(e) => setData(e.target.value)} />
+      </div>
+      <Box titolo="Anamnesi">
+        {campo("Infortuni e dolori", "infortuni", "Dolori ricorrenti, infortuni passati, zone sensibili…")}
+        {campo("Interventi, patologie, farmaci", "patologie", "Se non ce ne sono, lascia vuoto")}
+        {campo("Lavoro, sonno, stress, attività", "stile", "Es. ufficio 8h, sonno 6h, cammina poco…")}
+        {campo("Obiettivi e aspettative", "obiettivi", "Cosa vuole ottenere")}
+      </Box>
+      <Box titolo="Test funzionali">
+        {test.map((t, i) => (
+          <div key={i} className="py-1.5" style={{ borderTop: i ? "1px solid #EEF3F8" : "none" }}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-sm text-slate-700">{t.nome}</span>
+              <div className="flex gap-1">
+                {ESITI_TEST.map(([k, l]) => <button key={k} onClick={() => setTest(test.map((x, j) => (j === i ? { ...x, esito: x.esito === k ? null : k } : x)))} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: t.esito === k ? "#27466D" : "#fff", color: t.esito === k ? "#fff" : "#3F78B3", border: `1.5px solid ${t.esito === k ? "#27466D" : "#C9E0F7"}` }}>{l}</button>)}
+              </div>
+            </div>
+            <input value={t.nota || ""} onChange={(e) => setTest(test.map((x, j) => (j === i ? { ...x, nota: e.target.value } : x)))} placeholder="nota (facoltativa)" className="w-full mt-1 text-xs border-b border-slate-100 py-1 text-slate-600 focus:outline-none" />
+          </div>
+        ))}
+        <div className="flex gap-2 pt-1">
+          <input value={nuovoTest} onChange={(e) => setNuovoTest(e.target.value)} placeholder="+ aggiungi un test tuo" className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+          <button onClick={() => { if (!nuovoTest.trim()) return; setTest([...test, { nome: nuovoTest.trim(), esito: null, nota: "" }]); setNuovoTest(""); }} className="px-3 rounded-lg text-sm font-semibold text-white" style={{ background: "#27466D" }}>Aggiungi</button>
+        </div>
+      </Box>
+      <Box titolo="Restrizioni">
+        <p className="text-xs text-slate-500">Cose da evitare o limitare: le vedrai sempre nella scheda del gruppo e nell'allenamento della cliente.</p>
+        <div className="flex flex-wrap gap-1.5">
+          {restr.map((r, i) => <button key={i} onClick={() => setRestr(restr.filter((_, j) => j !== i))} className="px-3 py-1 rounded-full text-xs font-semibold text-white" style={{ background: "#27466D" }}>{r} <Ic n="x" bare size={11} /></button>)}
+        </div>
+        <div className="flex gap-2">
+          <input value={nuovaRestr} onChange={(e) => setNuovaRestr(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && nuovaRestr.trim()) { setRestr([...restr, nuovaRestr.trim()]); setNuovaRestr(""); } }} placeholder="Es. Spalla dx: no overhead" className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+          <button onClick={() => { if (!nuovaRestr.trim()) return; setRestr([...restr, nuovaRestr.trim()]); setNuovaRestr(""); }} className="px-3 rounded-lg text-sm font-semibold text-white" style={{ background: "#27466D" }}>Aggiungi</button>
+        </div>
+      </Box>
+      <Box titolo="Su cosa lavorare">
+        <textarea value={lavorare} onChange={(e) => setLavorare(e.target.value)} rows={3} placeholder="Priorità: 1. … 2. … 3. …" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800" />
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Altre note del primo incontro" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800" />
+      </Box>
+      <Box titolo="Foto">
+        <div className="grid grid-cols-4 gap-2">
+          {SLOT_FOTO_VAL.map(([k, l]) => <FotoValutazione key={k} path={foto[k]} etichetta={l} onFile={(f) => caricaFoto(k, f)} onRimuovi={() => setFoto((x) => { const n = { ...x }; delete n[k]; return n; })} />)}
+        </div>
+      </Box>
+      {errore && <p className="text-xs text-slate-700">{errore}</p>}
+      <button onClick={salva} disabled={salvando} className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{salvando ? "Salvo…" : "Salva valutazione"}</button>
+    </div>
+  );
+}
+
+function ConfrontoValutazioni({ valutazioni }) {
+  const ordinate = [...valutazioni].sort((a, b) => a.data.localeCompare(b.data) || (a.created_at || "").localeCompare(b.created_at || ""));
+  const [ia, setIa] = useState(0);
+  const [ib, setIb] = useState(ordinate.length - 1);
+  const A = ordinate[ia], B = ordinate[ib];
+  if (!A || !B) return null;
+  const nomi = [...new Set([...(A.test || []).map((t) => t.nome), ...(B.test || []).map((t) => t.nome)])];
+  const es = (v, n) => (v.test || []).find((t) => t.nome === n)?.esito || null;
+  const eti = (k) => (k ? (ESITI_TEST.find((e) => e[0] === k) || [])[1] : "—");
+  const righe = nomi.map((n) => ({ n, a: es(A, n), b: es(B, n) })).filter((r) => r.a || r.b);
+  const selettore = (val, set) => (
+    <select value={val} onChange={(e) => set(Number(e.target.value))} className="flex-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white text-slate-700">
+      {ordinate.map((v, i) => <option key={v.id} value={i}>{v.titolo || "Valutazione"} · {fmtDataIt(v.data)}</option>)}
+    </select>
+  );
+  const slotConFoto = SLOT_FOTO_VAL.filter(([k]) => A.foto?.[k] || B.foto?.[k]);
+  const migliorati = righe.filter((r) => r.a != null && r.b != null && RANGO_ESITO[r.b] > RANGO_ESITO[r.a]).length;
+  return (
+    <div className="space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium px-1">Confronto prima / dopo</p>
+      <div className="flex gap-2 items-center">{selettore(ia, setIa)}<span className="text-slate-400 text-xs">↔</span>{selettore(ib, setIb)}</div>
+      {slotConFoto.map(([k, l]) => (
+        <Card key={k} className="p-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-2">Foto · {l.toLowerCase()}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div><FotoValutazione path={A.foto?.[k]} etichetta={`Prima · ${fmtDataIt(A.data)}`} sola /></div>
+            <div><FotoValutazione path={B.foto?.[k]} etichetta={`Dopo · ${fmtDataIt(B.data)}`} sola /></div>
+          </div>
+        </Card>
+      ))}
+      <Card className="p-3">
+        <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Test funzionali{righe.length ? ` · ${migliorati} migliorat${migliorati === 1 ? "o" : "i"}` : ""}</p>
+        {righe.length === 0 && <p className="text-sm text-slate-400">Nessun test compilato in queste due valutazioni.</p>}
+        {righe.map((r) => {
+          const su = r.a != null && r.b != null && RANGO_ESITO[r.b] > RANGO_ESITO[r.a], giu = r.a != null && r.b != null && RANGO_ESITO[r.b] < RANGO_ESITO[r.a];
+          return (
+            <div key={r.n} className="flex items-center justify-between py-1.5 text-sm" style={{ borderTop: "1px solid #EEF3F8" }}>
+              <span className="text-slate-700">{r.n}</span>
+              <span className="text-slate-600">{eti(r.a)} → <span className="font-semibold" style={{ color: "#27466D" }}>{eti(r.b)}{su ? " ↑" : giu ? " ↓" : ""}</span></span>
+            </div>
+          );
+        })}
+      </Card>
+      {(A.restrizioni?.length > 0 || B.restrizioni?.length > 0) && (
+        <Card className="p-3 space-y-1">
+          <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Restrizioni</p>
+          <p className="text-xs text-slate-600">Prima: {(A.restrizioni || []).join(" · ") || "nessuna"}</p>
+          <p className="text-xs text-slate-600">Dopo: {(B.restrizioni || []).join(" · ") || "nessuna"}</p>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function ValutazioniBulb({ client }) {
+  const [lista, setLista] = useState(null);
+  const [vista, setVista] = useState("elenco"); // "elenco" | "nuova" | id valutazione
+  const carica = async () => {
+    const { data } = await supabase.from("valutazioni_bulb").select("*").eq("client_id", client.id).order("data").order("created_at");
+    setLista(data || []);
+  };
+  useEffect(() => { carica(); }, [client.id]);
+  if (!lista) return <Spinner />;
+  if (vista === "nuova") return <ModificaValutazione client={client} val={null} nPrecedenti={lista.length} onAnnulla={() => setVista("elenco")} onFatto={() => { setVista("elenco"); carica(); }} />;
+  const aperta = lista.find((v) => v.id === vista);
+  if (aperta) return <ModificaValutazione client={client} val={aperta} nPrecedenti={lista.length} onAnnulla={() => setVista("elenco")} onFatto={() => { setVista("elenco"); carica(); }} />;
+  const elimina = async (v) => {
+    if (!await confermaApp(`Elimino "${v.titolo || "valutazione"}" del ${fmtDataIt(v.data)}? Non si può annullare.`)) return;
+    await supabase.from("valutazioni_bulb").delete().eq("id", v.id);
+    carica();
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">Anamnesi, test funzionali, restrizioni e foto del primo incontro e delle rivalutazioni. Sono visibili solo a te.</p>
+      {[...lista].reverse().map((v) => {
+        const nTest = (v.test || []).filter((t) => t.esito).length;
+        return (
+          <Card key={v.id} className="p-3">
+            <div className="flex items-start justify-between gap-2">
+              <button onClick={() => setVista(v.id)} className="text-left flex-1 min-w-0">
+                <p className="font-semibold text-slate-800">{v.titolo || "Valutazione"} <span className="text-xs font-medium text-slate-500">· {fmtDataIt(v.data)}</span></p>
+                <p className="text-xs text-slate-500 mt-0.5">{[`${(v.restrizioni || []).length} restrizioni`, `${nTest} test compilati`, `${Object.keys(v.foto || {}).length} foto`].join(" · ")}</p>
+                {(v.restrizioni || []).length > 0 && <p className="text-xs mt-1" style={{ color: "#27466D" }}><Ic n="warn"/> {(v.restrizioni || []).join(" · ")}</p>}
+              </button>
+              <button onClick={() => elimina(v)} className="text-xs text-slate-400 underline">elimina</button>
+            </div>
+          </Card>
+        );
+      })}
+      {lista.length === 0 && <Card className="p-6 text-center text-slate-400 text-sm">Ancora nessuna valutazione: inizia dal primo incontro ✨</Card>}
+      <button onClick={() => setVista("nuova")} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>{lista.length === 0 ? "+ Prima valutazione" : "+ Nuova rivalutazione"}</button>
+      {lista.length >= 2 && <ConfrontoValutazioni valutazioni={lista} />}
+    </div>
+  );
+}
+
+// Restrizioni dell'ultima valutazione: sempre sotto gli occhi in sala
+function RestrizioniCliente({ clientId }) {
+  const [v, setV] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const { data } = await supabase.from("valutazioni_bulb").select("restrizioni, lavorare, data").eq("client_id", clientId).order("data", { ascending: false }).order("created_at", { ascending: false }).limit(1);
+        if (vivo) setV(data?.[0] || null);
+      } catch (e) { /* ignora */ }
+    })();
+    return () => { vivo = false; };
+  }, [clientId]);
+  if (!v || (!(v.restrizioni || []).length && !v.lavorare)) return null;
+  return (
+    <div className="rounded-xl px-3 py-2 text-xs space-y-1" style={{ background: "#E1EEFB", border: "1px solid #C9E0F7", color: "#27466D" }}>
+      {(v.restrizioni || []).length > 0 && <p className="font-semibold"><Ic n="warn"/> {(v.restrizioni || []).join(" · ")}</p>}
+      {v.lavorare && <p><span className="font-semibold">Da lavorare:</span> {v.lavorare}</p>}
+    </div>
+  );
+}
+
+// Importa un programma da CSV su una cliente (usato per i gruppi: stesso file per tutte).
+// Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note, tipo, esecuzione (+ "scheda" facoltativa)
+async function importaCsvPerCliente(righe, clientId, sostituisci) {
+  const header = righe[0].map((h) => h.trim().toLowerCase());
+  const idx = {
+    scheda: header.indexOf("scheda"), giorno: header.indexOf("giorno"), esercizio: header.indexOf("esercizio"),
+    serie: header.indexOf("serie"), ripetizioni: header.indexOf("ripetizioni"), recupero: header.indexOf("recupero"),
+    tecnica: header.indexOf("tecnica"), note: header.indexOf("note"), tipo: header.indexOf("tipo"), esecuzione: header.indexOf("esecuzione"),
+  };
+  if ((idx.giorno === -1 && idx.tipo === -1) || idx.esercizio === -1) throw new Error('Il file deve avere almeno le colonne "giorno" e "esercizio" nella prima riga.');
+  const { data: tuttiGiorni } = await supabase.from("training_days").select("*").eq("client_id", clientId);
+  let giorniLocali = (tuttiGiorni || []).filter((g) => !g.scheda_archiviata);
+  if (sostituisci && giorniLocali.length) {
+    const numeri = (tuttiGiorni || []).map((g) => parseInt((g.scheda_archiviata || "").replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+    const etichetta = "T." + ((numeri.length ? Math.max(...numeri) : 0) + 1);
+    await supabase.from("training_days").update({ scheda_archiviata: etichetta }).in("id", giorniLocali.map((g) => g.id));
+    giorniLocali = [];
+  }
+  const cacheGiorni = {};
+  let giorniCreati = 0, eserciziCreati = 0;
+  const { data: prepEsistenti } = await supabase.from("training_exercises").select("id, nome, tipo").eq("client_id", clientId).is("training_day_id", null).eq("tipo", "mobilita");
+  const prepLista = [...(prepEsistenti || [])];
+  for (let r = 1; r < righe.length; r++) {
+    const riga = righe[r];
+    if (riga.every((v) => !v || !v.trim())) continue;
+    const schedaVal = idx.scheda !== -1 ? (riga[idx.scheda] || "").trim() : "";
+    const giornoVal = idx.giorno !== -1 ? (riga[idx.giorno] || "").trim() : "";
+    const nomeEsercizio = (riga[idx.esercizio] || "").trim();
+    const tipoGrezzo = idx.tipo !== -1 ? (riga[idx.tipo] || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "") : "";
+    const tipoRiga = tipoGrezzo.startsWith("mobil") ? "mobilita" : tipoGrezzo.startsWith("attiv") ? "attivazione" : "forza";
+    if (!nomeEsercizio) continue;
+    if (tipoRiga === "mobilita") {
+      const campi = { note: idx.note !== -1 ? (riga[idx.note] || "").trim() || null : null, esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null };
+      const gia = prepLista.find((x) => x.nome.trim().toLowerCase() === nomeEsercizio.toLowerCase());
+      if (gia) await supabase.from("training_exercises").update(campi).eq("id", gia.id);
+      else {
+        const { data: nuova } = await supabase.from("training_exercises").insert({ client_id: clientId, training_day_id: null, nome: nomeEsercizio, tipo: tipoRiga, ordine: prepLista.length + 1, ...campi }).select("id, nome, tipo").single();
+        if (nuova) prepLista.push(nuova);
+      }
+      continue;
+    }
+    if (!giornoVal) continue;
+    const nomeGiornoCompleto = schedaVal ? `${schedaVal} - ${giornoVal}` : giornoVal;
+    let giornoId = cacheGiorni[nomeGiornoCompleto];
+    if (!giornoId) {
+      const esistente = giorniLocali.find((g) => g.nome === nomeGiornoCompleto);
+      if (esistente) giornoId = esistente.id;
+      else {
+        if (giorniLocali.length >= 30) continue;
+        const { data: nuovo } = await supabase.from("training_days").insert({ client_id: clientId, nome: nomeGiornoCompleto, ordine: giorniLocali.length + 1 }).select().single();
+        if (!nuovo) continue;
+        giorniLocali.push(nuovo); giornoId = nuovo.id; giorniCreati++;
+      }
+      cacheGiorni[nomeGiornoCompleto] = giornoId;
+    }
+    const { data: eserciziEsistenti } = await supabase.from("training_exercises").select("nome").eq("training_day_id", giornoId);
+    const nomiEsistenti = (eserciziEsistenti || []).map((e) => e.nome);
+    if (nomiEsistenti.includes(nomeEsercizio)) continue;
+    const noteParti = [];
+    if (idx.recupero !== -1 && riga[idx.recupero]?.trim()) noteParti.push(`Recupero: ${riga[idx.recupero].trim()}`);
+    if (idx.tecnica !== -1 && riga[idx.tecnica]?.trim()) noteParti.push(riga[idx.tecnica].trim());
+    if (idx.note !== -1 && riga[idx.note]?.trim()) noteParti.push(riga[idx.note].trim());
+    await supabase.from("training_exercises").insert({
+      client_id: clientId, training_day_id: giornoId, nome: nomeEsercizio, tipo: tipoRiga,
+      esecuzione: idx.esecuzione !== -1 ? (riga[idx.esecuzione] || "").trim() || null : null,
+      ordine: nomiEsistenti.length + 1,
+      serie: idx.serie !== -1 && riga[idx.serie]?.trim() ? Number(riga[idx.serie].trim()) : null,
+      ripetizioni: idx.ripetizioni !== -1 ? (riga[idx.ripetizioni] || "").trim() || null : null,
+      note: noteParti.join(" — ") || null,
+    });
+    eserciziCreati++;
+  }
+  return { giorniCreati, eserciziCreati };
+}
+
+/* ------------------------------------------------------------------ */
+/* CIRCUITO DI GRUPPO — ogni cliente cambia esercizio a ogni giro      */
+/* ------------------------------------------------------------------ */
+function CircuitoGruppo({ gruppo, membri, onChanged, inline = false }) {
+  const salvato = gruppo.circuito || {};
+  const [aperto, setAperto] = useState(!!inline);
+  const [modifica, setModifica] = useState(false);
+  const [postazioni, setPostazioni] = useState(Array.isArray(salvato.postazioni) && salvato.postazioni.length ? salvato.postazioni : ["", "", "", ""]);
+  const [giri, setGiri] = useState(salvato.giri || 4);
+  const [recupero, setRecupero] = useState(salvato.recupero || 45);
+  const [lavoro, setLavoro] = useState(salvato.lavoro || 40);
+  const [varianti, setVarianti] = useState(salvato.varianti || {});
+  const [giro, setGiro] = useState(0);
+  const [pronto, setPronto] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [ids, setIds] = useState({}); // clientId -> { nomeLower: exerciseId }
+  const [valori, setValori] = useState({}); // `${clientId}|${exerciseId}|${n}` -> { kg, rip }
+  const [ultime, setUltime] = useState({}); // exerciseId -> "37,5 kg × 10"
+  const [timer, setTimer] = useState({ fase: null, s: 0 });
+  const [autoRec, setAutoRec] = useState(true);
+  const oggi = formatDataLocale(new Date());
+  const post = postazioni.map((p) => p.trim()).filter(Boolean);
+  const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const esercizioDi = (ci, g) => {
+    const v = varianti[`${membri[ci].id}|${g}`];
+    if (v) return v;
+    return post.length ? post[(ci + g) % post.length] : "";
+  };
+  const occorrenza = (ci, g) => { const nome = esercizioDi(ci, g).toLowerCase(); let n = 1; for (let k = 0; k < g; k++) if (esercizioDi(ci, k).toLowerCase() === nome) n += 1; return n; };
+
+  useEffect(() => {
+    if (!timer.fase) return undefined;
+    const t = setTimeout(() => {
+      if (timer.s > 1) { setTimer({ fase: timer.fase, s: timer.s - 1 }); return; }
+      try { if (navigator.vibrate) navigator.vibrate(timer.fase === "lavoro" ? [200, 100, 200] : 400); } catch (e) { /* ignora */ }
+      if (timer.fase === "lavoro" && autoRec && Number(recupero) > 0) setTimer({ fase: "recupero", s: Number(recupero) });
+      else setTimer({ fase: null, s: 0 });
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [timer, autoRec, recupero]);
+
+  const importaCsvCircuito = async (file) => {
+    if (!file) return;
+    try {
+      const righe = parseCSV(await file.text()).filter((r) => r.some((v) => v && v.trim()));
+      if (!righe.length) throw new Error("vuoto");
+      const h = righe[0].map((x) => (x || "").trim().toLowerCase());
+      const ie = h.indexOf("esercizio"); const ip = h.indexOf("postazione");
+      let lista;
+      if (ie !== -1) {
+        let corpo = righe.slice(1).map((r, i) => ({ p: ip !== -1 ? parseInt(r[ip], 10) : NaN, n: (r[ie] || "").trim(), i })).filter((x) => x.n);
+        corpo = corpo.sort((a, b) => ((isNaN(a.p) ? a.i : a.p) - (isNaN(b.p) ? b.i : b.p)) || a.i - b.i);
+        lista = corpo.map((x) => x.n);
+        const ig = h.indexOf("giri"); const ir = h.indexOf("recupero");
+        if (ig !== -1 && righe[1] && parseInt(righe[1][ig], 10) > 0) setGiri(parseInt(righe[1][ig], 10));
+        if (ir !== -1 && righe[1] && parseInt(righe[1][ir], 10) > 0) setRecupero(parseInt(righe[1][ir], 10));
+      } else lista = righe.map((r) => (r[0] || "").trim()).filter(Boolean);
+      if (lista.length < 2) throw new Error("poche");
+      setPostazioni(lista); if (ie === -1 || h.indexOf("giri") === -1) setGiri(lista.length);
+      setMsg(`Importate ${lista.length} postazioni: controlla e premi "Salva circuito" ✨`);
+    } catch (e) { setMsg("File non leggibile: serve una colonna \"esercizio\" con almeno 2 righe 🫶🏻"); }
+    setTimeout(() => setMsg(""), 6000);
+  };
+  const salvaSetup = async () => {
+    const pulite = post;
+    if (pulite.length < 2) { setMsg("Servono almeno 2 postazioni 🫶🏻"); setTimeout(() => setMsg(""), 3000); return; }
+    const circ = { postazioni: pulite, giri: Math.max(1, Math.min(12, Number(giri) || pulite.length)), recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti };
+    const { error } = await supabase.from("gruppi_bulb").update({ circuito: circ }).eq("id", gruppo.id);
+    if (error) { setMsg("Non è stato possibile salvare: riprova 🫶🏻"); setTimeout(() => setMsg(""), 4000); return; }
+    setPostazioni(pulite); setModifica(false); setPronto(false); setMsg("Circuito salvato ✨"); onChanged(); setTimeout(() => setMsg(""), 3000);
+  };
+  const salvaVarianti = async (nuove) => {
+    setVarianti(nuove); setPronto(false);
+    await supabase.from("gruppi_bulb").update({ circuito: { postazioni: post, giri: Number(giri) || post.length, recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti: nuove } }).eq("id", gruppo.id);
+  };
+
+  // crea (se mancano) il giorno "Circuito" e gli esercizi di ogni cliente, poi scarica i carichi di oggi e l'ultima volta
+  const prepara = async () => {
+    setMsg("Preparo il circuito…");
+    try {
+      const nomiNecessari = {};
+      membri.forEach((m, ci) => { nomiNecessari[m.id] = new Set(); for (let g = 0; g < giriTot; g++) { const n = esercizioDi(ci, g); if (n) nomiNecessari[m.id].add(n); } });
+      const nuoviIds = {};
+      for (const m of membri) {
+        const { data: giorni } = await supabase.from("training_days").select("id, nome, scheda_archiviata").eq("client_id", m.id);
+        let giorno = (giorni || []).find((g) => !g.scheda_archiviata && g.nome === "Circuito");
+        if (!giorno) {
+          const { data: nuovo, error } = await supabase.from("training_days").insert({ client_id: m.id, nome: "Circuito", ordine: (giorni || []).length + 1 }).select().single();
+          if (error) throw error; giorno = nuovo;
+        }
+        const { data: es } = await supabase.from("training_exercises").select("id, nome").eq("client_id", m.id).eq("training_day_id", giorno.id);
+        const lista = [...(es || [])]; nuoviIds[m.id] = {};
+        for (const nome of nomiNecessari[m.id]) {
+          let ex = lista.find((x) => x.nome.trim().toLowerCase() === nome.toLowerCase());
+          if (!ex) {
+            const { data: nuovo, error } = await supabase.from("training_exercises").insert({ client_id: m.id, training_day_id: giorno.id, nome, serie: 1, tipo: "forza", ordine: lista.length + 1 }).select("id, nome").single();
+            if (error) throw error; ex = nuovo; lista.push(ex);
+          }
+          nuoviIds[m.id][nome.toLowerCase()] = ex.id;
+        }
+      }
+      const tuttiId = Object.values(nuoviIds).flatMap((o) => Object.values(o));
+      const { data: righe } = await supabase.from("training_entries").select("client_id, exercise_id, data, numero_serie, kg, ripetizioni").in("exercise_id", tuttiId).order("data", { ascending: false });
+      const v = {}; const ult = {};
+      (righe || []).forEach((r) => {
+        if (r.data === oggi) v[`${r.client_id}|${r.exercise_id}|${r.numero_serie}`] = { kg: r.kg == null ? "" : String(r.kg).replace(".", ","), rip: r.ripetizioni || "" };
+        else if (r.kg != null && !ult[r.exercise_id]) ult[r.exercise_id] = { data: r.data, kg: r.kg, rip: r.ripetizioni };
+        else if (r.kg != null && ult[r.exercise_id].data === r.data && Number(r.kg) > Number(ult[r.exercise_id].kg)) ult[r.exercise_id] = { data: r.data, kg: r.kg, rip: r.ripetizioni };
+      });
+      leggiCoda().forEach((o) => { if (o.data === oggi) v[`${o.clientId}|${o.exerciseId}|${o.n}`] = { kg: o.payload.kg == null ? "" : String(o.payload.kg).replace(".", ","), rip: o.payload.ripetizioni || "" }; });
+      const testo = {}; Object.entries(ult).forEach(([k, x]) => { testo[k] = `${String(x.kg).replace(".", ",")} kg${x.rip ? ` × ${x.rip}` : ""}`; });
+      setIds(nuoviIds); setValori(v); setUltime(testo); setPronto(true); setMsg("");
+    } catch (e) { setMsg("Non è stato possibile preparare il circuito: controlla la connessione e riprova 🫶🏻"); setTimeout(() => setMsg(""), 5000); }
+  };
+  const giriTot = Math.max(1, Number(giri) || post.length || 4);
+
+  const salvaCella = async (ci, g, campo, valore) => {
+    const m = membri[ci]; const nome = esercizioDi(ci, g); const exId = ids[m.id]?.[nome.toLowerCase()]; if (!exId) return;
+    const n = occorrenza(ci, g); const k = `${m.id}|${exId}|${n}`;
+    const nuovo = { ...(valori[k] || { kg: "", rip: "" }), [campo]: valore };
+    setValori((v) => ({ ...v, [k]: nuovo }));
+    const kg = num(nuovo.kg);
+    const payload = { kg, ripetizioni: nuovo.rip === "" ? null : String(nuovo.rip), completata: kg != null };
+    const op = { clientId: m.id, exerciseId: exId, data: oggi, n, payload };
+    const giaInCoda = leggiCoda().some((x) => x.k === chiaveOp(op));
+    if (giaInCoda) { accodaOp(op); inviaCoda(); return; }
+    try { await scriviSerieRemoto(op); if (kg != null) inviaPushCarichi(); } catch (err) { accodaOp(op); }
+  };
+
+  const Cella = ({ ci, g }) => {
+    const m = membri[ci]; const nome = esercizioDi(ci, g); const exId = ids[m.id]?.[nome.toLowerCase()];
+    const n = occorrenza(ci, g); const k = `${m.id}|${exId}|${n}`; const v = valori[k] || { kg: "", rip: "" };
+    return (
+      <div className="bg-white border rounded-2xl p-2.5" style={{ borderColor: "#C9E0F7" }}>
+        <p className="text-[11px] font-semibold text-slate-500 truncate">{nomeCl(m)}</p>
+        <div className="flex items-center gap-1">
+          <p className="flex-1 text-sm font-bold truncate" style={{ color: "#27466D" }}>{nome || "—"}</p>
+          <select value="" onChange={(e) => { const val = e.target.value; const nv = { ...varianti }; if (val === "__reset") delete nv[`${m.id}|${g}`]; else nv[`${m.id}|${g}`] = val; salvaVarianti(nv); }} className="text-[11px] w-6 bg-transparent" style={{ color: "#3F78B3" }} title="Cambia esercizio solo per lei">
+            <option value="">Cambia…</option>
+            {post.map((p) => <option key={p} value={p}>{p}</option>)}
+            {varianti[`${m.id}|${g}`] && <option value="__reset">Torna al giro normale</option>}
+          </select>
+        </div>
+        <div className="flex gap-1.5 mt-1.5">
+          <Stepper valore={v.kg} passo={2.5} placeholder="kg" onChange={(x) => setValori((o) => ({ ...o, [k]: { ...v, kg: x } }))} onCommit={(x) => salvaCella(ci, g, "kg", x)} />
+          <Stepper valore={v.rip} passo={1} placeholder="rip" onChange={(x) => setValori((o) => ({ ...o, [k]: { ...v, rip: x } }))} onCommit={(x) => salvaCella(ci, g, "rip", x)} />
+        </div>
+        <p className="text-[11px] mt-1" style={{ color: "#3F78B3" }}>{ultime[exId] ? `Ultima volta: ${ultime[exId]}` : "Prima volta"}</p>
+      </div>
+    );
+  };
+
+  if (!aperto) return <button onClick={() => setAperto(true)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#3F78B3" }}>Circuito a rotazione</button>;
+  const giriArr = Array.from({ length: giriTot }, (_, i) => i);
+  return (
+    <div className="bg-white rounded-2xl border p-3 space-y-3 w-full" style={{ borderColor: "#C9E0F7" }}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Circuito a rotazione · {gruppo.nome}</p>
+        <div className="flex gap-3 text-xs">
+          <button onClick={() => setModifica(!modifica)} className="underline" style={{ color: "#3F78B3" }}>{modifica ? "Chiudi impostazioni" : "Imposta postazioni"}</button>
+          {!inline && <button onClick={() => setAperto(false)} className="text-slate-400 underline">Chiudi</button>}
+        </div>
+      </div>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      {modifica && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-600">Scrivi gli esercizi delle postazioni. La 1ª cliente parte dalla postazione 1, la 2ª dalla 2… e a ogni giro tutte scalano di una. Con meno postazioni che giri, si ricomincia da capo.</p>
+          {postazioni.map((p, i) => (
+            <div key={i} className="flex gap-2 items-center">
+              <span className="text-xs font-semibold w-5" style={{ color: "#27466D" }}>{i + 1}</span>
+              <input value={p} onChange={(e) => setPostazioni(postazioni.map((x, j) => (j === i ? e.target.value : x)))} placeholder="Esercizio" className="flex-1 border rounded-lg px-3 py-1.5 text-sm" style={{ borderColor: "#C9E0F7" }} />
+              {postazioni.length > 2 && <button onClick={() => setPostazioni(postazioni.filter((_, j) => j !== i))} className="text-slate-400 text-lg leading-none">×</button>}
+            </div>
+          ))}
+          <div className="flex gap-4 items-center">
+            <button onClick={() => setPostazioni([...postazioni, ""])} className="text-xs underline" style={{ color: "#3F78B3" }}>+ aggiungi postazione</button>
+            <label className="text-xs underline cursor-pointer" style={{ color: "#3F78B3" }}>Importa da CSV
+              <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; importaCsvCircuito(f); }} />
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-400">CSV: una colonna "esercizio" (una riga per postazione, nell'ordine). Facoltative: "postazione" (numero), "giri" e "recupero" (compilati nella prima riga).</p>
+          <div className="flex gap-3">
+            <label className="text-xs text-slate-500 flex-1">Giri<input type="number" min="1" max="12" value={giri} onChange={(e) => setGiri(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+            <label className="text-xs text-slate-500 flex-1">Lavoro (sec)<input type="number" min="0" value={lavoro} onChange={(e) => setLavoro(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+            <label className="text-xs text-slate-500 flex-1">Recupero (sec)<input type="number" min="0" value={recupero} onChange={(e) => setRecupero(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+          </div>
+          <button onClick={salvaSetup} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Salva circuito</button>
+        </div>
+      )}
+      {!modifica && post.length < 2 && <p className="text-xs text-slate-500">Prima imposta le postazioni del circuito 🫶🏻</p>}
+      {!modifica && post.length >= 2 && membri.length === 0 && <p className="text-xs text-slate-500">Aggiungi le clienti al gruppo per usare il circuito.</p>}
+      {!modifica && post.length >= 2 && membri.length > 0 && !pronto && (
+        <div className="space-y-2">
+          <div className="flex gap-3">
+            <label className="text-xs text-slate-500 flex-1">Lavoro (sec)<input type="number" min="0" value={lavoro} onChange={(e) => setLavoro(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+            <label className="text-xs text-slate-500 flex-1">Recupero (sec)<input type="number" min="0" value={recupero} onChange={(e) => setRecupero(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5" style={{ borderColor: "#C9E0F7" }} /></label>
+          </div>
+          <button onClick={async () => { await supabase.from("gruppi_bulb").update({ circuito: { postazioni: post, giri: giriTot, recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti } }).eq("id", gruppo.id); prepara(); }} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avvia il circuito di oggi</button>
+        </div>
+      )}
+      {!modifica && pronto && (
+        <>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1.5 flex-1">
+              {giriArr.map((g) => <button key={g} onClick={() => setGiro(g)} className="flex-1 py-1.5 rounded-full text-xs font-bold" style={{ background: giro === g ? "#27466D" : "#fff", color: giro === g ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{g + 1}</button>)}
+            </div>
+            {timer.fase ? (
+              <button onClick={() => setTimer({ fase: null, s: 0 })} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-white" style={{ background: timer.fase === "lavoro" ? "#27466D" : "#4F8FD0" }}>{timer.fase === "lavoro" ? "Lavoro" : "Recupero"} {timer.s}s ■</button>
+            ) : (
+              <>
+                <button onClick={() => setTimer({ fase: "lavoro", s: Number(lavoro) || 40 })} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>▶ Lavoro {Number(lavoro) || 40}s</button>
+                <button onClick={() => setTimer({ fase: "recupero", s: Number(recupero) || 45 })} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1px solid #C9E0F7" }}>▶ Recupero {Number(recupero) || 45}s</button>
+              </>
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Giro {giro + 1} di {giriTot}</p>
+            <label className="text-[11px] text-slate-500 flex items-center gap-1"><input type="checkbox" checked={autoRec} onChange={(e) => setAutoRec(e.target.checked)} /> dopo il lavoro parte il recupero</label>
+          </div>
+          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+            {membri.map((m, ci) => <div key={m.id}>{Cella({ ci, g: giro })}</div>)}
+          </div>
+          {giro < giriTot - 1 && <button onClick={() => { setGiro(giro + 1); setTimer({ fase: null, s: 0 }); }} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Avanti: giro {giro + 2} →</button>}
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs" style={{ color: "#27466D" }}>
+              <thead><tr><th className="text-left p-1.5 text-slate-500 font-medium"></th>{giriArr.map((g) => <th key={g} className="text-left p-1.5 font-medium" style={{ color: g === giro ? "#27466D" : "#7a8da3" }}>Giro {g + 1}</th>)}</tr></thead>
+              <tbody>
+                {membri.map((m, ci) => (
+                  <tr key={m.id} className="border-t border-slate-100">
+                    <td className="p-1.5 font-semibold">{nomeCl(m)}</td>
+                    {giriArr.map((g) => { const nome = esercizioDi(ci, g); const exId = ids[m.id]?.[nome.toLowerCase()]; const v = valori[`${m.id}|${exId}|${occorrenza(ci, g)}`]; return <td key={g} className="p-1.5 align-top" style={{ background: g === giro ? "#E1EEFB" : "transparent" }}>{nome}<div style={{ color: "#3F78B3" }}>{v && v.kg !== "" ? `${v.kg} × ${v.rip || "—"} ✓` : "—"}</div></td>; })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-400">I carichi si salvano nello storico personale di ogni cliente, nel giorno "Circuito". Se manca la connessione restano sul telefono e partono da soli.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* SESSIONE DI GRUPPO DA TELEFONO — tasti grandi, una cliente alla     */
+/* volta oppure circuito, carichi con + e − (o scritti a mano)         */
+/* ------------------------------------------------------------------ */
+const fmtNum = (n) => String(Math.round(n * 100) / 100).replace(".", ",");
+function Stepper({ valore, suggerimento, passo, placeholder, onChange, onCommit, fatto }) {
+  const base = () => { const v = num(valore); if (v != null) return v; const s = num(suggerimento); return s != null ? s : 0; };
+  const muovi = (d) => { const n = Math.max(0, Math.round((base() + d) * 100) / 100); const t = fmtNum(n); onChange(t); onCommit(t); };
+  return (
+    <div className="flex items-stretch flex-1 min-w-0 rounded-2xl overflow-hidden" style={{ border: "1.5px solid #C9E0F7" }}>
+      <button type="button" onClick={() => muovi(-passo)} className="w-11 text-xl font-semibold flex-shrink-0" style={{ background: "#F5FAFE", color: "#3F78B3" }}>−</button>
+      <input inputMode="decimal" value={valore} onChange={(e) => onChange(e.target.value)} onBlur={(e) => onCommit(e.target.value)} placeholder={suggerimento != null && suggerimento !== "" ? String(suggerimento).replace(".", ",") : placeholder}
+        className="flex-1 min-w-0 text-center text-lg font-semibold bg-white py-2.5 focus:outline-none" style={{ color: fatto ? "#27466D" : "#27466D" }} />
+      <button type="button" onClick={() => muovi(passo)} className="w-11 text-xl font-semibold flex-shrink-0" style={{ background: "#F5FAFE", color: "#3F78B3" }}>+</button>
+    </div>
+  );
+}
+
+// Riga modificabile di un esercizio (sessione di gruppo): si salva quando esci dal campo
+function RigaEsercizioEditor({ es, primo, ultimo, libreriaV, onSalva, onElimina, onSposta }) {
+  const [nome, setNome] = useState(es.nome || "");
+  const [serie, setSerie] = useState(es.serie ?? "");
+  const [rip, setRip] = useState(es.ripetizioni || "");
+  const [nota, setNota] = useState(es.note || "");
+  const salva = (campi) => onSalva(es.id, campi);
+  const inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white";
+  return (
+    <div className="rounded-xl p-2 space-y-1.5" style={{ background: "#fff", border: "1px solid #C9E0F7" }}>
+      <div className="flex gap-1.5">
+        <input list="lib-esercizi-sessione" value={nome} onChange={(e) => setNome(e.target.value)} onBlur={() => nome.trim() && nome !== es.nome && salva({ nome: nome.trim() })} placeholder="Esercizio" className={`${inp} flex-1 min-w-0 font-medium`} />
+        <button onClick={() => onSposta(es.id, -1)} disabled={primo} className="px-2 text-slate-400 disabled:opacity-20">↑</button>
+        <button onClick={() => onSposta(es.id, 1)} disabled={ultimo} className="px-2 text-slate-400 disabled:opacity-20">↓</button>
+        <button onClick={() => onElimina(es)} className="px-2 text-slate-400"><Ic n="x" bare/></button>
+      </div>
+      <div className="flex gap-1.5">
+        <input value={serie} onChange={(e) => setSerie(e.target.value.replace(/\D/g, ""))} onBlur={() => String(serie) !== String(es.serie ?? "") && salva({ serie: serie === "" ? null : Number(serie) })} inputMode="numeric" placeholder="Serie" className={`${inp} w-16`} />
+        <input value={rip} onChange={(e) => setRip(e.target.value)} onBlur={() => rip !== (es.ripetizioni || "") && salva({ ripetizioni: rip.trim() || null })} placeholder="Ripetizioni (es. 10 o 8-10)" className={`${inp} flex-1 min-w-0`} />
+      </div>
+      <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={() => nota !== (es.note || "") && salva({ note: nota.trim() || null })} placeholder="Nota (facoltativa)" className={`${inp} w-full text-xs`} />
+    </div>
+  );
+}
+
+// Crea o modifica a mano le sessioni di una cliente direttamente dalla sessione di gruppo
+function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, esercizi, libreriaV, onCambiato, chiudi }) {
+  const [nuovoGiorno, setNuovoGiorno] = useState("");
+  const [nuovoEs, setNuovoEs] = useState({ nome: "", serie: "3", rip: "10" });
+  const [nomeG, setNomeG] = useState("");
+  const [msg, setMsg] = useState("");
+  const giorno = giorni.find((g) => g.id === giornoId) || null;
+  useEffect(() => { setNomeG(giorno?.nome || ""); }, [giornoId, giorno?.nome]);
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 3500); };
+  const inp = "border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white";
+
+  const creaGiorno = async () => {
+    const nome = nuovoGiorno.trim() || `Sessione ${giorni.length + 1}`;
+    const ordine = Math.max(-1, ...giorni.map((g) => g.ordine ?? 0)) + 1;
+    const { data, error } = await supabase.from("training_days").insert({ client_id: cl.id, nome, ordine }).select("id").single();
+    if (error || !data) { avviso("Non è stato possibile creare la sessione, riprova 🫶🏻"); return; }
+    setNuovoGiorno(""); setGiornoId(data.id); onCambiato();
+  };
+  const rinominaGiorno = async () => {
+    if (!giorno || !nomeG.trim() || nomeG.trim() === giorno.nome) return;
+    await supabase.from("training_days").update({ nome: nomeG.trim() }).eq("id", giorno.id); onCambiato();
+  };
+  const eliminaGiorno = async () => {
+    if (!giorno) return;
+    if (!await confermaApp(`Elimino la sessione "${giorno.nome}" di ${cl.nome || "questa cliente"}, con esercizi e carichi registrati? Non si può annullare.`)) return;
+    const { data: es } = await supabase.from("training_exercises").select("id").eq("training_day_id", giorno.id);
+    const ids = (es || []).map((e) => e.id);
+    if (ids.length) await supabase.from("training_entries").delete().in("exercise_id", ids);
+    await supabase.from("training_exercises").delete().eq("training_day_id", giorno.id);
+    await supabase.from("training_days").delete().eq("id", giorno.id);
+    setGiornoId(null); onCambiato();
+  };
+  const aggiungiEs = async () => {
+    if (!giorno || !nuovoEs.nome.trim()) return;
+    const ordine = Math.max(0, ...esercizi.map((e) => e.ordine ?? 0)) + 1;
+    const { error } = await supabase.from("training_exercises").insert({ client_id: cl.id, training_day_id: giorno.id, nome: nuovoEs.nome.trim(), tipo: "forza", serie: nuovoEs.serie ? Number(nuovoEs.serie) : null, ripetizioni: nuovoEs.rip.trim() || null, ordine });
+    if (error) { avviso("Non è stato possibile aggiungerlo, riprova 🫶🏻"); return; }
+    setNuovoEs({ ...nuovoEs, nome: "" }); onCambiato();
+  };
+  const salvaEs = async (id, campi) => { await supabase.from("training_exercises").update(campi).eq("id", id); onCambiato(); };
+  const eliminaEs = async (es) => {
+    if (!await confermaApp(`Tolgo "${es.nome}" da questa sessione, con i carichi registrati? Non si può annullare.`)) return;
+    await supabase.from("training_entries").delete().eq("exercise_id", es.id);
+    await supabase.from("training_exercises").delete().eq("id", es.id);
+    onCambiato();
+  };
+  const sposta = async (id, verso) => {
+    const i = esercizi.findIndex((e) => e.id === id), j = i + verso;
+    if (i < 0 || j < 0 || j >= esercizi.length) return;
+    const a = esercizi[i], b = esercizi[j];
+    const oa = a.ordine ?? i + 1, ob = b.ordine ?? j + 1;
+    await supabase.from("training_exercises").update({ ordine: ob === oa ? ob + verso : ob }).eq("id", a.id);
+    await supabase.from("training_exercises").update({ ordine: oa }).eq("id", b.id);
+    onCambiato();
+  };
+  const copiaAlleAltre = async () => {
+    if (!giorno) return;
+    const altre = (membri || []).filter((m) => m.id !== cl.id);
+    if (!altre.length) return;
+    if (!await confermaApp(`Copio la sessione "${giorno.nome}" (${esercizi.length} esercizi) a: ${altre.map((m) => m.nome).join(", ")}? Viene AGGIUNTA a quello che hanno già.`)) return;
+    try {
+      for (const m of altre) {
+        const { data: ex } = await supabase.from("training_days").select("ordine").eq("client_id", m.id);
+        const ordine = Math.max(-1, ...(ex || []).map((x) => x.ordine ?? 0)) + 1;
+        const { data: nuovo, error } = await supabase.from("training_days").insert({ client_id: m.id, nome: giorno.nome, ordine }).select("id").single();
+        if (error || !nuovo) throw error || new Error("giorno");
+        const righe = esercizi.map((e, k) => ({ client_id: m.id, training_day_id: nuovo.id, nome: e.nome, tipo: e.tipo || "forza", serie: e.serie, ripetizioni: e.ripetizioni, note: e.note, recupero_sec: e.recupero_sec, ordine: k + 1 }));
+        if (righe.length) { const { error: e2 } = await supabase.from("training_exercises").insert(righe); if (e2) throw e2; }
+      }
+      avviso(`Fatto ✨ Sessione copiata a ${altre.length} clienti`);
+    } catch (e) { avviso("Non è stato possibile copiare tutto: controlla le altre clienti prima di riprovare."); }
+  };
+
+  return (
+    <div className="rounded-2xl p-3 space-y-2.5" style={{ background: "#F5FAFE", border: "1.5px solid #C9E0F7" }}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold" style={{ color: "#27466D" }}>Programma di {cl.nome || "questa cliente"}</p>
+        {chiudi && <button onClick={chiudi} className="text-xs font-semibold" style={{ color: "#3F78B3" }}>Fatto ✓</button>}
+      </div>
+      <datalist id="lib-esercizi-sessione">{(libreriaV || []).map((x) => <option key={x.id} value={x.nome} />)}</datalist>
+      {giorni.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto">
+          {giorni.map((g) => <button key={g.id} onClick={() => setGiornoId(g.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: giornoId === g.id ? "#27466D" : "#fff", color: giornoId === g.id ? "#fff" : "#27466D", border: "1px solid #C9E0F7" }}>{g.nome}</button>)}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <input value={nuovoGiorno} onChange={(e) => setNuovoGiorno(e.target.value)} placeholder={giorni.length ? "Nome nuova sessione" : "Nome della sessione (es. Gruppo – Lezione 1)"} className={`${inp} flex-1 min-w-0`} />
+        <button onClick={creaGiorno} className="px-3 rounded-lg text-xs font-bold text-white" style={{ background: "#27466D" }}>+ Sessione</button>
+      </div>
+      {giorno && (
+        <>
+          <div className="flex gap-1.5">
+            <input value={nomeG} onChange={(e) => setNomeG(e.target.value)} onBlur={rinominaGiorno} className={`${inp} flex-1 min-w-0 font-semibold`} />
+            <button onClick={eliminaGiorno} className="px-3 rounded-lg text-xs text-slate-500" style={{ border: "1px solid #C9E0F7", background: "#fff" }}><Ic n="trash"/> Elimina sessione</button>
+          </div>
+          {esercizi.length === 0 && <p className="text-xs text-slate-400 px-1">Nessun esercizio: aggiungine uno qui sotto.</p>}
+          {esercizi.map((e, i) => <RigaEsercizioEditor key={e.id} es={e} primo={i === 0} ultimo={i === esercizi.length - 1} libreriaV={libreriaV} onSalva={salvaEs} onElimina={eliminaEs} onSposta={sposta} />)}
+          <div className="rounded-xl p-2 space-y-1.5" style={{ background: "#E1EEFB" }}>
+            <input list="lib-esercizi-sessione" value={nuovoEs.nome} onChange={(e) => setNuovoEs({ ...nuovoEs, nome: e.target.value })} placeholder="Nuovo esercizio (scrivi o scegli dalla libreria)" className={`${inp} w-full`} />
+            <div className="flex gap-1.5">
+              <input value={nuovoEs.serie} onChange={(e) => setNuovoEs({ ...nuovoEs, serie: e.target.value.replace(/\D/g, "") })} inputMode="numeric" placeholder="Serie" className={`${inp} w-16`} />
+              <input value={nuovoEs.rip} onChange={(e) => setNuovoEs({ ...nuovoEs, rip: e.target.value })} placeholder="Ripetizioni" className={`${inp} flex-1 min-w-0`} />
+              <button onClick={aggiungiEs} disabled={!nuovoEs.nome.trim()} className="px-3 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: "#27466D" }}>+ Aggiungi</button>
+            </div>
+          </div>
+          {(membri || []).length > 1 && esercizi.length > 0 && <button onClick={copiaAlleAltre} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Copia questa sessione alle altre del gruppo</button>}
+        </>
+      )}
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+    </div>
+  );
+}
+
+function VistaClienteSessione({ cl, oggi, membri = [] }) {
+  const [rl, setRl] = useState(0);
+  const [modifica, setModifica] = useState(false);
+  const clPrec = React.useRef(null);
+  const [giorni, setGiorni] = useState(null);
+  const [giornoId, setGiornoId] = useState(null);
+  const [esercizi, setEsercizi] = useState([]);
+  const [oggiMap, setOggiMap] = useState({}); // `${exId}|${n}` -> { kg, rip, ok }
+  const [ultime, setUltime] = useState({}); // `${exId}|${n}` -> { kg, rip, data }
+  const [bozza, setBozza] = useState({});
+  const [aperto, setAperto] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [timer, setTimer] = useState(0);
+  const [notaAperta, setNotaAperta] = useState(false);
+  const [prep, setPrep] = useState([]); // mobilità e attivazione: solo da spuntare, niente serie/ripetizioni/kg
+  const [prepFatte, setPrepFatte] = useState({});
+  const [prepAperta, setPrepAperta] = useState(false);
+  const [libreriaV, setLibreriaV] = useState([]);
+  const [infoEsV, setInfoEsV] = useState(null);
+  useEffect(() => { supabase.from("esercizi_video").select("*").order("ordine").then(({ data }) => setLibreriaV(data || [])).catch(() => {}); }, []);
+
+  useEffect(() => {
+    let vivo = true;
+    if (clPrec.current !== cl.id) { setGiorni(null); setGiornoId(null); setEsercizi([]); clPrec.current = cl.id; }
+    (async () => {
+      const { data } = await supabase.from("training_days").select("id, nome, ordine, scheda_archiviata").eq("client_id", cl.id).order("ordine");
+      if (!vivo) return;
+      const att = (data || []).filter((g) => !g.scheda_archiviata);
+      setGiorni(att); setGiornoId((cur) => (att.some((g) => g.id === cur) ? cur : att[0]?.id || null));
+    })();
+    return () => { vivo = false; };
+  }, [cl.id, rl]);
+
+  useEffect(() => {
+    if (!giornoId) return undefined;
+    let vivo = true;
+    (async () => {
+      const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, note, recupero_sec, ordine, tipo").eq("client_id", cl.id).eq("training_day_id", giornoId).order("ordine");
+      const tuttiEs = es || [];
+      const { data: mob } = await supabase.from("training_exercises").select("id, nome, note, ordine, tipo").eq("client_id", cl.id).is("training_day_id", null).eq("tipo", "mobilita").order("ordine");
+      const lista = tuttiEs.filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione");
+      const prepL = [...(mob || []), ...tuttiEs.filter((e) => e.tipo === "mobilita" || e.tipo === "attivazione")];
+      if (vivo) {
+        const { data: pe } = prepL.length ? await supabase.from("training_entries").select("exercise_id, completata").eq("client_id", cl.id).eq("data", oggi).in("exercise_id", prepL.map((e) => e.id)) : { data: [] };
+        const pf = {}; (pe || []).forEach((r) => { if (r.completata === true) pf[r.exercise_id] = true; });
+        setPrep(prepL); setPrepFatte(pf);
+      }
+      let righe = [];
+      if (lista.length) { const r = await supabase.from("training_entries").select("exercise_id, data, numero_serie, kg, ripetizioni, completata").eq("client_id", cl.id).in("exercise_id", lista.map((e) => e.id)).order("data", { ascending: false }); righe = r.data || []; }
+      if (!vivo) return;
+      const om = {}, ul = {};
+      [...righe].reverse().forEach((r) => { // dal più vecchio al più recente: l'ultimo valore per serie vince
+        if (r.data === oggi) om[`${r.exercise_id}|${r.numero_serie}`] = { kg: r.kg == null ? "" : fmtNum(r.kg), rip: r.ripetizioni || "", ok: !!r.completata };
+        else if (r.kg != null || r.ripetizioni) ul[`${r.exercise_id}|${r.numero_serie}`] = { kg: r.kg, rip: r.ripetizioni, data: r.data };
+      });
+      leggiCoda().forEach((o) => { if (o.clientId === cl.id && o.data === oggi) om[`${o.exerciseId}|${o.n}`] = { kg: o.payload.kg == null ? "" : fmtNum(o.payload.kg), rip: o.payload.ripetizioni || "", ok: !!o.payload.completata }; });
+      setEsercizi(lista); setOggiMap(om); setUltime(ul); setBozza({});
+      const primo = lista.find((e) => { const n = parseInt(e.serie, 10) || 3; for (let i = 1; i <= n; i++) if (!om[`${e.id}|${i}`]?.ok) return true; return false; });
+      setAperto((primo || lista[0] || {}).id || null);
+    })();
+    return () => { vivo = false; };
+  }, [giornoId, cl.id, rl]);
+
+  useEffect(() => { if (timer <= 0) return undefined; const t = setTimeout(() => setTimer((s) => s - 1), 1000); return () => clearTimeout(t); }, [timer]);
+
+  const valoreDi = (es, n, campo) => { const k = `${es.id}|${n}|${campo}`; if (k in bozza) return bozza[k]; return oggiMap[`${es.id}|${n}`]?.[campo] ?? ""; };
+  const sugg = (es, n, campo) => { const u = ultime[`${es.id}|${n}`]; if (!u) { const alt = Object.keys(ultime).filter((k) => k.startsWith(`${es.id}|`)).sort().pop(); const x = alt ? ultime[alt] : null; return x ? (campo === "kg" ? (x.kg == null ? "" : fmtNum(x.kg)) : (x.rip || "")) : ""; } return campo === "kg" ? (u.kg == null ? "" : fmtNum(u.kg)) : (u.rip || ""); };
+
+  const scrivi = async (es, n, kgT, ripT, ok) => {
+    const kg = num(kgT);
+    const payload = { kg, ripetizioni: ripT === "" || ripT == null ? null : String(ripT), completata: !!ok };
+    const op = { clientId: cl.id, exerciseId: es.id, data: oggi, n, payload };
+    setOggiMap((m) => ({ ...m, [`${es.id}|${n}`]: { kg: kg == null ? "" : fmtNum(kg), rip: payload.ripetizioni || "", ok: !!ok } }));
+    const giaInCoda = leggiCoda().some((x) => x.k === chiaveOp(op));
+    if (giaInCoda) { accodaOp(op); inviaCoda(); return; }
+    try { await scriviSerieRemoto(op); if (kg != null && ok) inviaPushCarichi(); } catch (e) { accodaOp(op); }
+  };
+  const commit = (es, n, campo, v) => {
+    const kgT = campo === "kg" ? v : valoreDi(es, n, "kg"); const ripT = campo === "rip" ? v : valoreDi(es, n, "rip");
+    setBozza((b) => { const c = { ...b }; delete c[`${es.id}|${n}|${campo}`]; return c; });
+    if ((kgT === "" || kgT == null) && (ripT === "" || ripT == null) && !oggiMap[`${es.id}|${n}`]) return;
+    scrivi(es, n, kgT, ripT, oggiMap[`${es.id}|${n}`]?.ok);
+  };
+  const spunta = (es, n) => {
+    const cur = oggiMap[`${es.id}|${n}`];
+    const kgT = valoreDi(es, n, "kg") !== "" ? valoreDi(es, n, "kg") : sugg(es, n, "kg");
+    const ripT = valoreDi(es, n, "rip") !== "" ? valoreDi(es, n, "rip") : sugg(es, n, "rip");
+    const nuovo = !cur?.ok;
+    scrivi(es, n, nuovo ? kgT : valoreDi(es, n, "kg"), nuovo ? ripT : valoreDi(es, n, "rip"), nuovo);
+    if (nuovo) {
+      setTimer(es.recupero_sec > 0 ? es.recupero_sec : 60);
+      const tot = parseInt(es.serie, 10) || 3;
+      const fatte = Array.from({ length: tot }, (_, i) => i + 1).filter((i) => i === n || oggiMap[`${es.id}|${i}`]?.ok).length;
+      if (fatte >= tot) { const i = esercizi.findIndex((e) => e.id === es.id); const prox = esercizi[i + 1]; if (prox) setTimeout(() => setAperto(prox.id), 250); }
+    }
+  };
+
+  if (!giorni) return <p className="text-sm text-slate-400 px-1 py-6 text-center">Carico…</p>;
+  const editor = (chiudi) => <EditorProgrammaSessione cl={cl} membri={membri} giorni={giorni} giornoId={giornoId} setGiornoId={setGiornoId} esercizi={esercizi} libreriaV={libreriaV} onCambiato={() => setRl((n) => n + 1)} chiudi={chiudi} />;
+  if (!giorni.length) return (
+    <div className="space-y-3 pb-24">
+      <p className="text-sm text-slate-500 px-1 pt-3 text-center">{`${cl.nome || "Questa cliente"} non ha ancora un programma: crealo qui a mano, importalo con il CSV o copialo da un'altra cliente 🫶🏻`}</p>
+      {editor(null)}
+    </div>
+  );
+  return (
+    <div className="space-y-3 pb-24">
+      {(cl.note_particolari || (cl.problematiche_salute || []).filter(Boolean).length > 0) && (
+        <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "#FFFBEF", border: "1px solid #F0E2B0", color: "#6B5416" }}>
+          <Ic n="note"/> {[cl.note_particolari, ...(cl.problematiche_salute || []).filter(Boolean)].filter(Boolean).join(" · ")}
+        </div>
+      )}
+      {giorni.length > 1 && (
+        <div className="flex gap-1.5 overflow-x-auto">
+          {giorni.map((g) => <button key={g.id} onClick={() => setGiornoId(g.id)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: giornoId === g.id ? "#27466D" : "#fff", color: giornoId === g.id ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{g.nome}</button>)}
+        </div>
+      )}
+      {prep.length > 0 && (
+        <div className="bg-white rounded-2xl" style={{ border: "1.5px solid #C9E0F7" }}>
+          <button onClick={() => setPrepAperta(!prepAperta)} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
+            <span className="flex-1 text-sm font-bold" style={{ color: "#27466D" }}>Mobilità</span>
+            <span className="text-xs font-bold rounded-full px-2.5 py-1" style={{ background: "#E1EEFB", color: "#27466D" }}>{prep.filter((p) => prepFatte[p.id]).length}/{prep.length}</span>
+            <ChevronRight size={16} stroke="#4F8FD0" className={`transition-transform ${prepAperta ? "rotate-90" : ""}`} />
+          </button>
+          {prepAperta && (
+            <div className="px-3 pb-2.5">
+              <p className="text-[11px] font-semibold rounded-lg px-2.5 py-1.5 mb-1" style={{ background: "#E1EEFB", color: "#27466D" }}><Ic n="timer"/> 30/60 secondi per esercizio</p>
+              {prep.map((p) => {
+                const ok = !!prepFatte[p.id]; const info = trovaEsercizioVideo(p.nome, libreriaV);
+                return (
+                  <div key={p.id} className="flex items-center gap-2 py-1" style={{ borderTop: "1px solid #EEF3F8" }}>
+                    <span className="flex-1 min-w-0 text-sm font-semibold truncate" style={{ color: "#27466D" }}>{p.nome}</span>
+                    {info && <button onClick={() => setInfoEsV(info)} className="text-[11px] font-semibold flex-shrink-0" style={{ color: "#3F78B3" }}>▷ Video</button>}
+                    <button onClick={async () => {
+                      setPrepFatte((m) => ({ ...m, [p.id]: !ok }));
+                      const { data: e } = await supabase.from("training_entries").select("id").eq("client_id", cl.id).eq("exercise_id", p.id).eq("data", oggi).limit(1).maybeSingle();
+                      if (e) await supabase.from("training_entries").update({ completata: !ok }).eq("id", e.id);
+                      else await supabase.from("training_entries").insert({ client_id: cl.id, exercise_id: p.id, data: oggi, numero_serie: 1, completata: true });
+                    }} aria-label={ok ? "Fatto" : "Segna come fatto"} className="rounded-full flex items-center justify-center flex-shrink-0" style={{ width: 36, height: 36, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff" }}>
+                      <Check size={16} strokeWidth={2.6} stroke={ok ? "#fff" : "#C9E0F7"} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      {infoEsV && <EsercizioInfoModal es={infoEsV} onClose={() => setInfoEsV(null)} />}
+      <div className="flex justify-end"><button onClick={() => setModifica((v) => !v)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: modifica ? "#27466D" : "#fff", color: modifica ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{modifica ? "Chiudi modifica" : <><Ic n="edit"/> Modifica programma</>}</button></div>
+      {modifica && editor(() => setModifica(false))}
+      {esercizi.map((es) => {
+        const tot = parseInt(es.serie, 10) || 3;
+        const fatte = Array.from({ length: tot }, (_, i) => i + 1).filter((i) => oggiMap[`${es.id}|${i}`]?.ok).length;
+        const completo = fatte >= tot; const apertoQui = aperto === es.id;
+        return (
+          <div key={es.id} className="bg-white rounded-2xl" style={{ border: `1.5px solid ${apertoQui ? "#4F8FD0" : "#C9E0F7"}`, opacity: completo && !apertoQui ? 0.7 : 1 }}>
+            <button onClick={() => setAperto(apertoQui ? null : es.id)} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
+              <span className="flex-1 min-w-0"><span className="block text-[15px] font-bold truncate" style={{ color: "#27466D" }}>{es.nome}</span><span className="block text-xs" style={{ color: "#3F78B3" }}>{tot} serie{es.ripetizioni ? ` × ${es.ripetizioni}` : ""}{es.note ? ` · ${es.note}` : ""}</span></span>
+              <span className="text-xs font-bold rounded-full px-2.5 py-1" style={{ background: completo ? "#4F8FD0" : "#E1EEFB", color: completo ? "#fff" : "#27466D" }}>{completo ? "✓" : `${fatte}/${tot}`}</span>
+            </button>
+            {apertoQui && (
+              <div className="px-3 pb-3 space-y-2">
+                {Array.from({ length: tot }, (_, i) => i + 1).map((n) => {
+                  const ok = !!oggiMap[`${es.id}|${n}`]?.ok;
+                  return (
+                    <div key={n} className="flex items-center gap-2">
+                      <span className="w-6 text-xs font-bold text-center" style={{ color: "#7a8da3" }}>{n}</span>
+                      <Stepper valore={valoreDi(es, n, "kg")} suggerimento={sugg(es, n, "kg")} passo={2.5} placeholder="kg" fatto={ok} onChange={(v) => setBozza((b) => ({ ...b, [`${es.id}|${n}|kg`]: v }))} onCommit={(v) => commit(es, n, "kg", v)} />
+                      <Stepper valore={valoreDi(es, n, "rip")} suggerimento={sugg(es, n, "rip")} passo={1} placeholder="rip" fatto={ok} onChange={(v) => setBozza((b) => ({ ...b, [`${es.id}|${n}|rip`]: v }))} onCommit={(v) => commit(es, n, "rip", v)} />
+                      <button onClick={() => spunta(es, n)} aria-label={ok ? "Serie fatta" : "Segna come fatta"} className="rounded-full flex items-center justify-center flex-shrink-0" style={{ width: 46, height: 46, border: `2px solid ${ok ? "#4F8FD0" : "#C9E0F7"}`, background: ok ? "#4F8FD0" : "#fff", color: ok ? "#fff" : "#C9E0F7", fontSize: 20 }}>✓</button>
+                    </div>
+                  );
+                })}
+                {(() => { const u = Object.keys(ultime).filter((k) => k.startsWith(`${es.id}|`)); if (!u.length) return <p className="text-[11px]" style={{ color: "#7a8da3" }}>Prima volta: nessun valore precedente</p>; const d = u.map((k) => ultime[k].data).sort().pop(); return <p className="text-[11px]" style={{ color: "#7a8da3" }}>I numeri grigi sono l'ultima volta ({d.split("-").reverse().slice(0, 2).join("/")}): tocca ✓ per confermarli.</p>; })()}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button onClick={() => setNotaAperta(!notaAperta)} className="w-full py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>{notaAperta ? "Chiudi la nota finale" : "Nota finale dell'allenamento"}</button>
+      {notaAperta && <NotaFinaleAllenamento clientId={cl.id} data={oggi} />}
+      <div className="fixed bottom-0 left-0 right-0 px-3 py-2.5 flex gap-2" style={{ background: "#fff", borderTop: "1px solid #C9E0F7", zIndex: 70 }}>
+        <button onClick={() => setTimer(timer > 0 ? 0 : 60)} className="flex-1 py-3 rounded-2xl text-sm font-bold" style={{ background: timer > 0 ? "#27466D" : "#E1EEFB", color: timer > 0 ? "#fff" : "#27466D" }}>{timer > 0 ? <><Ic n="timer"/> Recupero {timer}s ■</> : <><Ic n="timer"/> Recupero 60s</>}</button>
+      </div>
+      {msg && <p className="text-xs">{msg}</p>}
+    </div>
+  );
+}
+
+function SessioneTelefono({ gruppo, membri, onClose, onChanged, inizialeId }) {
+  const [vista, setVista] = useState("clienti");
+  const [sel, setSel] = useState(inizialeId || membri[0]?.id || null);
+  const oggi = formatDataLocale(new Date());
+  const nomeBreve = (c, i) => (c.nome && c.nome.trim() ? c.nome.trim().split(" ")[0] : `Cliente ${i + 1}`);
+  const cl = membri.find((m) => m.id === sel) || membri[0];
+  return (
+    <div className="fixed inset-0 overflow-y-auto" style={{ background: "#FFFCF2", zIndex: 60 }}>
+      <div className="sticky top-0 z-10" style={{ background: "#27466D" }}>
+        <div className="px-3 pt-3 pb-1 flex items-center justify-between">
+          <div><p className="text-white font-semibold text-sm">Sessione · {gruppo.nome}</p><p className="text-[11px]" style={{ color: "#C9E0F7" }}>{oggi.split("-").reverse().join("/")}</p></div>
+          <button onClick={() => { onChanged && onChanged(); onClose(); }} className="text-white text-sm font-semibold px-3 py-1.5 rounded-xl" style={{ background: "rgba(255,255,255,.15)" }}>Chiudi</button>
+        </div>
+        <div className="px-3 pb-2 flex gap-2">
+          {[["clienti", "Per cliente"], ["circuito", "Circuito"]].map(([k, l]) => <button key={k} onClick={() => setVista(k)} className="flex-1 py-2 rounded-xl text-xs font-bold" style={{ background: vista === k ? "#fff" : "rgba(255,255,255,.12)", color: vista === k ? "#27466D" : "#C9E0F7" }}>{l}</button>)}
+        </div>
+        {vista === "clienti" && (
+          <div className="px-3 pb-2.5 flex gap-1.5 overflow-x-auto">
+            {membri.map((m, i) => <button key={m.id} onClick={() => setSel(m.id)} className="px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap" style={{ background: sel === m.id ? "#fff" : "rgba(255,255,255,.12)", color: sel === m.id ? "#27466D" : "#C9E0F7" }}>{nomeBreve(m, i)}</button>)}
+          </div>
+        )}
+      </div>
+      <div className="p-3 max-w-xl mx-auto">
+        {membri.length === 0 ? <p className="text-sm text-slate-500 text-center py-10">Aggiungi prima le clienti al gruppo 🫶🏻</p>
+          : vista === "clienti" ? (cl && <VistaClienteSessione key={cl.id} cl={cl} oggi={oggi} membri={membri} />)
+          : <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged || (() => {})} inline />}
+      </div>
+    </div>
+  );
+}
+
+function CardMembroGruppo({ cl, gruppoNome, onToglila, onApri, onCambiato, modoValutazione = false }) {
+  const [nome, setNome] = useState(cl.nome || "");
+  const [cognome, setCognome] = useState(cl.cognome || "");
+  const [note, setNote] = useState(cl.note_particolari || "");
+  const [sezione, setSezione] = useState(null); // null | "progressi" | "consigli" | "valutazione"
+  useEffect(() => { setSezione(modoValutazione ? "valutazione" : null); }, [modoValutazione]);
+  const salva = async (campi) => { await supabase.from("clients").update(campi).eq("id", cl.id); onCambiato(); };
+  const salute = (cl.problematiche_salute || []).filter(Boolean);
+  const chip = (t) => <span className="px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>{t}</span>;
+  return (
+    <div id={`membro-${cl.id}`} className="bg-white rounded-2xl border border-slate-200 overflow-hidden" style={{ scrollMarginTop: 70 }}>
+      <div className="px-3 pt-3 pb-2" style={{ background: "#F5FAFE", borderBottom: "1px solid #C9E0F7" }}>
+        <div className="flex gap-2">
+          <input value={nome} onChange={(e) => setNome(e.target.value)} onBlur={() => nome.trim() && nome !== cl.nome && salva({ nome: nome.trim() })} placeholder="Nome" className="flex-1 min-w-0 bg-transparent font-semibold text-slate-800 text-base border-b border-dashed border-slate-300 focus:outline-none focus:border-sky-500" />
+          <input value={cognome} onChange={(e) => setCognome(e.target.value)} onBlur={() => cognome !== (cl.cognome || "") && salva({ cognome: cognome.trim() })} placeholder="Cognome" className="flex-1 min-w-0 bg-transparent font-semibold text-slate-800 text-base border-b border-dashed border-slate-300 focus:outline-none focus:border-sky-500" />
+        </div>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {cl.obiettivo_attuale && chip(labelObiettivo(cl.obiettivo_attuale))}
+          {cl.livello_allenamento && chip(cl.livello_allenamento)}
+          {salute.map((x) => <span key={x}>{chip(x)}</span>)}
+        </div>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (cl.note_particolari || "") && salva({ note_particolari: note.trim() || null })} rows={2} placeholder="Note particolari (infortuni, limiti, cose da ricordare in sala)…" className="w-full mt-2 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700" />
+      </div>
+      <div className="px-3 pt-2 space-y-2"><RestrizioniCliente clientId={cl.id} /><ScarichiCliente clientId={cl.id} /></div>
+      <div className="px-1 py-1"><DiarioClienteHost clientId={cl.id} isAdmin /></div>
+      <div className="px-3 pb-3 space-y-2">
+        <div className="flex gap-2">
+          <button onClick={() => setSezione(sezione === "progressi" ? null : "progressi")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "progressi" ? "#27466D" : "#fff", color: sezione === "progressi" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Progressi carichi</button>
+          <button onClick={() => setSezione(sezione === "consigli" ? null : "consigli")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "consigli" ? "#27466D" : "#fff", color: sezione === "consigli" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prossimo allenamento</button>
+          <button onClick={() => setSezione(sezione === "valutazione" ? null : "valutazione")} className="flex-1 py-1.5 rounded-lg text-xs font-semibold" style={{ background: sezione === "valutazione" ? "#27466D" : "#fff", color: sezione === "valutazione" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazione</button>
+        </div>
+        {sezione === "progressi" && <><AderenzaAllenamenti clientId={cl.id} /><AnalisiCarichi clientId={cl.id} renderGestione={(g) => (<><ScarichiCoach clientId={cl.id} scarichi={g.scarichi} onChange={g.ricarica} /><CambiPalestraCoach clientId={cl.id} cambi={g.cambi} onChange={g.ricarica} /></>)} /></>}
+        {sezione === "consigli" && <ConsigliProgramma client={cl} />}
+        {sezione === "valutazione" && <ValutazioniBulb client={cl} />}
+        <div className="flex justify-between text-xs pt-1">
+          <button onClick={() => onApri(cl.id)} className="underline" style={{ color: "#3F78B3" }}>Apri scheda completa</button>
+          <button onClick={onToglila} className="text-slate-400 underline">Togli dal gruppo</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* GRUPPO — presenze alle lezioni e pagamento condiviso               */
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Recuperi lezioni e saldo pacchetti                                  */
+/* ------------------------------------------------------------------ */
+const PREZZI_GRUPPO = { 4: 200, 8: 320, 12: 480, 24: 912 }; // totale per il gruppo da 4
+const fmtEuro = (n) => `${Number(n).toFixed(2).replace(".", ",").replace(",00", "")}€`;
+// ultimo giorno del mese successivo a quello della data indicata
+const fineMeseSuccessivo = (ymd) => { const [a, m] = ymd.split("-").map(Number); const d = new Date(Date.UTC(a, m + 1, 0)); return d.toISOString().slice(0, 10); };
+const inizioMeseSuccessivo = (ymd) => { const [a, m] = ymd.split("-").map(Number); return new Date(Date.UTC(a, m, 1)).toISOString().slice(0, 10); };
+
+// una lezione annullata in tempo e' recuperabile solo nel mese successivo: se non viene recuperata, diventa persa
+async function scadenzaRecuperi(clientIds) {
+  if (!clientIds?.length) return;
+  const oggi = formatDataLocale(new Date());
+  const { data: scad } = await supabase.from("calendar_events").select("*").in("client_id", clientIds).eq("tipo", "lezione").eq("stato", "annullata").eq("recuperata", false).not("recupero_entro", "is", null).lt("recupero_entro", oggi);
+  for (const ev of scad || []) {
+    await supabase.from("calendar_events").update({ stato: "persa", recuperata: true }).eq("id", ev.id);
+    await collegaLezionePacchetto(ev.client_id, { ...ev, stato: "persa" }); // occupa una lezione del pacchetto
+  }
+}
+
+function RecuperiGruppo({ membri }) {
+  const [lista, setLista] = useState(null);
+  useEffect(() => { (async () => {
+    await scadenzaRecuperi(membri.map((m) => m.id));
+    const { data } = await supabase.from("calendar_events").select("id, client_id, data, recupero_entro").in("client_id", membri.map((m) => m.id)).eq("tipo", "lezione").eq("stato", "annullata").eq("recuperata", false).not("recupero_entro", "is", null).order("recupero_entro");
+    setLista(data || []);
+  })(); }, [membri.map((m) => m.id).join(",")]);
+  if (!lista || lista.length === 0) return null;
+  const fmt = (d) => d.split("-").reverse().slice(0, 2).join("/");
+  return (
+    <div className="rounded-xl p-3 space-y-1.5" style={{ background: "#E1EEFB" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Recuperi da fare</p>
+      {lista.map((e) => { const m = membri.find((x) => x.id === e.client_id); return <p key={e.id} className="text-xs text-slate-600">{m?.nome || "Cliente"}: lezione del {fmt(e.data)} annullata in tempo, da recuperare entro il {fmt(e.recupero_entro)}</p>; })}
+    </div>
+  );
+}
+
+function StatoPagamentiGruppo({ membri, chiave }) {
+  const [daSaldare, setDaSaldare] = useState([]);
+  useEffect(() => { (async () => {
+    const { data } = await supabase.from("pacchetti_lezioni").select("id, client_id, numero_lezioni, importo_quota").in("client_id", membri.map((m) => m.id)).eq("saldato", false).eq("stato", "attivo");
+    setDaSaldare(data || []);
+  })(); }, [membri.map((m) => m.id).join(","), chiave]);
+  if (daSaldare.length === 0) return <p className="text-[11px]" style={{ color: "#3F78B3" }}>Pacchetti: tutti saldati ✓</p>;
+  return (
+    <div className="rounded-xl p-3 space-y-1" style={{ background: "#FFFBEF", border: "1.5px solid #F7E9BE" }}>
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Da saldare</p>
+      {daSaldare.map((p) => { const m = membri.find((x) => x.id === p.client_id); return <p key={p.id} className="text-xs text-slate-600">{m?.nome || "Cliente"}: pacchetto da {p.numero_lezioni} lezioni{p.importo_quota ? ` · ${fmtEuro(p.importo_quota)}` : ""}</p>; })}
+    </div>
+  );
+}
+
+function PresenzeGruppo({ gruppo, membri }) {
+  const [eventi, setEventi] = useState(null);
+  const [dataSel, setDataSel] = useState(null);
+  const oggi = formatDataLocale(new Date());
+  const carica = async () => {
+    const { data } = await supabase.from("calendar_events").select("id, client_id, data, ora, assente").eq("gruppo_id", gruppo.id).eq("tipo", "lezione").eq("stato", "confermato").gte("data", addGiorni(oggi, -21)).lte("data", addGiorni(oggi, 21)).order("data");
+    const lista = data || [];
+    setEventi(lista);
+    const date = [...new Set(lista.map((e) => `${e.data}|${(e.ora || "").slice(0, 5)}`))];
+    setDataSel((cur) => cur || date.filter((d) => d.split("|")[0] <= oggi).pop() || date[0] || null);
+  };
+  useEffect(() => { carica(); }, [gruppo.id]);
+  const date = eventi ? [...new Set(eventi.map((e) => `${e.data}|${(e.ora || "").slice(0, 5)}`))] : [];
+  const imposta = async (ev, assente) => {
+    setEventi((l) => l.map((x) => (x.id === ev.id ? { ...x, assente } : x)));
+    await supabase.from("calendar_events").update({ assente }).eq("id", ev.id);
+  };
+  const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const evSel = (eventi || []).filter((e) => `${e.data}|${(e.ora || "").slice(0, 5)}` === dataSel);
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Presenze alla lezione</p>
+      <p className="text-xs text-slate-500">Segna chi è assente. L'assenza non cambia il pacchetto: la lezione viene scalata comunque.</p>
+      {!eventi ? <Spinner /> : date.length === 0 ? <p className="text-xs text-slate-400">Nessuna lezione di gruppo confermata nelle ultime/prossime 3 settimane.</p> : (
+        <>
+          <div className="flex gap-1.5 overflow-x-auto">
+            {date.map((d) => { const [dd, oo] = d.split("|"); return <button key={d} onClick={() => setDataSel(d)} className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: dataSel === d ? "#27466D" : "#fff", color: dataSel === d ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{dd.split("-").reverse().slice(0, 2).join("/")} {oo}</button>; })}
+          </div>
+          <div className="space-y-1.5">
+            {membri.map((m) => {
+              const ev = evSel.find((e) => e.client_id === m.id);
+              if (!ev) return <p key={m.id} className="text-xs text-slate-400">{nomeCl(m)}: non prenotata</p>;
+              return (
+                <div key={m.id} className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-slate-700">{nomeCl(m)}</span>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => imposta(ev, false)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: !ev.assente ? "#27466D" : "#fff", color: !ev.assente ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Presente</button>
+                    <button onClick={() => imposta(ev, true)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: ev.assente ? "#8DB8E8" : "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Assente</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PagamentoCondivisoGruppo({ membri, onFatto }) {
+  const nomeCl = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Cliente";
+  const [chi, setChi] = useState(membri[0]?.id || "");
+  const [tipo, setTipo] = useState("Pacchetto lezioni Bulb");
+  const [metodo, setMetodo] = useState("");
+  const [dataP, setDataP] = useState(formatDataLocale(new Date()));
+  const [tot, setTot] = useState("");
+  const [coperte, setCoperte] = useState(membri.map((m) => m.id));
+  const [uguali, setUguali] = useState(true);
+  const [quote, setQuote] = useState({});
+  const [lezioni, setLezioni] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const scegliOfferta = (n) => { if (!n) return; setTipo("Pacchetto lezioni Bulb"); setTot(String(PREZZI_GRUPPO[n])); setLezioni(String(n)); };
+  const [msg, setMsg] = useState("");
+  const totale = Number(String(tot).replace(",", ".")) || 0;
+  const n = coperte.length;
+  const quotaUguale = (i) => { if (!n) return 0; const base = Math.floor((totale * 100) / n) / 100; return i === n - 1 ? Math.round((totale - base * (n - 1)) * 100) / 100 : base; };
+  const importi = coperte.map((id, i) => (uguali ? quotaUguale(i) : Number(String(quote[id] ?? "").replace(",", ".")) || 0));
+  const somma = Math.round(importi.reduce((a, b) => a + b, 0) * 100) / 100;
+  const quadra = totale > 0 && Math.abs(somma - totale) < 0.01;
+  const registra = async () => {
+    if (!quadra || !n) { setMsg("Controlla che la somma delle quote sia uguale al totale 🫶🏻"); return; }
+    const pagante = membri.find((m) => m.id === chi);
+    setSalvando(true); setMsg("");
+    try {
+      let creati = 0, pacchetti = 0;
+      for (let i = 0; i < coperte.length; i++) {
+        const id = coperte[i];
+        const { error } = await supabase.from("payments").insert({
+          client_id: id, data_pagamento: dataP, tipo_piano: tipo, importo: importi[i], metodo_pagamento: metodo || null, stato: "saldato",
+          note: id === chi && n === 1 ? null : `Pagamento condiviso: ${nomeCl(pagante || {})} ha versato ${totale.toFixed(2).replace(".", ",")}€ per ${n} ${n === 1 ? "cliente" : "clienti"}`,
+        });
+        if (error) throw error;
+        creati += 1;
+        const nl = parseInt(lezioni, 10);
+        if (tipo === "Pacchetto lezioni Bulb") await supabase.from("pacchetti_lezioni").update({ saldato: true }).eq("client_id", id).eq("saldato", false);
+        if (nl > 0 && tipo === "Pacchetto lezioni Bulb") {
+          const { data: att } = await supabase.from("pacchetti_lezioni").select("id").eq("client_id", id).eq("stato", "attivo").limit(1).maybeSingle();
+          if (!att) { await supabase.from("pacchetti_lezioni").insert({ client_id: id, numero_lezioni: nl, stato: "attivo", saldato: true }); pacchetti += 1; }
+        }
+      }
+      setMsg(`Registrato ✨ ${creati} ${creati === 1 ? "pagamento" : "pagamenti"}${pacchetti ? ` e ${pacchetti} ${pacchetti === 1 ? "pacchetto creato" : "pacchetti creati"}` : ""}.`);
+      setTot(""); setQuote({});
+      onFatto && onFatto();
+    } catch (e) { setMsg("Non è stato possibile registrare tutto: controlla lo storico pagamenti prima di riprovare."); }
+    setSalvando(false);
+  };
+  const campo = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm";
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
+      <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Pagamento condiviso</p>
+      <p className="text-xs text-slate-500">Una persona paga, tu scegli per chi e come dividere. Ogni cliente riceve la sua quota nel proprio storico, il totale resta giusto.</p>
+      <label className="text-xs text-slate-500 block">Offerta Small Group (compila totale e lezioni)
+        <select defaultValue="" onChange={(e) => scegliOfferta(Number(e.target.value))} className={campo + " mt-1"}><option value="">— scegli —</option>{Object.entries(PREZZI_GRUPPO).map(([n, p]) => <option key={n} value={n}>{n} lezioni · {p}€ totali</option>)}</select></label>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="text-xs text-slate-500">Chi paga
+          <select value={chi} onChange={(e) => setChi(e.target.value)} className={campo + " mt-1"}>{membri.map((m) => <option key={m.id} value={m.id}>{nomeCl(m)}</option>)}</select></label>
+        <label className="text-xs text-slate-500">Tipo
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className={campo + " mt-1"}><option>Pacchetto lezioni Bulb</option><option>Lezione singola Bulb</option></select></label>
+        <label className="text-xs text-slate-500">Metodo
+          <select value={metodo} onChange={(e) => setMetodo(e.target.value)} className={campo + " mt-1"}><option value="">—</option>{METODI_PAGAMENTO.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}</select></label>
+        <label className="text-xs text-slate-500">Data<InputData value={dataP} onChange={(e) => setDataP(e.target.value)} className="mt-1" /></label>
+        <label className="text-xs text-slate-500">Totale versato (€)<input type="number" step="0.01" value={tot} onChange={(e) => setTot(e.target.value)} className={campo + " mt-1"} placeholder="es. 400" /></label>
+        {tipo === "Pacchetto lezioni Bulb" && <label className="text-xs text-slate-500">Lezioni del pacchetto (facoltativo)<input type="number" min="1" value={lezioni} onChange={(e) => setLezioni(e.target.value)} className={campo + " mt-1"} placeholder="es. 10" /></label>}
+      </div>
+      <div>
+        <p className="text-xs text-slate-500 mb-1">Per chi (clienti coperte)</p>
+        <div className="flex flex-wrap gap-2">
+          {membri.map((m) => { const on = coperte.includes(m.id); return <button key={m.id} onClick={() => setCoperte(on ? coperte.filter((x) => x !== m.id) : [...coperte, m.id])} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{nomeCl(m)}</button>; })}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        {[[true, "In parti uguali"], [false, "Importi a mano"]].map(([v, l]) => <button key={String(v)} onClick={() => setUguali(v)} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: uguali === v ? "#27466D" : "#fff", color: uguali === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>)}
+      </div>
+      <div className="space-y-1.5">
+        {coperte.map((id, i) => {
+          const m = membri.find((x) => x.id === id);
+          return (
+            <div key={id} className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-slate-700">{nomeCl(m)}</span>
+              {uguali ? <span className="font-semibold" style={{ color: "#27466D" }}>{importi[i].toFixed(2).replace(".", ",")} €</span>
+                : <input type="number" step="0.01" value={quote[id] ?? ""} onChange={(e) => setQuote({ ...quote, [id]: e.target.value })} className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-right" placeholder="€" />}
+            </div>
+          );
+        })}
+        {totale > 0 && <p className="text-[11px]" style={{ color: quadra ? "#3F78B3" : "#64748b" }}>{quadra ? "La somma torna con il totale ✓" : `Somma quote ${somma.toFixed(2).replace(".", ",")} € · totale ${totale.toFixed(2).replace(".", ",")} €`}</p>}
+      </div>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      <button onClick={registra} disabled={salvando || !quadra || !n} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>{salvando ? "Registro…" : "Registra il pagamento"}</button>
+    </div>
+  );
+}
+
+function CambiaOrarioGruppo({ ids, evento, onFatto, onAnnulla }) {
+  const [data, setData] = useState(evento.data);
+  const [ora, setOra] = useState(evento.ora ? evento.ora.slice(0, 5) : SLOT_ORARI[6]);
+  const [luogo, setLuogo] = useState(evento.luogo || LUOGHI[0]);
+  const [salvando, setSalvando] = useState(false);
+  const conferma = async () => {
+    setSalvando(true);
+    for (const id of ids) {
+      await supabase.from("calendar_events").update({ data, ora, luogo, stato: "confermato" }).eq("id", id);
+      await sincronizzaLezionePacchetto(id);
+    }
+    const { data: evs } = await supabase.from("calendar_events").select("*").in("id", ids);
+    for (const ev of evs || []) { try { await avvisaLezioneCliente(ev, "nuova"); } catch (e) { /* ignora */ } }
+    setSalvando(false); onFatto();
+  };
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-sm font-medium text-slate-700">Cambia orario e conferma per tutto il gruppo</p>
+      <div className="grid grid-cols-2 gap-3">
+        <InputData value={data} onChange={(e) => setData(e.target.value)} />
+        <OraCoach value={ora} onChange={(e) => setOra(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      </div>
+      <SelezionaLuogo value={luogo} onChange={setLuogo} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+      <div className="flex gap-2">
+        <button onClick={conferma} disabled={salvando} className="flex-1 bg-slate-800 text-white rounded-xl py-2 text-sm font-medium">{salvando ? "Salvo..." : "Conferma per tutte"}</button>
+        <button onClick={onAnnulla} className="px-4 rounded-xl border border-slate-200 text-sm text-slate-500">Annulla</button>
+      </div>
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PROGRAMMA DI GRUPPO — sessioni create a mano, valide per tutte       */
+/* ------------------------------------------------------------------ */
+function ProgrammaGruppo({ membri }) {
+  const ids = membri.map((m) => m.id);
+  const [giorni, setGiorni] = useState(null); // [{ id, client_id, nome, ordine }]
+  const [esercizi, setEsercizi] = useState([]);
+  const [libreria, setLibreria] = useState([]);
+  const [nuovaSess, setNuovaSess] = useState("");
+  const [aperta, setAperta] = useState(null);
+  const [f, setF] = useState({ nome: "", serie: "3", rip: "10", recupero: "", note: "" });
+  const [msg, setMsg] = useState("");
+  const [lavoro, setLavoro] = useState(false);
+  const carica = async () => {
+    if (!ids.length) { setGiorni([]); return; }
+    const { data: g } = await supabase.from("training_days").select("id, client_id, nome, ordine, scheda_archiviata").in("client_id", ids).order("ordine");
+    const att = (g || []).filter((x) => !x.scheda_archiviata && x.nome !== "Circuito");
+    setGiorni(att);
+    if (att.length) { const { data: e } = await supabase.from("training_exercises").select("id, client_id, training_day_id, nome, serie, ripetizioni, recupero_sec, note, ordine").in("training_day_id", att.map((x) => x.id)).order("ordine"); setEsercizi(e || []); } else setEsercizi([]);
+  };
+  useEffect(() => { carica(); }, [ids.join(",")]);
+  useEffect(() => { supabase.from("esercizi_video").select("nome").order("nome").then(({ data }) => setLibreria([...new Set((data || []).map((x) => x.nome))]), () => {}); }, []);
+  if (!giorni) return <Spinner />;
+  const nomi = [...new Set(giorni.map((g) => g.nome))];
+  const nomeMembro = (id) => (membri.find((m) => m.id === id)?.nome || "").trim() || "cliente";
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 4500); };
+  const creaSessioni = async (lista) => {
+    setLavoro(true);
+    try {
+      for (const nome of lista) {
+        for (const m of membri) {
+          const suoi = giorni.filter((g) => g.client_id === m.id);
+          if (suoi.some((g) => g.nome === nome)) continue;
+          const { data: tutti } = await supabase.from("training_days").select("ordine").eq("client_id", m.id);
+          await supabase.from("training_days").insert({ client_id: m.id, nome, ordine: Math.max(0, ...(tutti || []).map((x) => x.ordine ?? 0)) + 1 });
+        }
+      }
+      setNuovaSess(""); await carica(); avviso(`Fatto ✨ ${lista.length === 1 ? "Sessione creata" : "Sessioni create"} per tutte le clienti`);
+    } catch (e) { avviso("Non è stato possibile creare tutto: controlla e riprova 🫶🏻"); }
+    setLavoro(false);
+  };
+  const quanteSessioni = (n) => {
+    const base = nomi.length;
+    creaSessioni(Array.from({ length: n }, (_, i) => `Sessione ${base + i + 1}`));
+  };
+  const rinomina = async (nome) => {
+    const nuovo = (prompt("Nuovo nome della sessione:", nome) || "").trim();
+    if (!nuovo || nuovo === nome) return;
+    await supabase.from("training_days").update({ nome: nuovo }).in("id", giorni.filter((g) => g.nome === nome).map((g) => g.id));
+    setAperta(nuovo); await carica();
+  };
+  const eliminaSessione = async (nome) => {
+    const gg = giorni.filter((g) => g.nome === nome).map((g) => g.id);
+    if (!await confermaApp(`Elimino "${nome}" per TUTTE le clienti, con esercizi e carichi registrati? Non si può annullare.`)) return;
+    const exIds = esercizi.filter((e) => gg.includes(e.training_day_id)).map((e) => e.id);
+    if (exIds.length) await supabase.from("training_entries").delete().in("exercise_id", exIds);
+    await supabase.from("training_exercises").delete().in("training_day_id", gg);
+    await supabase.from("training_days").delete().in("id", gg);
+    setAperta(null); await carica();
+  };
+  const aggiungiEsercizio = async (nome) => {
+    const nomeEs = f.nome.trim();
+    if (!nomeEs) return;
+    setLavoro(true);
+    try {
+      for (const g of giorni.filter((x) => x.nome === nome)) {
+        const n = esercizi.filter((e) => e.training_day_id === g.id).length;
+        const note = [f.recupero.trim() ? `Recupero: ${f.recupero.trim()}` : "", f.note.trim()].filter(Boolean).join(" — ");
+        await supabase.from("training_exercises").insert({ client_id: g.client_id, training_day_id: g.id, nome: nomeEs, tipo: "forza", ordine: n + 1, serie: Number(f.serie) || null, ripetizioni: f.rip.trim() || null, note: note || null });
+      }
+      setF((x) => ({ ...x, nome: "", note: "" })); await carica();
+    } catch (e) { avviso("Non è stato possibile aggiungerlo: riprova 🫶🏻"); }
+    setLavoro(false);
+  };
+  const eliminaEsercizio = async (nomeSess, nomeEs) => {
+    if (!await confermaApp(`Tolgo "${nomeEs}" da "${nomeSess}" per tutte le clienti? I carichi già segnati su questo esercizio vengono eliminati.`)) return;
+    const gg = giorni.filter((g) => g.nome === nomeSess).map((g) => g.id);
+    const daTogliere = esercizi.filter((e) => gg.includes(e.training_day_id) && e.nome === nomeEs).map((e) => e.id);
+    if (daTogliere.length) { await supabase.from("training_entries").delete().in("exercise_id", daTogliere); await supabase.from("training_exercises").delete().in("id", daTogliere); }
+    await carica();
+  };
+  const salvaCampo = async (nomeSess, nomeEs, campi) => {
+    const gg = giorni.filter((g) => g.nome === nomeSess).map((g) => g.id);
+    const target = esercizi.filter((e) => gg.includes(e.training_day_id) && e.nome === nomeEs).map((e) => e.id);
+    if (target.length) await supabase.from("training_exercises").update(campi).in("id", target);
+    await carica();
+  };
+  const inp = "border border-slate-200 rounded-lg px-2.5 py-2 text-sm bg-white";
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-3">
+      <div>
+        <p className="text-sm font-semibold" style={{ color: "#27466D" }}>Sessioni del gruppo</p>
+        <p className="text-xs text-slate-500">Crea le sessioni che ripetete ogni settimana (es. 2 lezioni = 2 sessioni) e gli esercizi: valgono per tutte le clienti. I carichi e le note li segni poi in "Avvia la sessione", per ognuna.</p>
+      </div>
+      {nomi.length === 0 && <p className="text-xs text-slate-400">Nessuna sessione ancora. Quante lezioni a settimana fa il gruppo?</p>}
+      <div className="flex flex-wrap gap-2 items-center">
+        {[1, 2, 3].map((n) => <button key={n} disabled={lavoro} onClick={() => quanteSessioni(n)} className="px-3 py-1.5 rounded-full text-xs font-semibold disabled:opacity-50" style={{ background: "#E1EEFB", color: "#27466D" }}>+ {n} {n === 1 ? "sessione" : "sessioni"}</button>)}
+        <input value={nuovaSess} onChange={(e) => setNuovaSess(e.target.value)} placeholder="oppure un nome (es. Lezione A)" className={inp + " flex-1 min-w-[140px] text-xs"} />
+        <button disabled={lavoro || !nuovaSess.trim()} onClick={() => creaSessioni([nuovaSess.trim()])} className="px-3 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Crea</button>
+      </div>
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+      {nomi.map((nome) => {
+        const gg = giorni.filter((g) => g.nome === nome);
+        const mancano = membri.filter((m) => !gg.some((g) => g.client_id === m.id));
+        const base = gg[0];
+        const lista = esercizi.filter((e) => e.training_day_id === base.id).sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0));
+        const diversi = gg.some((g) => esercizi.filter((e) => e.training_day_id === g.id).length !== lista.length);
+        return (
+          <div key={nome} className="rounded-xl border border-slate-200">
+            <button onClick={() => setAperta(aperta === nome ? null : nome)} className="w-full flex items-center justify-between px-3 py-2.5 text-left">
+              <span className="text-sm font-semibold" style={{ color: "#27466D" }}>{nome} <span className="text-slate-400 font-normal text-xs">· {lista.length} esercizi</span></span>
+              <ChevronRight size={16} className={aperta === nome ? "rotate-90" : ""} />
+            </button>
+            {aperta === nome && (
+              <div className="px-3 pb-3 space-y-2.5">
+                {mancano.length > 0 && <p className="text-[11px]" style={{ color: "#7a6a3a" }}>Manca a: {mancano.map((m) => nomeMembro(m.id)).join(", ")}. Premi "+ Crea" con lo stesso nome per aggiungerla.</p>}
+                {diversi && <p className="text-[11px]" style={{ color: "#7a6a3a" }}>Le clienti non hanno tutte gli stessi esercizi (modifiche fatte singolarmente): qui vedi quelli di {nomeMembro(base.client_id)}.</p>}
+                {lista.length === 0 && <p className="text-xs text-slate-400">Ancora nessun esercizio: aggiungi il primo qui sotto.</p>}
+                {lista.map((e) => (
+                  <div key={e.id} className="flex items-center gap-2 border-b border-slate-100 pb-1.5 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-slate-700 truncate">{e.nome}</p>
+                      <div className="flex gap-1.5 items-center mt-0.5">
+                        <input defaultValue={e.serie ?? ""} inputMode="numeric" onBlur={(ev) => Number(ev.target.value) !== (e.serie ?? 0) && salvaCampo(nome, e.nome, { serie: Number(ev.target.value) || null })} className="w-10 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-center" />
+                        <span className="text-[11px] text-slate-400">serie ×</span>
+                        <input defaultValue={e.ripetizioni ?? ""} onBlur={(ev) => ev.target.value !== (e.ripetizioni ?? "") && salvaCampo(nome, e.nome, { ripetizioni: ev.target.value.trim() || null })} className="w-16 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-center" />
+                        <span className="text-[11px] text-slate-400">rip</span>
+                      </div>
+                      {e.note && <p className="text-[11px] text-slate-400 truncate">{e.note}</p>}
+                    </div>
+                    <button onClick={() => eliminaEsercizio(nome, e.nome)} className="text-slate-300 text-sm px-1"><Ic n="x" bare/></button>
+                  </div>
+                ))}
+                <div className="rounded-lg p-2.5 space-y-2" style={{ background: "#F5FAFE" }}>
+                  <input list="libreria-esercizi-gruppo" value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} placeholder="Esercizio (scegli dalla libreria o scrivi)" className={inp + " w-full"} />
+                  <datalist id="libreria-esercizi-gruppo">{libreria.map((n) => <option key={n} value={n} />)}</datalist>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input value={f.serie} onChange={(e) => setF({ ...f, serie: e.target.value })} inputMode="numeric" placeholder="Serie" className={inp} />
+                    <input value={f.rip} onChange={(e) => setF({ ...f, rip: e.target.value })} placeholder="Rip (8-10)" className={inp} />
+                    <input value={f.recupero} onChange={(e) => setF({ ...f, recupero: e.target.value })} placeholder="Rec (90s)" className={inp} />
+                  </div>
+                  <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Note (facoltative)" className={inp + " w-full"} />
+                  <button disabled={lavoro || !f.nome.trim()} onClick={() => aggiungiEsercizio(nome)} className="w-full py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>+ Aggiungi per tutte le clienti</button>
+                </div>
+                <div className="flex gap-4 pt-0.5">
+                  <button onClick={() => rinomina(nome)} className="text-xs text-slate-500 underline">Rinomina sessione</button>
+                  <button onClick={() => eliminaSessione(nome)} className="text-xs text-slate-400 underline">Elimina sessione</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
+  const [membri, setMembri] = useState(null);
+  const [candidate, setCandidate] = useState([]);
+  const [nomeG, setNomeG] = useState(gruppo.nome);
+  const [giorno, setGiorno] = useState(gruppo.giorno || "");
+  const [ora, setOra] = useState(gruppo.ora || "");
+  const [menu, setMenu] = useState(false);
+  const [sessioneTel, setSessioneTel] = useState(false);
+  const [telIniziale, setTelIniziale] = useState(null);
+  const [completa, setCompleta] = useState(false); // false = vista semplice per la sessione dal telefono
+  const [serieOggi, setSerieOggi] = useState({});
+  useEffect(() => { (async () => {
+    const oggiS = formatDataLocale(new Date());
+    const { data: cl } = await supabase.from("clients").select("id").eq("gruppo_id", gruppo.id);
+    const ids = (cl || []).map((c) => c.id);
+    if (!ids.length) return;
+    const { data } = await supabase.from("training_entries").select("client_id, completata, kg").in("client_id", ids).eq("data", oggiS);
+    const m = {}; (data || []).forEach((r) => { if (r.completata !== false && r.kg != null) m[r.client_id] = (m[r.client_id] || 0) + 1; });
+    setSerieOggi(m);
+  })(); }, [gruppo.id, sessioneTel]);
+  const [pannello, setPannello] = useState(null); // null | "presenze" | "pagamento"
+  const [chiavePag, setChiavePag] = useState(0);
+  const [copia, setCopia] = useState({ da: "", a: [] });
+  const [msg, setMsg] = useState("");
+  const [notaG, setNotaG] = useState(gruppo.nota || "");
+  const [modoVal, setModoVal] = useState(false);
+  const [csvAperto, setCsvAperto] = useState(false);
+  const [progAperto, setProgAperto] = useState(false);
+  const [csvDest, setCsvDest] = useState(null); // null = tutte le clienti del gruppo
+  const [csvSostituisci, setCsvSostituisci] = useState(false);
+  const [csvInCorso, setCsvInCorso] = useState(false);
+  const importaCsvGruppo = async (file) => {
+    if (!file) return;
+    const dest = (csvDest || (membri || []).map((m) => m.id));
+    if (!dest.length) return;
+    const nomi = dest.map((id) => (membri || []).find((m) => m.id === id)).filter(Boolean).map((m) => `${m.nome} ${m.cognome || ""}`.trim()).join(", ");
+    if (!await confermaApp(`Importo il programma del file per: ${nomi}.${csvSostituisci ? " Il programma attuale di ognuna verrà archiviato (con tutti i carichi) e sostituito." : " Viene aggiunto a quello che hanno già."} Procedo?`)) return;
+    setCsvInCorso(true); setMsg("Importo…");
+    try {
+      const righe = parseCSV(await file.text());
+      if (righe.length < 2) throw new Error("File vuoto o non leggibile.");
+      let tot = { giorniCreati: 0, eserciziCreati: 0 };
+      for (const id of dest) { const r = await importaCsvPerCliente(righe, id, csvSostituisci); tot.giorniCreati += r.giorniCreati; tot.eserciziCreati += r.eserciziCreati; }
+      setMsg(`Fatto ✨ ${dest.length} clienti: ${tot.giorniCreati} giorni e ${tot.eserciziCreati} esercizi creati in totale.`);
+      setCsvAperto(false); setMembri(null); await carica();
+    } catch (e) { setMsg(e?.message ? `Import non riuscito: ${e.message}` : "Import non riuscito: controlla il file e riprova."); }
+    setCsvInCorso(false);
+    setTimeout(() => setMsg(""), 7000);
+  };
+  const [prenota, setPrenota] = useState(false);
+  const [lez, setLez] = useState({ data: formatDataLocale(new Date()), ora: SLOT_ORARI[6], luogo: LUOGHI[0], nota: "" });
+  const [prossime, setProssime] = useState([]);
+  const caricaProssime = async () => {
+    const { data } = await supabase.from("calendar_events").select("data, ora, luogo, stato").eq("gruppo_id", gruppo.id).eq("tipo", "lezione").in("stato", ["confermato", "richiesta"]).gte("data", formatDataLocale(new Date())).order("data").order("ora");
+    const viste = new Set(); const lista = [];
+    (data || []).forEach((x) => { const k = `${x.data}|${x.ora}`; if (!viste.has(k)) { viste.add(k); lista.push(x); } });
+    setProssime(lista);
+  };
+  useEffect(() => { caricaProssime(); }, [gruppo.id]);
+  const prenotaOra = async () => {
+    setMsg("Prenoto…");
+    const n = await prenotaLezioneGruppo(gruppo.id, lez);
+    setMsg(n ? `Lezione prenotata per ${n} clienti ✨` : "Il gruppo non ha clienti: aggiungile prima 🫶🏻");
+    setPrenota(false); caricaProssime(); onChanged();
+    setTimeout(() => setMsg(""), 4000);
+  };
+  const carica = async () => {
+    const { data } = await supabase.from("clients").select("*").eq("gruppo_id", gruppo.id).order("codice");
+    setMembri(data || []);
+    const { data: altre } = await supabase.from("clients").select("id, nome, cognome").is("gruppo_id", null).in("tipo_servizio", ["presenza", "ibrido"]).eq("archiviato", false).order("nome");
+    setCandidate(altre || []);
+  };
+  useEffect(() => { carica(); }, [gruppo.id]);
+  const salvaG = async (campi) => { await supabase.from("gruppi_bulb").update(campi).eq("id", gruppo.id); onChanged(); };
+  const aggiungi = async (id) => { await supabase.from("clients").update({ gruppo_id: gruppo.id }).eq("id", id); await carica(); };
+  const nuovoProfilo = async () => {
+    const n = (membri || []).length + 1;
+    const codice = `GR-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+    await supabase.from("clients").insert({ codice, nome: `Cliente ${n}`, cognome: "", tipo_servizio: "presenza", sede_abituale: "Via San Secondo 39, Torino", gruppo_id: gruppo.id });
+    await carica();
+  };
+  const togli = async (id) => { if (!await confermaApp("Tolgo questa cliente dal gruppo? Il suo profilo e i suoi allenamenti restano.")) return; await supabase.from("clients").update({ gruppo_id: null }).eq("id", id); await carica(); };
+  const nomeCompleto = (c) => `${c.nome || ""} ${c.cognome || ""}`.trim() || "Senza nome";
+
+  const svuotaAllenamentiGruppo = async () => {
+    const ids = (membri || []).map((m) => m.id);
+    if (!ids.length) return;
+    if (!await confermaApp(`Elimino TUTTI i programmi (attuali e archiviati) con esercizi e carichi registrati di: ${(membri || []).map((m) => m.nome).join(", ")}? Non si può annullare.`)) return;
+    setMsg("Elimino…");
+    try {
+      await supabase.from("training_entries").delete().in("client_id", ids);
+      await supabase.from("training_exercises").delete().in("client_id", ids);
+      await supabase.from("training_days").delete().in("client_id", ids);
+      setMsg("Fatto ✨ Allenamenti svuotati per tutto il gruppo.");
+      setMembri(null); await carica();
+    } catch (e) { setMsg("Non è stato possibile eliminare tutto: riprova."); }
+    setTimeout(() => setMsg(""), 5000);
+  };
+
+  const eseguiCopia = async () => {
+    if (!copia.da || !copia.a.length) return;
+    const dest = copia.a.filter((x) => x !== copia.da);
+    const nomiDest = dest.map((id) => nomeCompleto(membri.find((m) => m.id === id))).join(", ");
+    if (!await confermaApp(`Copio il programma di ${nomeCompleto(membri.find((m) => m.id === copia.da))} a: ${nomiDest}? Viene AGGIUNTO ai programmi che hanno già (niente viene cancellato). Poi potrai ritoccare ogni cliente con le sue variazioni.`)) return;
+    setMsg("Copio…");
+    try {
+      const { data: giorni } = await supabase.from("training_days").select("*").eq("client_id", copia.da).order("ordine");
+      const attivi = (giorni || []).filter((g) => !g.scheda_archiviata);
+      const { data: esAll } = await supabase.from("training_exercises").select("*").eq("client_id", copia.da).order("ordine");
+      for (const dst of dest) {
+        const { data: esistenti } = await supabase.from("training_days").select("ordine").eq("client_id", dst);
+        let base = Math.max(-1, ...(esistenti || []).map((x) => x.ordine ?? 0)) + 1;
+        for (const g of attivi) {
+          const { data: nuovo, error } = await supabase.from("training_days").insert({ client_id: dst, nome: g.nome, ordine: base++ }).select().single();
+          if (error || !nuovo) throw error || new Error("giorno");
+          const righe = (esAll || []).filter((e) => e.training_day_id === g.id).map((e) => ({
+            client_id: dst, training_day_id: nuovo.id, nome: e.nome, ordine: e.ordine, serie: e.serie, ripetizioni: e.ripetizioni, note: e.note,
+            tipo: e.tipo, esecuzione: e.esecuzione, recupero_sec: e.recupero_sec, tecnica: e.tecnica, serie_top: e.serie_top, serie_backoff: e.serie_backoff,
+          }));
+          if (righe.length) { const { error: e2 } = await supabase.from("training_exercises").insert(righe); if (e2) throw e2; }
+        }
+      }
+      setMsg("Fatto! Programma copiato ✨ (ricarico le schede)");
+      setCopia({ da: "", a: [] });
+      setMenu(false);
+      setMembri(null); await carica();
+      setTimeout(() => setMsg(""), 4000);
+    } catch (e) { setMsg("Non è stato possibile copiare tutto: controlla le schede prima di riprovare."); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: "#F1F6FB" }}>
+      <div className="sticky top-0 z-10 px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: "#27466D" }}>
+        <button onClick={() => { onChanged(); onClose(); }} className="text-white text-sm font-semibold flex items-center gap-1"><ArrowLeft size={16} /> Gruppi</button>
+        <input value={nomeG} onChange={(e) => setNomeG(e.target.value)} onBlur={() => nomeG.trim() && nomeG !== gruppo.nome && salvaG({ nome: nomeG.trim() })} className="bg-transparent text-white font-semibold text-sm border-b border-dashed border-white/40 focus:outline-none min-w-0 w-36" />
+        <input value={giorno} onChange={(e) => setGiorno(e.target.value)} onBlur={() => salvaG({ giorno: giorno.trim() || null })} placeholder="giorno" className="bg-transparent text-sky-100 text-xs border-b border-dashed border-white/30 focus:outline-none w-20 placeholder:text-sky-200/60" />
+        <input value={ora} onChange={(e) => setOra(e.target.value)} onBlur={() => salvaG({ ora: ora.trim() || null })} placeholder="ora" className="bg-transparent text-sky-100 text-xs border-b border-dashed border-white/30 focus:outline-none w-14 placeholder:text-sky-200/60" />
+        <div className="flex gap-1.5 ml-auto overflow-x-auto">
+          {(membri || []).map((m) => <a key={m.id} href={`#membro-${m.id}`} onClick={(e) => { e.preventDefault(); document.getElementById(`membro-${m.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }} className="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap" style={{ background: "#C9E0F7", color: "#27466D" }}>{m.nome || "?"}</a>)}
+        </div>
+      </div>
+      <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
+        {!membri ? <Spinner /> : (
+          <>
+            <button onClick={() => { setTelIniziale(null); setSessioneTel(true); }} className="w-full py-4 rounded-2xl text-base font-bold text-white" style={{ background: "#27466D" }}>▶ Avvia la sessione di oggi</button>
+            {!completa && (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold tracking-wide text-slate-500 mb-2">LE CLIENTI</p>
+                  <div className="space-y-2">
+                    {membri.map((m) => (
+                      <button key={m.id} onClick={() => { setTelIniziale(m.id); setSessioneTel(true); }} className="w-full flex items-center gap-3 text-left bg-white rounded-2xl px-3 py-3" style={{ border: "1.5px solid #C9E0F7" }}>
+                        <span className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "#E1EEFB", color: "#27466D" }}>{(m.nome || "?").trim().charAt(0).toUpperCase()}</span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-semibold" style={{ color: "#27466D" }}>{`${m.nome || ""} ${m.cognome || ""}`.trim()}</span>
+                          <span className="block text-xs text-slate-500 truncate">{m.note_particolari || "—"}</span>
+                        </span>
+                        {serieOggi[m.id] > 0 && <span className="text-[11px] font-semibold px-2 py-1 rounded-full flex-shrink-0" style={{ background: "#E1EEFB", color: "#27466D" }}>{serieOggi[m.id]} serie oggi</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[11px] font-semibold tracking-wide text-slate-500">STRUMENTI</p>
+              </>
+            )}
+            <div className={completa ? "hidden" : "flex flex-wrap gap-2 items-center"}>
+              <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prenota lezione</button>
+              <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
+              <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Presenze</button>
+              <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Pagamento</button>
+              <button onClick={() => { setCompleta(true); setModoVal(true); }} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazioni</button>
+              <button onClick={() => setProgAperto(!progAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: progAperto ? "#27466D" : "#fff", color: progAperto ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Sessioni e programma</button>
+              <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Importa CSV</button>
+              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}><Ic n="trash"/> Svuota allenamenti di tutte</button>
+              <button onClick={() => setCompleta(true)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Gestione completa</button>
+            </div>
+            {!completa && msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+            {completa && <button onClick={() => { setCompleta(false); setModoVal(false); }} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>← Torna alla vista semplice</button>}
+            <div className={completa ? "flex flex-wrap gap-2 items-center" : "hidden"}>
+              <button onClick={() => setMenu(!menu)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Copia programma tra le clienti</button>
+              <button onClick={svuotaAllenamentiGruppo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#7a8da3", border: "1.5px solid #C9E0F7" }}><Ic n="trash"/> Svuota allenamenti di tutte</button>
+              <button onClick={nuovoProfilo} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo profilo vuoto</button>
+              {candidate.length > 0 && (
+                <select value="" onChange={(e) => e.target.value && aggiungi(e.target.value)} className="px-3 py-2 rounded-xl text-xs border border-slate-200 bg-white text-slate-700">
+                  <option value="">+ Aggiungi cliente esistente…</option>
+                  {candidate.map((c) => <option key={c.id} value={c.id}>{`${c.nome} ${c.cognome || ""}`.trim()}</option>)}
+                </select>
+              )}
+              <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
+              <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
+              <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>Presenze</button>
+              <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>Pagamento condiviso</button>
+              <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Importa programma da CSV (mobilità e stretching)</button>
+              <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
+              {msg && <span className="text-xs" style={{ color: "#3F78B3" }}>{msg}</span>}
+            </div>
+            <StatoPagamentiGruppo membri={membri} chiave={chiavePag} />
+            <RecuperiGruppo membri={membri} />
+            {pannello === "presenze" && <PresenzeGruppo gruppo={gruppo} membri={membri} />}
+            {pannello === "pagamento" && <PagamentoCondivisoGruppo membri={membri} onFatto={() => setChiavePag((k) => k + 1)} />}
+            {progAperto && <ProgrammaGruppo key={(membri || []).map((m) => m.id).join(",")} membri={membri} />}
+            {csvAperto && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs text-slate-600">Carichi lo stesso file CSV del programma e viene importato per tutte le clienti scelte, ognuna col suo programma (poi ritocchi le variazioni). Colonne: giorno, esercizio, serie, ripetizioni, recupero, tecnica, note (facoltative: scheda, tipo, esecuzione).</p>
+                <div className="flex flex-wrap gap-2">
+                  {membri.map((m) => {
+                    const on = (csvDest || membri.map((x) => x.id)).includes(m.id);
+                    return <button key={m.id} onClick={() => { const cur = csvDest || membri.map((x) => x.id); setCsvDest(on ? cur.filter((x) => x !== m.id) : [...cur, m.id]); }} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{`${m.nome} ${m.cognome || ""}`.trim()}</button>;
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  {[[false, "Aggiungi ai programmi esistenti"], [true, "Sostituisci (archivia l'attuale)"]].map(([v, l]) => <button key={String(v)} onClick={() => setCsvSostituisci(v)} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: csvSostituisci === v ? "#27466D" : "#fff", color: csvSostituisci === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>)}
+                </div>
+                <label className="block w-full py-2 rounded-xl text-sm font-semibold text-white text-center cursor-pointer" style={{ background: "#27466D", opacity: csvInCorso ? 0.5 : 1 }}>
+                  {csvInCorso ? "Importo…" : "Scegli il file CSV"}
+                  <input type="file" accept=".csv,text/csv" className="hidden" disabled={csvInCorso} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; importaCsvGruppo(f); }} />
+                </label>
+              </div>
+            )}
+            {prenota && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs text-slate-600">Crea la lezione per tutte le clienti del gruppo in un colpo solo: compare nel calendario come un unico evento e scala la lezione dal pacchetto di ognuna.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <InputData value={lez.data} onChange={(e) => setLez({ ...lez, data: e.target.value })} />
+                  <OraCoach value={lez.ora} onChange={(e) => setLez({ ...lez, ora: e.target.value })} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <SelezionaLuogo value={lez.luogo} onChange={(v) => setLez({ ...lez, luogo: v })} />
+                <input value={lez.nota} onChange={(e) => setLez({ ...lez, nota: e.target.value })} placeholder="Nota (facoltativa)" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+                <button onClick={prenotaOra} className="w-full py-2 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Prenota per {membri.length} clienti</button>
+              </div>
+            )}
+            <div className={completa ? "bg-white rounded-2xl border border-slate-200 p-3 space-y-2" : "hidden"}>
+              <p className="text-xs font-semibold" style={{ color: "#27466D" }}>Informazioni comuni del gruppo</p>
+              <textarea value={notaG} onChange={(e) => setNotaG(e.target.value)} onBlur={() => notaG !== (gruppo.nota || "") && salvaG({ nota: notaG.trim() || null })} rows={2} placeholder="Cose valide per tutte: obiettivo del gruppo, attrezzi da preparare, focus della sessione…" className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2" />
+              <p className="text-xs text-slate-500">{prossime.length ? "Prossime lezioni: " + prossime.map((x) => `${x.data.split("-").reverse().join("/")} ${x.ora ? x.ora.slice(0, 5) : ""}`).join(" · ") : "Nessuna lezione di gruppo in programma."}</p>
+            </div>
+            {menu && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2">
+                <p className="text-xs text-slate-600">Copia i giorni di allenamento (con esercizi, serie, ripetizioni e note) da una cliente alle altre. Poi ritocchi le variazioni di ognuna dal suo programma.</p>
+                <label className="block text-xs text-slate-500">Da
+                  <select value={copia.da} onChange={(e) => setCopia({ ...copia, da: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-slate-800 mt-0.5">
+                    <option value="">Scegli…</option>
+                    {membri.map((m) => <option key={m.id} value={m.id}>{nomeCompleto(m)}</option>)}
+                  </select>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {membri.filter((m) => m.id !== copia.da).map((m) => {
+                    const on = copia.a.includes(m.id);
+                    return <button key={m.id} onClick={() => setCopia({ ...copia, a: on ? copia.a.filter((x) => x !== m.id) : [...copia.a, m.id] })} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{nomeCompleto(m)}</button>;
+                  })}
+                </div>
+                <button onClick={eseguiCopia} disabled={!copia.da || !copia.a.length} className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>Copia a {copia.a.length || "…"} clienti</button>
+              </div>
+            )}
+            {membri.length === 0 && <p className="text-sm text-slate-500 text-center py-8">Nessuna cliente nel gruppo: aggiungi un profilo vuoto o una cliente già esistente 🫶🏻</p>}
+            {sessioneTel && <SessioneTelefono gruppo={gruppo} membri={membri} inizialeId={telIniziale} onClose={() => setSessioneTel(false)} onChanged={onChanged} />}
+            {completa && <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4 items-start">
+              {membri.map((m) => <CardMembroGruppo key={m.id} cl={m} gruppoNome={gruppo.nome} onToglila={() => togli(m.id)} onApri={(id) => { onChanged(); onClose(); onSelect(id); }} onCambiato={() => {}} modoValutazione={modoVal} />)}
+            </div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GruppiBulb({ onSelect }) {
+  const [gruppi, setGruppi] = useState(null);
+  const [conta, setConta] = useState({});
+  const [aperto, setAperto] = useState(null);
+  const carica = async () => {
+    const { data } = await supabase.from("gruppi_bulb").select("*").order("created_at");
+    setGruppi(data || []);
+    const { data: cl } = await supabase.from("clients").select("id, nome, gruppo_id").not("gruppo_id", "is", null).order("codice");
+    const m = {};
+    (cl || []).forEach((c) => { (m[c.gruppo_id] = m[c.gruppo_id] || []).push(c.nome); });
+    setConta(m);
+  };
+  useEffect(() => { carica(); }, []);
+  const nuovo = async () => {
+    const n = (gruppi || []).length + 1;
+    const { data } = await supabase.from("gruppi_bulb").insert({ nome: `Gruppo Bulb ${n}` }).select().single();
+    await carica();
+    if (data) setAperto(data);
+  };
+  const elimina = async (g) => {
+    if (!await confermaApp(`Elimino il gruppo "${g.nome}"? Le clienti e i loro allenamenti restano, escono solo dal gruppo.`)) return;
+    await supabase.from("gruppi_bulb").delete().eq("id", g.id);
+    carica();
+  };
+  if (!gruppi) return <Spinner />;
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-500">Clienti che si allenano a Bulb insieme, nello stesso momento: le vedi tutte in una schermata, con programma, carichi e progressi di ognuna.</p>
+      {gruppi.map((g) => (
+        <div key={g.id} className="bg-white border border-slate-200 rounded-2xl p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-semibold text-slate-800">{g.nome}</p>
+              <p className="text-xs text-slate-500">{[g.giorno, g.ora].filter(Boolean).join(" · ") || "giorno e ora da impostare"}</p>
+              <p className="text-xs text-slate-500 mt-1">{(conta[g.id] || []).join(", ") || "nessuna cliente"}</p>
+            </div>
+            <button onClick={() => elimina(g)} className="text-xs text-slate-400 underline">elimina</button>
+          </div>
+          <button onClick={() => setAperto(g)} className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: "#27466D" }}>Apri la sessione</button>
+        </div>
+      ))}
+      <button onClick={nuovo} className="w-full py-2.5 rounded-xl text-sm font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>+ Nuovo gruppo</button>
+      {aperto && <SessioneGruppo gruppo={aperto} onClose={() => setAperto(null)} onChanged={carica} onSelect={onSelect} />}
+    </div>
+  );
+}
+
+// cliente che non porta guadagno (piano o stato "gratuito")
+const eClienteGratuito = (c) => c.stato_pacchetto === "gratuito" || (c.piano || "").trim().toLowerCase() === "gratuito";
+
 function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCorso, onBackup }) {
   const [mostraForm, setMostraForm] = useState(false);
+  const [menuAperto, setMenuAperto] = useState(false);
   const [ricerca, setRicerca] = useState("");
   const [filtro, setFiltro] = useState("tutti");
   const [vistaLista, setVistaLista] = useState("schede");
@@ -9653,14 +15337,13 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const caricaNonLetteCoach = async () => {
     const { count: r } = await supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("stato", "richiesta");
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
-    const { count: m } = await supabase.from("messaggi").select("id", { count: "exact", head: true }).eq("mittente", "cliente").eq("letto", false);
-    const { count: a } = await supabase.from("notifiche").select("id", { count: "exact", head: true }).eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%");
+    const { count: m } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("nuovo_per_coach", true);
     setChatNonLette(m || 0);
-    setNonLetteCoach((r || 0) + (c || 0) + (a || 0));
+    setNonLetteCoach((r || 0) + (c || 0)); // i messaggi automatici non fanno più numero né notifica
     try { setSfideDaFare(await contaSfideCoach()); } catch (e) { /* non blocca mai il caricamento */ }
   };
   const caricaCandidatureNuove = async () => {
-    const { count } = await supabase.from("candidature").select("id", { count: "exact", head: true }).eq("stato", "nuova");
+    const { count } = await supabase.from("lista_attesa").select("id", { count: "exact", head: true }).eq("contattata", false).is("client_id", null);
     setCandidatureNuove(count || 0);
   };
   useEffect(() => { caricaNonLetteCoach(); caricaCandidatureNuove(); }, [vista]);
@@ -9668,6 +15351,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   // I clienti archiviati (percorso non attivo) restano fuori da liste, calendario, promemoria e
   // rinnovi finché non vengono riattivati — ma restano recuperabili con "Mostra archiviati".
   const clientiAttivi = clients.filter((c) => !c.archiviato);
+  // i clienti gratuiti non portano guadagno: sezione a parte, fuori dai totali e dalle statistiche
+  const clientiGratuiti = clientiAttivi.filter(eClienteGratuito);
+  const clientiPaganti = clientiAttivi.filter((c) => !eClienteGratuito(c));
   const clientiArchiviati = clients.filter((c) => c.archiviato);
 
   // Clienti che si sono registrate da sole e a cui manca ancora il pacchetto/prezzo: compaiono
@@ -9675,9 +15361,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const nuoveDaCompletare = clientiAttivi.filter((c) => c.registrato_da_solo && !c.piano && !c.notifica_vista);
 
   const promemoriaDomani = clientiAttivi.flatMap((c) => promemoriaCliente(c).map((v) => ({ ...v, cliente: c })));
-  const inScadenza = clientiAttivi.filter((c) => c.stato_pacchetto === "in scadenza");
-  const daFare = clientiAttivi.filter((c) => c.stato_check === "da_compilare");
-  const scaduti = clientiAttivi.filter((c) => c.stato_pacchetto === "scaduto");
+  const inScadenza = clientiPaganti.filter((c) => c.stato_pacchetto === "in scadenza");
+  const daFare = clientiPaganti.filter((c) => c.stato_check === "da_compilare");
+  const scaduti = clientiPaganti.filter((c) => c.stato_pacchetto === "scaduto");
 
   const spostaOrdine = async (clienteId, direzione) => {
     const ordinati = [...clients].filter((c) => !c.archiviato).sort((a, b) => (a.ordine ?? 9999) - (b.ordine ?? 9999));
@@ -9690,7 +15376,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     onChanged();
   };
 
-  const baseVisibili = filtro === "archiviati" ? clientiArchiviati : clientiAttivi;
+  const baseVisibili = filtro === "archiviati" ? clientiArchiviati : filtro === "gratuiti" ? clientiGratuiti : clientiPaganti;
   const chiaveData = (d) => d || "9999-12-31";
   let visibili = [...baseVisibili].sort((a, b) => {
     if (ordinamento === "check") return chiaveData(a.prossimo_check).localeCompare(chiaveData(b.prossimo_check));
@@ -9712,8 +15398,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
   const statoScad = (d) => {
     if (!d) return { classe: "", testo: "" };
     const g = Math.round((new Date(d + "T00:00:00") - new Date(new Date().toISOString().slice(0, 10) + "T00:00:00")) / 86400000);
-    if (g < 0) return { classe: "text-rose-500 font-medium", testo: " (scaduto da " + Math.abs(g) + "g)" };
-    if (g <= 7) return { classe: "text-amber-500 font-medium", testo: g === 0 ? " (oggi)" : " (tra " + g + "g)" };
+    if (g < 0) return { classe: "text-slate-800 font-medium", testo: " (scaduto da " + Math.abs(g) + "g)" };
+    if (g <= 7) return { classe: "text-slate-500 font-medium", testo: g === 0 ? " (oggi)" : " (tra " + g + "g)" };
     return { classe: "text-slate-600", testo: " (tra " + g + "g)" };
   };
 
@@ -9738,70 +15424,80 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <NuovoClienteForm onAnnulla={() => setMostraForm(false)} onCreato={() => { setMostraForm(false); onChanged(); }} />
       )}
 
-      <div className="grid grid-cols-3 gap-1.5">
-        <button onClick={() => setVista("oggi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "oggi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Oggi</button>
-        <button onClick={() => setVista("lista")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "lista" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Lista</button>
-        <button onClick={() => setVista("calendario")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "calendario" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Calendario</button>
-        <button onClick={() => setVista("notifiche")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "notifiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Notifiche
-          {(nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length) > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length}</span>
-          )}
-        </button>
-        <button onClick={() => setVista("guadagni")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "guadagni" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Guadagni</button>
-        <button onClick={() => setVista("candidature")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "candidature" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Candidature
-          {candidatureNuove > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{candidatureNuove}</span>
-          )}
-        </button>
-        <button onClick={() => setVista("chat")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "chat" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Chat
-          {chatNonLette > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{chatNonLette}</span>
-          )}
-        </button>
-        <button onClick={() => setVista("statistiche")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "statistiche" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Statistiche</button>
-        <button onClick={() => setVista("esercizi")} className={`py-2 rounded-xl text-[11px] font-medium ${vista === "esercizi" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>Esercizi</button>
-        <button onClick={() => setVista("sfide")} className={`relative py-2 rounded-xl text-[11px] font-medium ${vista === "sfide" ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
-          Sfide
-          {sfideDaFare > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{sfideDaFare}</span>
-          )}
-        </button>
-      </div>
+      <CercaClienti clienti={clientiAttivi} onSelect={onSelect} />
 
+      {(() => {
+        const voci = [
+          { k: "oggi", l: "Oggi" }, { k: "lista", l: "Lista" }, { k: "calendario", l: "Calendario" },
+          { k: "notifiche", l: "Notifiche", b: nonLetteCoach + nuoveDaCompletare.length + promemoriaDomani.length },
+          { k: "guadagni", l: "Guadagni" }, { k: "candidature", l: "Lista d'attesa", b: candidatureNuove },
+          { k: "chat", l: "Appunti", b: chatNonLette }, { k: "statistiche", l: "Statistiche" },
+          { k: "gruppi", l: "Gruppi Bulb" }, { k: "esercizi", l: "Esercizi" }, { k: "sfide", l: "Sfide", b: sfideDaFare },
+        ];
+        const totale = voci.reduce((t, v) => t + (v.b || 0), 0);
+        const corrente = voci.find((v) => v.k === vista);
+        return (
+          <div className="relative z-20">
+            <button onClick={() => setMenuAperto((x) => !x)} className="w-full bg-white border border-slate-200 rounded-2xl px-3 py-2.5 flex items-center gap-2 text-left">
+              <span className="text-sky-500 text-lg leading-none"><Ic n="menu" bare/></span>
+              <span className="font-semibold text-slate-800 text-sm">{corrente ? corrente.l : "Menu"}</span>
+              <span className="ml-auto flex items-center gap-2">
+                {totale > 0 && !menuAperto && <span className="bg-slate-800 text-white text-[10px] font-bold rounded-full px-1.5 min-w-[20px] h-5 flex items-center justify-center">{totale}</span>}
+                <span className="text-slate-400 text-xs">{menuAperto ? "▲" : "▼"}</span>
+              </span>
+            </button>
+            {menuAperto && (
+              <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl p-2.5 shadow-xl grid grid-cols-3 gap-2">
+                {voci.map((v) => (
+                  <button key={v.k} onClick={() => { setVista(v.k); setMenuAperto(false); }}
+                    className={`relative py-2.5 rounded-xl text-xs font-medium ${vista === v.k ? "bg-slate-800 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+                    {v.l}
+                    {v.b > 0 && <span className="absolute -top-1.5 -right-1.5 bg-slate-800 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">{v.b}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {vista === "gruppi" && <GruppiBulb onSelect={onSelect} />}
       {vista === "esercizi" && <LibreriaEserciziCoach />}
       {vista === "sfide" && <SfideCoach clients={clientiAttivi} onCambiato={caricaNonLetteCoach} />}
       {vista === "oggi" && <OggiCoach clients={clientiAttivi} onSelect={onSelect} vai={setVista} />}
       {vista === "calendario" && <CalendarioAgenda clients={clientiAttivi} onSelect={onSelect} />}
       {vista === "notifiche" && <CentroNotificheCoach clients={clientiAttivi} promemoriaDomani={promemoriaDomani} nuoveDaCompletare={nuoveDaCompletare} onSelect={onSelect} onChanged={onChanged} onAggiorna={caricaNonLetteCoach} />}
-      {vista === "statistiche" && <StatisticheCoach clients={clientiAttivi} />}
-      {vista === "guadagni" && <GuadagniCoach clients={clientiAttivi} onSelect={onSelect} onClientiCambiati={onChanged} />}
+      {vista === "statistiche" && <StatisticheCoach clients={clientiPaganti} />}
+      {vista === "guadagni" && <GuadagniCoach clients={clientiPaganti} onSelect={onSelect} onClientiCambiati={onChanged} />}
       {vista === "chat" && <ChatCoach clients={clientiAttivi} onChanged={caricaNonLetteCoach} />}
-      {vista === "candidature" && <CandidatureCoach onClientiCambiati={onChanged} />}
+      {vista === "candidature" && <ListaAttesaCoach onChanged={() => { onChanged && onChanged(); caricaCandidatureNuove(); }} aperta />}
       {vista === "lista" && (
         <>
       <input value={ricerca} onChange={(e) => setRicerca(e.target.value)} placeholder="Cerca cliente per nome o codice..."
         className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white" />
 
       <div className="grid grid-cols-3 gap-3">
-        {filtriBtn("da_fare", "Check da fare", daFare.length, "bg-amber-50 text-amber-700")}
-        {filtriBtn("in_scadenza", "In scadenza", inScadenza.length, "bg-rose-50 text-rose-700")}
+        {filtriBtn("da_fare", "Check da fare", daFare.length, "bg-slate-100 text-slate-700")}
+        {filtriBtn("in_scadenza", "In scadenza", inScadenza.length, "bg-slate-100 text-slate-800")}
         {filtriBtn("scaduti", "Scaduti", scaduti.length, "bg-slate-100 text-slate-600")}
       </div>
       <div className="flex gap-2">
         <button onClick={() => setFiltro(filtro === "online" ? "tutti" : "online")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "online" ? "bg-sky-500 text-white" : "bg-sky-50 text-sky-700"}`}>
-          ONLINE ({clientiAttivi.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
+          ONLINE ({clientiPaganti.filter((c) => c.tipo_servizio === "online" || c.tipo_servizio === "ibrido").length})
         </button>
         <button onClick={() => setFiltro(filtro === "presenza" ? "tutti" : "presenza")}
           className={`flex-1 py-2 rounded-xl text-sm font-medium ${filtro === "presenza" ? "bg-violet-500 text-white" : "bg-violet-50 text-violet-700"}`}>
-          BULB ({clientiAttivi.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
+          BULB ({clientiPaganti.filter((c) => c.tipo_servizio === "presenza" || c.tipo_servizio === "ibrido").length})
         </button>
       </div>
       {filtro !== "tutti" && (
         <button onClick={() => setFiltro("tutti")} className="text-sky-600 text-sm font-medium">← Mostra tutti i clienti</button>
+      )}
+      {clientiGratuiti.length > 0 && (
+        <button onClick={() => setFiltro(filtro === "gratuiti" ? "tutti" : "gratuiti")} className="text-slate-500 text-xs font-medium block">
+          {filtro === "gratuiti" ? "← Torna ai clienti" : <><Ic n="gift"/> Clienti gratuiti ({clientiGratuiti.length}) · non contati nei totali</>}
+        </button>
       )}
       {clientiArchiviati.length > 0 && (
         <button onClick={() => setFiltro(filtro === "archiviati" ? "tutti" : "archiviati")} className="text-slate-400 text-xs font-medium">
@@ -9811,7 +15507,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
 
       <div>
         <div className="flex items-center justify-between px-1 mb-2">
-          <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : "Clienti"} ({visibili.length})</p>
+          <p className="text-sm font-medium text-slate-700">{filtro === "archiviati" ? "Clienti archiviati" : filtro === "gratuiti" ? "Clienti gratuiti (fuori dai totali)" : "Clienti"} ({visibili.length})</p>
           <select value={ordinamento} onChange={(e) => setOrdinamento(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white">
             <option value="check">Ordine: prossimo check</option>
             <option value="scadenza">Ordine: scadenza pacchetto</option>
@@ -9826,7 +15522,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         {vistaLista === "schede" && (
         <div className="space-y-2">
           {visibili.map((c) => (
-            <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-rose-50/50 border-rose-100" : ""}`}>
+            <Card key={c.id} className={`p-3 flex items-center gap-2 ${c.stato_pacchetto === "in scadenza" ? "bg-slate-100/50 border-slate-200" : ""}`}>
               {riordinabile && (
                 <div className="flex flex-col flex-shrink-0">
                   <button onClick={() => spostaOrdine(c.id, -1)} className="text-slate-300 hover:text-slate-600 text-xs leading-none py-0.5">▲</button>
@@ -9836,8 +15532,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
               <button onClick={() => onSelect(c.id)} className="flex-1 min-w-0 flex items-center justify-between gap-2 text-left">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <p className="font-medium text-slate-700 ">{c.nome} {c.cognome}</p>
-                    <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
+                    <p className="font-medium text-slate-700 "><NomeCl c={c} /></p>
+                    <Badge className={`flex-shrink-0 ${c.tipo_servizio === "presenza" ? "bg-violet-100 text-violet-700" : c.tipo_servizio === "ibrido" ? "bg-sky-100 text-sky-700" : "bg-sky-100 text-sky-700"}`}>
                       {c.tipo_servizio === "presenza" ? "BULB" : c.tipo_servizio === "ibrido" ? "IBRIDO" : "ONLINE"}
                     </Badge>
                     {c.archiviato && <Badge className="flex-shrink-0 bg-slate-200 text-slate-500">ARCHIVIATO</Badge>}
@@ -9871,10 +15567,10 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         <div className="grid grid-cols-2 gap-2">
           <BottoneCartelleClienti clients={clients} className="col-span-2" />
           <BottoneSoloFoto clients={clients} className="col-span-2" />
-          <BottoneEsportaExcel label="⬇ Esporta tutto in Excel (carichi, progressi, check)" className="col-span-2" />
-          <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta clienti (CSV)</button>
-          <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta check (CSV)</button>
-          <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2">⬇ Esporta carichi allenamento (CSV)</button>
+          <BottoneEsportaExcel label={<><Ic n="download"/> Esporta tutto in Excel (carichi, progressi, check)</>} className="col-span-2" />
+          <button onClick={() => esportaClientiCsv(clients)} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2"><Ic n="download"/> Esporta clienti (CSV)</button>
+          <button onClick={() => esportaCheckCsv()} className="border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2"><Ic n="download"/> Esporta check (CSV)</button>
+          <button onClick={() => esportaCarichiCsv()} className="col-span-2 border border-slate-200 bg-white text-slate-600 text-xs font-medium rounded-lg py-2"><Ic n="download"/> Esporta carichi allenamento (CSV)</button>
           <button onClick={onBackup} disabled={backupInCorso} className="col-span-2 border border-slate-200 bg-white text-slate-500 text-xs font-medium rounded-lg py-2 disabled:opacity-50">
             {backupInCorso ? "Esporto..." : "📦 Backup completo"}
           </button>
@@ -9882,9 +15578,9 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
         </Sezione>
       </div>
 
-      <div className="pt-2 border-t border-slate-100">
-        <Sezione id="account" titolo="Il tuo account"><div className="space-y-2">
+      <div className="pt-2 border-t border-slate-100 space-y-2">
         <AttivaNotifichePush ruolo="coach" />
+        <Sezione id="account" titolo="Il tuo account"><div className="space-y-2">
         <CambiaPasswordPropria />
       </div></Sezione>
       </div>
@@ -9938,7 +15634,7 @@ function tempoRelativo(iso) {
   return g === 1 ? "ieri" : `${g} giorni fa`;
 }
 
-function FeedCoach({ onSelect }) {
+function FeedCoach({ onSelect, aperto = true, setAperto }) {
   const [righe, setRighe] = useState([]);
   const [pronto, setPronto] = useState(false);
   const [entrate, setEntrate] = useState({});
@@ -9991,11 +15687,12 @@ function FeedCoach({ onSelect }) {
 
   const icone = { allenamento: Dumbbell, lezione: Clock, check: ClipboardList, messaggio: MessageCircle };
   if (!pronto) return null;
+  if (!aperto) return createPortal(<button onClick={() => setAperto?.(true)} className="hidden lg:flex fixed top-4 right-4 z-30 items-center gap-1.5 bg-white border border-sky-200 rounded-full shadow-sm px-3 py-1.5 text-xs text-slate-600"><Bell size={12} /> Notifiche{righe.some((r) => !visti.has(r.chiave)) && <span className="w-2 h-2 rounded-full bg-sky-500" />}</button>, document.body);
   return createPortal(
     <div className="hidden lg:block fixed top-4 right-4 w-64 z-30">
       <style>{"@keyframes feedEntra{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}"}</style>
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-3">
-        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche</p>
+        <p className="text-[11px] uppercase tracking-wide text-slate-400 font-medium px-1 mb-2 flex items-center gap-1.5"><Bell size={12} /> Ultime notifiche<button onClick={() => setAperto?.(false)} className="ml-auto text-slate-400 text-sm px-1" aria-label="Chiudi notifiche"><Ic n="x" bare/></button></p>
         {righe.length === 0 && <p className="text-xs text-slate-400 px-1 py-2">Ancora nessuna attività dalle clienti.</p>}
         <div className="space-y-1">
           {righe.map((r) => {
@@ -10026,7 +15723,7 @@ function AdminApp({ onVistaCliente }) {
   const [selectedId, setSelectedId] = useState(null);
   const [caricando, setCaricando] = useState(true);
   const [backupInCorso, setBackupInCorso] = useState(false);
-  const [vista, setVista] = useState("oggi"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
+  const [vista, setVista] = useState("calendario"); // sollevato qui per non perdere la scheda aperta tornando da un cliente
 
   const carica = async () => {
     try {
@@ -10038,12 +15735,24 @@ function AdminApp({ onVistaCliente }) {
   };
   useEffect(() => { carica(); }, []);
 
+  const [feedAperto, setFeedAperto] = useState(() => { try { return localStorage.getItem("feed_coach_aperto") !== "no"; } catch { return true; } });
+  const cambiaFeed = (v) => { setFeedAperto(v); try { localStorage.setItem("feed_coach_aperto", v ? "si" : "no"); } catch { /* ignora */ } };
+  const [chatCoachNuove, setChatCoachNuove] = useState(0);
+  const contaChatCoach = async () => {
+    try {
+      const { count } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("nuovo_per_coach", true);
+      setChatCoachNuove(count || 0);
+    } catch (e) { /* ignora */ }
+  };
+  useEffect(() => { contaChatCoach(); const t = setInterval(contaChatCoach, 20000); return () => clearInterval(t); }, []);
+
   if (caricando) return <Spinner />;
 
   return (
+    <ApriClienteCtx.Provider value={setSelectedId}>
     <PullToRefresh onRefresh={carica}>
-    <div className="min-h-screen bg-slate-50 lg:pr-[17rem]">
-      <FeedCoach onSelect={setSelectedId} />
+    <div className={`min-h-screen bg-slate-50 ${feedAperto ? "lg:pr-[17rem]" : ""}`}>
+      <FeedCoach onSelect={setSelectedId} aperto={feedAperto} setAperto={cambiaFeed} />
       <div className="flex items-center justify-between px-6 pt-5 max-w-3xl mx-auto">
         <div className="flex items-center gap-2"><img src="/logo.png" alt="MorGainz" className="h-11 w-auto" /><span className="text-slate-400 text-xs font-medium tracking-wide">PANNELLO COACH</span></div>
         <div className="flex items-center gap-4">
@@ -10052,13 +15761,17 @@ function AdminApp({ onVistaCliente }) {
         </div>
       </div>
       {selectedId ? (
-        <AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} />
+        <div className="lg:flex lg:items-start">
+          <ElencoLaterale clients={clients} attivoId={selectedId} onSelect={setSelectedId} />
+          <div className="flex-1 min-w-0"><AdminClientDetail clientId={selectedId} onBack={() => setSelectedId(null)} onChanged={carica} /></div>
+        </div>
       ) : (
         <AdminList clients={clients} onSelect={setSelectedId} onChanged={carica} vista={vista} setVista={setVista}
           backupInCorso={backupInCorso} onBackup={() => esportaBackupCompleto(setBackupInCorso)} />
       )}
     </div>
     </PullToRefresh>
+    </ApriClienteCtx.Provider>
   );
 }
 
@@ -10097,7 +15810,7 @@ function ImpostaPassword({ onFatto }) {
             className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
           <input type="password" placeholder="Ripeti la password" value={conferma} onChange={(e) => setConferma(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
-          {errore && <p className="text-rose-400 text-xs">{errore}</p>}
+          {errore && <p className="text-slate-600 text-xs">{errore}</p>}
           <button disabled={salvando} className="w-full bg-sky-500 hover:bg-sky-400 transition-colors text-white font-medium rounded-xl py-3">
             {salvando ? "Salvo..." : "Crea password ed entra"}
           </button>
@@ -10107,7 +15820,200 @@ function ImpostaPassword({ onFatto }) {
   );
 }
 
+// ---------- Bilancio settimanale pubblico (link personale che la coach manda su WhatsApp: /?bilancio=CODICE) ----------
+function BilancioPubblico({ token }) {
+  const [info, setInfo] = useState(undefined); // undefined = carico, null = link non valido
+  const [passo, setPasso] = useState(0);
+  const [r, setR] = useState({ esito: null, voto: null, rispettato: [], meno: [], daSistemare: "", impegni: "" });
+  const [stato, setStato] = useState("form"); // form | invio | fatto
+  const [errore, setErrore] = useState("");
+  useEffect(() => { document.title = "Il tuo bilancio · Coaching by Morgana"; }, []);
+  useEffect(() => {
+    supabase.rpc("bilancio_info", { p_token: token }).then(({ data, error }) => setInfo(error ? null : data || null), () => setInfo(null));
+  }, [token]);
+  const sfondo = { background: "#F5FAFE", minHeight: "100dvh" };
+  if (info === undefined) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ ...sfondo, color: "#7a8da3" }}>Un attimo…</div>;
+  if (info === null) return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="max-w-md text-center space-y-2"><p className="text-3xl">✨</p><p style={{ color: "#27466D" }} className="font-semibold">Questo link non è più valido</p><p className="text-sm" style={{ color: "#7a8da3" }}>Scrivimi su WhatsApp e te ne mando uno nuovo 🫶🏻</p></div>
+    </div>
+  );
+  const nome = info.nome || "";
+  const prec = info.da_sistemare_prec;
+  const passi = [...(prec ? ["esito"] : []), "voto", "aree", "nuova"];
+  const corrente = passi[passo];
+  const aree = ["Allenamenti", "Alimentazione", "Passi", "Acqua", "Sonno", "Stress"];
+  const toggle = (k, v) => setR((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const chip = (on, f, t) => <button key={t} onClick={f} className="px-4 py-2.5 rounded-full text-sm font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
+  const bolla = (children) => <div className="rounded-2xl px-4 py-3 text-sm leading-snug max-w-[92%]" style={{ background: "#fff", border: "1px solid #dbe7f3", color: "#27466D", borderRadius: "18px 18px 18px 4px" }}>{children}</div>;
+  const risposta = (t) => <div className="self-end rounded-2xl px-4 py-2 text-sm text-white" style={{ background: "#27466D", borderRadius: "18px 18px 4px 18px" }}>{t}</div>;
+  const nomiEsito = { sistemato: "✅ Sistemato", meta: "🔸 A metà", no: "❌ Non ci sono riuscita" };
+  const puoAndare = corrente === "esito" ? !!r.esito : corrente === "voto" ? r.voto != null : true;
+  const ultimo = passo === passi.length - 1;
+  const invia = async () => {
+    setErrore(""); setStato("invio");
+    const { data, error } = await supabase.rpc("bilancio_invia", { p_token: token, p_esito: prec ? r.esito : null, p_voto: r.voto, p_rispettato: r.rispettato, p_meno: r.meno, p_da_sistemare: r.daSistemare, p_impegni: r.impegni });
+    if (error || data !== true) { setErrore("Non siamo riusciti a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
+    setStato("fatto");
+  };
+  if (stato === "fatto") return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md rounded-3xl p-8 text-center space-y-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+        <p className="text-4xl">✨</p>
+        <p className="text-lg font-semibold">Grazie {nome}!</p>
+        <p className="text-sm">Ho ricevuto tutto 🫶🏻 Ti rispondo io su WhatsApp e ripartiamo da qui. Questa settimana ci sono con te 💪🏻</p>
+      </div>
+    </div>
+  );
+  const campo = "w-full border rounded-xl px-3 py-3 text-sm bg-white";
+  return (
+    <div className="px-5 py-6 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md flex flex-col gap-3" style={{ minHeight: "calc(100dvh - 3rem)" }}>
+        <div className="flex gap-1.5">{passi.map((_, i) => <i key={i} className="flex-1 h-1 rounded-full" style={{ background: i <= passo ? "#27466D" : "#C9E0F7" }} />)}</div>
+        <p className="text-[11px] tracking-widest uppercase text-center" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
+        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Come stai? Ti lascio il bilancio della settimana precedente da compilare ✨ Ci metti 1 minuto 🫶🏻"}</>)}
+        {corrente === "esito" && bolla(<>Settimana scorsa volevi sistemare <b>«{prec}»</b>. Com'è andata?</>)}
+        {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
+        {corrente === "voto" && prec && r.esito && risposta(nomiEsito[r.esito])}
+        {corrente === "voto" && bolla(<>{prec ? (r.esito === "sistemato" ? "Che bello, brava! 🫶🏻" : "Capita, è già un passo 🫶🏻") + " " : ""}Da 1 a 10, com'è andata la settimana?</>)}
+        {corrente === "voto" && <div className="flex flex-wrap gap-2">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <button key={n} onClick={() => setR({ ...r, voto: n })} className="w-10 h-10 rounded-full text-sm font-semibold" style={r.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div>}
+        {corrente === "aree" && risposta(String(r.voto))}
+        {corrente === "aree" && bolla(<>Cosa hai rispettato di più? <span style={{ color: "#7a8da3" }}>(puoi sceglierne più di una)</span></>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{aree.map((a) => chip(r.rispettato.includes(a), () => toggle("rispettato", a), a))}</div>}
+        {corrente === "aree" && bolla(<>E di meno?</>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{aree.map((a) => chip(r.meno.includes(a), () => toggle("meno", a), a))}</div>}
+        {corrente === "nuova" && bolla(<>Una cosa che vuoi sistemare questa settimana?</>)}
+        {corrente === "nuova" && <textarea value={r.daSistemare} onChange={(e) => setR({ ...r, daSistemare: e.target.value })} rows={2} maxLength={300} placeholder="es. cena fuori: scegliere un piatto proteico" className={campo} style={{ borderColor: "#C9E0F7", color: "#27466D" }} />}
+        {corrente === "nuova" && bolla(<>Ci sono impegni da organizzare? <span style={{ color: "#7a8da3" }}>(viaggi, lavoro, cene)</span></>)}
+        {corrente === "nuova" && <textarea value={r.impegni} onChange={(e) => setR({ ...r, impegni: e.target.value })} rows={2} maxLength={300} placeholder="es. viaggio di lavoro mercoledì e giovedì" className={campo} style={{ borderColor: "#C9E0F7", color: "#27466D" }} />}
+        {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+        <div className="mt-auto pt-3 flex gap-2">
+          {passo > 0 && <button onClick={() => setPasso(passo - 1)} className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Indietro</button>}
+          <button disabled={!puoAndare || stato === "invio"} onClick={() => (ultimo ? invia() : setPasso(passo + 1))} className="flex-1 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>{ultimo ? (stato === "invio" ? "Invio…" : "Invia a Morgana") : "Avanti"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Bilancio AVANZATO pubblico (/?avanzato=CODICE) ----------
+function ScalaPunti({ label, hint, valore, onChange }) {
+  return (
+    <div className="rounded-2xl px-4 py-3" style={{ background: "#fff", border: "1px solid #dbe7f3" }}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0"><p className="text-sm" style={{ color: "#27466D" }}>{label}</p>{hint && <p className="text-[10px]" style={{ color: "#7a8da3" }}>{hint}</p>}</div>
+        <div className="flex gap-1.5 shrink-0">
+          {[1, 2, 3, 4, 5].map((n) => <button key={n} onClick={() => onChange(n)} className="w-9 h-9 rounded-full text-sm font-semibold" style={valore === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+function numeroDa(t, intero) {
+  const s = String(t || "").trim();
+  if (!s) return null;
+  const x = intero ? Number(s.replace(/[.\s]/g, "")) : Number(s.replace(/\s/g, "").replace(",", "."));
+  return isNaN(x) ? null : x;
+}
+function BilancioAvanzatoPubblico({ token }) {
+  const [info, setInfo] = useState(undefined);
+  const [passo, setPasso] = useState(0);
+  const [r, setR] = useState({ esito: null, voto: null, punti: {}, peso: "", passi: "", ore: "", dif: [], note: "", obiettivo: "", rispettato: [], meno: [], impegni: "" });
+  const [stato, setStato] = useState("form");
+  const [errore, setErrore] = useState("");
+  useEffect(() => { document.title = "Il tuo bilancio · Coaching by Morgana"; }, []);
+  useEffect(() => {
+    supabase.rpc("bilancio_avanzato_info", { p_token: token }).then(({ data, error }) => setInfo(error ? null : data || null), () => setInfo(null));
+  }, [token]);
+  const sfondo = { background: "#F5FAFE", minHeight: "100dvh" };
+  if (info === undefined) return <div className="min-h-screen flex items-center justify-center text-sm" style={{ ...sfondo, color: "#7a8da3" }}>Un attimo…</div>;
+  if (info === null) return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="max-w-md text-center space-y-2"><p className="text-3xl">✨</p><p style={{ color: "#27466D" }} className="font-semibold">Questo link non è più valido</p><p className="text-sm" style={{ color: "#7a8da3" }}>Scrivimi su WhatsApp e te ne mando uno nuovo 🫶🏻</p></div>
+    </div>
+  );
+  const nome = info.nome || "";
+  const prec = info.obiettivo_prec;
+  const passi = [...(prec ? ["esito"] : []), "voto", "aderenza", "recupero", "aree", "numeri", "difficolta", "obiettivo"];
+  const AREE_B = ["Allenamenti", "Alimentazione", "Passi", "Acqua", "Sonno", "Stress"];
+  const toggleA = (k, v) => setR((o) => ({ ...o, [k]: o[k].includes(v) ? o[k].filter((x) => x !== v) : [...o[k], v] }));
+  const corrente = passi[passo];
+  const setP = (k, v) => setR((o) => ({ ...o, punti: { ...o.punti, [k]: v } }));
+  const chip = (on, f, t) => <button key={t} onClick={f} className="px-4 py-2.5 rounded-full text-sm font-medium" style={on ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{t}</button>;
+  const bolla = (children) => <div className="rounded-2xl px-4 py-3 text-sm leading-snug max-w-[92%]" style={{ background: "#fff", border: "1px solid #dbe7f3", color: "#27466D", borderRadius: "18px 18px 18px 4px" }}>{children}</div>;
+  const campo = "w-full border rounded-xl px-3 py-3 text-sm bg-white";
+  const stileCampo = { borderColor: "#C9E0F7", color: "#27466D" };
+  const completo = (voci) => voci.every(([k]) => r.punti[k] != null);
+  const puoAndare = corrente === "esito" ? !!r.esito : corrente === "voto" ? r.voto != null : corrente === "aderenza" ? completo(VOCI_ADERENZA) : corrente === "recupero" ? completo(VOCI_RECUPERO) : true;
+  const ultimo = passo === passi.length - 1;
+  const invia = async () => {
+    setErrore(""); setStato("invio");
+    const { data, error } = await supabase.rpc("bilancio_completo_invia", {
+      p_token: token, p_esito: prec ? r.esito : null, p_voto: r.voto, p_punti: r.punti, p_peso: numeroDa(r.peso), p_passi: numeroDa(r.passi, true),
+      p_ore: numeroDa(r.ore), p_difficolta: r.dif, p_note: r.note, p_obiettivo: r.obiettivo, p_rispettato: r.rispettato, p_meno: r.meno, p_impegni: r.impegni,
+    });
+    if (error || data !== true) { setErrore("Non siamo riusciti a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
+    setStato("fatto");
+  };
+  if (stato === "fatto") return (
+    <div className="px-5 py-10 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md rounded-3xl p-8 text-center space-y-3" style={{ background: "#FFFBEF", border: "1px solid #F7E9BE", color: "#6b5d2e" }}>
+        <p className="text-4xl">✨</p>
+        <p className="text-lg font-semibold">Grazie {nome}!</p>
+        <p className="text-sm">Ho ricevuto tutto 🫶🏻 Analizzo i tuoi dati e ti scrivo io su WhatsApp. Continuiamo a costruire il percorso, passo dopo passo 💪🏻</p>
+      </div>
+    </div>
+  );
+  return (
+    <div className="px-5 py-6 flex justify-center" style={sfondo}>
+      <div className="w-full max-w-md flex flex-col gap-3" style={{ minHeight: "calc(100dvh - 3rem)" }}>
+        <div className="flex gap-1.5">{passi.map((_, i) => <i key={i} className="flex-1 h-1 rounded-full" style={{ background: i <= passo ? "#27466D" : "#C9E0F7" }} />)}</div>
+        <p className="text-[11px] tracking-widest uppercase text-center" style={{ color: "#3F78B3" }}>Coaching by Morgana</p>
+        {passo === 0 && bolla(<><b>Ciao {nome}! ✨</b><br />{info.gia_compilato ? "Hai già risposto per questa settimana: se vuoi, puoi aggiornare le tue risposte 🫶🏻" : "Come stai? Ti lascio il bilancio della settimana precedente da compilare ✨ Ci metti 2 minuti e mi serve per calibrare il tuo percorso 💪🏻"}</>)}
+        {corrente === "esito" && bolla(<>Settimana scorsa ti eri data come obiettivo <b>«{prec}»</b>. Com'è andata?</>)}
+        {corrente === "esito" && <div className="flex flex-wrap gap-2">{[["sistemato", "✅ Sistemato"], ["meta", "🔸 A metà"], ["no", "❌ Non ci sono riuscita"]].map(([v, l]) => chip(r.esito === v, () => setR({ ...r, esito: v }), l))}</div>}
+        {corrente === "voto" && bolla(<>Da 1 a 10, com'è andata la settimana?</>)}
+        {corrente === "voto" && <div className="flex flex-wrap gap-2">{[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <button key={n} onClick={() => setR({ ...r, voto: n })} className="w-10 h-10 rounded-full text-sm font-semibold" style={r.voto === n ? { background: "#27466D", color: "#fff" } : { background: "#E1EEFB", color: "#27466D" }}>{n}</button>)}</div>}
+        {corrente === "aree" && bolla(<>Cosa hai rispettato di più? <span style={{ color: "#7a8da3" }}>(puoi sceglierne più di una)</span></>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{AREE_B.map((a) => chip(r.rispettato.includes(a), () => toggleA("rispettato", a), a))}</div>}
+        {corrente === "aree" && bolla(<>E di meno?</>)}
+        {corrente === "aree" && <div className="flex flex-wrap gap-2">{AREE_B.map((a) => chip(r.meno.includes(a), () => toggleA("meno", a), a))}</div>}
+        {corrente === "aderenza" && bolla(<><b>Come hai gestito la settimana?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (al massimo)</span></>)}
+        {corrente === "aderenza" && VOCI_ADERENZA.map(([k, l]) => <ScalaPunti key={k} label={l} hint={k === "prestazioni" ? "carichi e ripetizioni rispetto al previsto" : null} valore={r.punti[k]} onChange={(v) => setP(k, v)} />)}
+        {corrente === "recupero" && bolla(<><b>E il recupero?</b><br /><span style={{ color: "#7a8da3" }}>Da 1 (per niente) a 5 (moltissimo)</span></>)}
+        {corrente === "recupero" && VOCI_RECUPERO.map(([k, l]) => <ScalaPunti key={k} label={l} hint={k === "fame" ? "1 = nessuna, 5 = tantissima" : k === "stress" ? "1 = sereno, 5 = molto stressata" : k === "dolori" ? "1 = nessuno, 5 = molto forti" : k === "digestione" ? "1 = pesante e gonfia, 5 = ottima" : null} valore={r.punti[k]} onChange={(v) => setP(k, v)} />)}
+        {corrente === "numeri" && bolla(<><b>I tuoi numeri della settimana</b><br /><span style={{ color: "#7a8da3" }}>Se non li hai, lascia vuoto</span></>)}
+        {corrente === "numeri" && (
+          <div className="space-y-2">
+            {[["peso", "Peso medio (kg)", "es. 58,4", "decimal"], ["passi", "Passi medi al giorno", "es. 9500", "numeric"], ["ore", "Ore di sonno medie", "es. 7", "decimal"]].map(([k, l, ph, m]) => (
+              <div key={k} className="flex items-center justify-between gap-3"><span className="text-sm" style={{ color: "#27466D" }}>{l}</span><input value={r[k]} onChange={(e) => setR({ ...r, [k]: e.target.value })} inputMode={m} placeholder={ph} className="w-28 border rounded-xl px-3 py-2.5 text-sm bg-white text-right" style={stileCampo} /></div>
+            ))}
+          </div>
+        )}
+        {corrente === "difficolta" && bolla(<>Cosa è stato più difficile? <span style={{ color: "#7a8da3" }}>(puoi sceglierne più di una)</span></>)}
+        {corrente === "difficolta" && <div className="flex flex-wrap gap-2">{DIFFICOLTA_AV.map((d) => chip(r.dif.includes(d), () => setR({ ...r, dif: r.dif.includes(d) ? r.dif.filter((x) => x !== d) : [...r.dif, d] }), d))}</div>}
+        {corrente === "difficolta" && <textarea value={r.note} onChange={(e) => setR({ ...r, note: e.target.value })} rows={3} maxLength={300} placeholder="Spiegami meglio (facoltativo)" className={campo} style={stileCampo} />}
+        {corrente === "obiettivo" && bolla(<>Qual è il tuo obiettivo per la prossima settimana? <span style={{ color: "#7a8da3" }}>Una cosa concreta e piccola</span></>)}
+        {corrente === "obiettivo" && <textarea value={r.obiettivo} onChange={(e) => setR({ ...r, obiettivo: e.target.value })} rows={3} maxLength={300} placeholder="es. chiudere i 10.000 passi ogni giorno" className={campo} style={stileCampo} />}
+        {corrente === "obiettivo" && bolla(<>Ci sono impegni da organizzare? <span style={{ color: "#7a8da3" }}>(viaggi, lavoro, cene)</span></>)}
+        {corrente === "obiettivo" && <textarea value={r.impegni} onChange={(e) => setR({ ...r, impegni: e.target.value })} rows={2} maxLength={300} placeholder="es. viaggio di lavoro mercoledì e giovedì" className={campo} style={stileCampo} />}
+        {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+        <div className="mt-auto pt-3 flex gap-2">
+          {passo > 0 && <button onClick={() => setPasso(passo - 1)} className="px-4 py-3 rounded-xl text-sm font-medium" style={{ background: "#E1EEFB", color: "#27466D" }}>Indietro</button>}
+          <button disabled={!puoAndare || stato === "invio"} onClick={() => (ultimo ? invia() : setPasso(passo + 1))} className="flex-1 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: "#27466D" }}>{ultimo ? (stato === "invio" ? "Invio…" : "Invia a Morgana") : "Avanti"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const qs = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  if (qs.get("avanzato") || qs.get("bilancio")) return <BilancioAvanzatoPubblico token={qs.get("avanzato") || qs.get("bilancio")} />;
+  return qs.has("lista") ? <ListaAttesaPubblica /> : <AppInterna />;
+}
+
+function AppInterna() {
   const [session, setSession] = useState(undefined);
   const [ruolo, setRuolo] = useState(null); // "admin" | "client" | null
   const [devImpostarePassword, setDevImpostarePassword] = useState(false);
@@ -10115,6 +16021,16 @@ export default function App() {
   // Il coach può guardare l'app come cliente (profilo Morgana) senza uscire; ricordo la scelta finché la scheda resta aperta
   const [vistaCliente, setVistaCliente] = useState(() => { try { return sessionStorage.getItem("vistaCliente") === "1"; } catch (e) { return false; } });
   const impostaVistaCliente = (v) => { setVistaCliente(v); try { sessionStorage.setItem("vistaCliente", v ? "1" : "0"); } catch (e) { /* ignora */ } };
+
+  // Carichi salvati offline: li invia quando torna la rete, quando riapri l'app e ogni tanto
+  useEffect(() => {
+    const prova = () => { if (leggiCoda().length) inviaCoda(); };
+    prova();
+    window.addEventListener("online", prova);
+    document.addEventListener("visibilitychange", prova);
+    const t = setInterval(prova, 15000);
+    return () => { window.removeEventListener("online", prova); document.removeEventListener("visibilitychange", prova); clearInterval(t); };
+  }, []);
 
   // Toglie il pallino rosso dall'icona quando apri l'app
   useEffect(() => {
@@ -10177,8 +16093,7 @@ export default function App() {
     if (vistaCliente) {
       return (
         <>
-          <ClientApp session={session} />
-          <button onClick={() => impostaVistaCliente(false)} className="fixed bottom-24 right-3 z-50 bg-slate-800 text-white text-xs font-medium rounded-full px-4 py-2 shadow-lg">← Torna a Coach</button>
+          <ClientApp session={session} onTornaCoach={() => impostaVistaCliente(false)} />
         </>
       );
     }
