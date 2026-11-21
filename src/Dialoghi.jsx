@@ -17,6 +17,10 @@ export function confermaApp(testo, opzioni = {}) {
   return accoda({ tipo: "conferma", testo: String(testo ?? ""), ...opzioni });
 }
 
+export function chiediApp(testo, opzioni = {}) {
+  return accoda({ tipo: "input", testo: String(testo ?? ""), ...opzioni });
+}
+
 export function avvisoApp(testo) {
   return accoda({ tipo: "avviso", testo: String(testo ?? "") });
 }
@@ -25,6 +29,7 @@ const DISTRUTTIVA = /elimin|cancell|rimuov|svuot|\btolgo\b|\bTUTT/i;
 
 export default function DialoghiApp() {
   const [corrente, setCorrente] = useState(null);
+  const [valore, setValore] = useState("");
 
   useEffect(() => {
     const prossimo = () => { setCorrente((att) => att || coda.shift() || null); };
@@ -36,9 +41,11 @@ export default function DialoghiApp() {
   const chiudi = (esito) => {
     const v = corrente;
     setCorrente(null);
-    if (v) v.risolvi(esito);
+    if (v) v.risolvi(v.tipo === "input" ? (esito ? valore : null) : esito);
     setTimeout(() => { if (coda.length) setCorrente(coda.shift()); }, 120);
   };
+
+  useEffect(() => { setValore(corrente && corrente.tipo === "input" ? String(corrente.valore ?? "") : ""); }, [corrente]);
 
   useEffect(() => {
     if (!corrente) return undefined;
@@ -48,10 +55,11 @@ export default function DialoghiApp() {
   });
 
   if (!corrente) return null;
-  const conferma = corrente.tipo === "conferma";
+  const conferma = corrente.tipo === "conferma" || corrente.tipo === "input";
+  const input = corrente.tipo === "input";
   const righe = corrente.testo.split("\n");
-  const titolo = corrente.titolo || (conferma ? (DISTRUTTIVA.test(corrente.testo) ? "Vuoi procedere?" : "Conferma") : "Un attimo");
-  const etichettaSi = corrente.si || (conferma ? (DISTRUTTIVA.test(corrente.testo) ? "Procedi" : "Conferma") : "Ok");
+  const titolo = corrente.titolo || (input ? "Un attimo" : conferma ? (DISTRUTTIVA.test(corrente.testo) ? "Vuoi procedere?" : "Conferma") : "Un attimo");
+  const etichettaSi = corrente.si || (input ? "Conferma" : conferma ? (DISTRUTTIVA.test(corrente.testo) ? "Procedi" : "Conferma") : "Ok");
   const etichettaNo = corrente.no || "Annulla";
 
   return (
@@ -75,11 +83,21 @@ export default function DialoghiApp() {
         <div style={{ marginTop: 10, maxHeight: "50vh", overflowY: "auto", fontSize: 13.5, lineHeight: 1.5, color: "#475569", whiteSpace: "pre-line", wordBreak: "break-word" }}>
           {righe.join("\n")}
         </div>
+        {input && (
+          <input
+            autoFocus
+            value={valore}
+            placeholder={corrente.placeholder || ""}
+            onChange={(e) => setValore(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") chiudi(true); }}
+            style={{ marginTop: 12, width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 12, fontSize: 16, border: "1.5px solid #C9E0F7", color: "#27466D", outline: "none", fontFamily: "inherit" }}
+          />
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
           {conferma && (
             <button onClick={() => chiudi(false)} style={{ flex: 1, padding: "10px 12px", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7", cursor: "pointer", outline: "none" }}>{etichettaNo}</button>
           )}
-          <button autoFocus onClick={() => chiudi(true)} style={{ flex: 1, padding: "10px 12px", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "#27466D", color: "#fff", border: "none", cursor: "pointer", outline: "none" }}>{etichettaSi}</button>
+          <button autoFocus={!input} onClick={() => chiudi(true)} style={{ flex: 1, padding: "10px 12px", borderRadius: 12, fontSize: 14, fontWeight: 600, background: "#27466D", color: "#fff", border: "none", cursor: "pointer", outline: "none" }}>{etichettaSi}</button>
         </div>
       </div>
     </div>

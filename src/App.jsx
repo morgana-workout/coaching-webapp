@@ -1,5 +1,5 @@
 import Ic from "./Ic";
-import { confermaApp } from "./Dialoghi";
+import { confermaApp, chiediApp } from "./Dialoghi";
 import AnalisiCarichi from "./AnalisiCarichi";
 import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
@@ -430,7 +430,7 @@ function ConsensiCliente({ client, posizione = "basso", forzaApri = false }) {
     const eraCompleto = !mancano;
     setRiga(nuova);
     const { error } = await supabase.from("consensi_cliente").upsert({ client_id: client.id, foto_coach: nuova.foto_coach ?? null, analisi_esterna: nuova.analisi_esterna ?? null, social: nuova.social ?? null, ciclo: nuova.ciclo ?? null, aggiornato_il: nuova.aggiornato_il });
-    if (error) { setErrore("Non sono riuscita a salvare, riprova tra un attimo 🫶🏻"); return; }
+    if (error) { setErrore("Non siamo riusciti a salvare, riprova tra un attimo 🫶🏻"); return; }
     const completo = !VOCI_CONSENSI.some(([kk]) => nuova[kk] == null);
     if (posizione === "alto" && completo && !eraCompleto) {
       setGrazie(true);
@@ -657,7 +657,7 @@ function ModificaLezioneSheet({ client, evento, onChiudi, onFatto }) {
       stato: "richiesta", sostituisce_id: evento.id, fuori_disponibilita: !disponibile,
     }).select().single();
     setInviando(false);
-    if (error) { alert("Non sono riuscita a inviare la richiesta. Riprova."); return; }
+    if (error) { alert("Non siamo riusciti a inviare la richiesta. Controlla la connessione e riprova tra un attimo 🫶🏻"); return; }
     if (creato?.id) inviaPush({ evento: "richiesta", event_id: creato.id });
     setApri(false);
     await carica();
@@ -2577,7 +2577,7 @@ function ConfrontoFoto({ checkins, isAdmin = false }) {
     const riga = { client_id: clienteFoto, angolo, id_prima: idPrima || null, id_dopo: idDopo || null, vista: { Prima: vistaDi(a), Dopo: vistaDi(b), perCheck }, insieme, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("confronto_foto_coach").upsert(riga, { onConflict: "client_id,angolo" });
     if (!error) { setSalvati((m) => ({ ...m, [angolo]: riga })); setSalvaMsg("Salvato: la cliente vede questo confronto ✓"); setTimeout(() => setSalvaMsg(""), 3000); }
-    else setSalvaMsg("Non sono riuscita a salvare");
+    else setSalvaMsg("Non siamo riusciti a salvare");
   };
   const invertiLaterali = async (c) => {
     const nuovo = { foto_laterale_path: c.foto_extra_path || null, foto_extra_path: c.foto_laterale_path || null };
@@ -3393,7 +3393,7 @@ function LibreriaEserciziCoach() {
       ? await supabase.from("esercizi_video").update(campi).eq("id", edit.id)
       : await supabase.from("esercizi_video").insert({ ...campi, ordine: (lista.reduce((m, e) => Math.max(m, e.ordine || 0), 0)) + 1 });
     setSalvando(false);
-    if (error) { setErrore("Non sono riuscita a salvare: " + error.message); return; }
+    if (error) { setErrore("Non siamo riusciti a salvare: " + error.message); return; }
     setEdit(null); carica();
   };
 
@@ -3493,7 +3493,7 @@ function RichiediVideoEsercizio({ clientId }) {
   const invia = async () => {
     if (!testo.trim()) return;
     const { error } = await supabase.from("esercizi_richieste").insert({ client_id: clientId, testo: testo.trim() });
-    if (error) { setMsg("Non sono riuscita a inviare, riprova."); return; }
+    if (error) { setMsg("Non siamo riusciti a inviare, riprova."); return; }
     setTesto(""); setMsg("Richiesta inviata ✨ Morgana ti preparerà il video!");
   };
   return (
@@ -3572,7 +3572,7 @@ function GiornoAllenamento({ clientId, giorno, onGiornoRinominato, libreriaVideo
 
   const aggiungiData = async () => {
     if (esercizi.length === 0) { alert("Aggiungi prima almeno un esercizio."); return; }
-    const nuovaData = prompt("Data del nuovo allenamento (gg/mm/aaaa oppure lascia vuoto per oggi):");
+    const nuovaData = await chiediApp("Data del nuovo allenamento (gg/mm/aaaa). Lascia vuoto per usare oggi.", { titolo: "Nuovo allenamento", placeholder: "gg/mm/aaaa" });
     let d = formatDataLocale(new Date());
     if (nuovaData) {
       const parti = nuovaData.split("/");
@@ -4541,7 +4541,7 @@ function NotaFinaleAllenamento({ clientId, data }) {
     const { error } = nota.trim()
       ? await supabase.from("note_allenamento").upsert({ client_id: clientId, data, nota: nota.trim(), updated_at: new Date().toISOString() })
       : await supabase.from("note_allenamento").delete().eq("client_id", clientId).eq("data", data);
-    if (error) { setStato("Non sono riuscita a salvare, riprova 🫶🏻"); return; }
+    if (error) { setStato("Non siamo riusciti a salvare, riprova 🫶🏻"); return; }
     setSalvata(nota); setStato("Nota salvata ✓");
   };
   return (
@@ -5197,7 +5197,7 @@ function CommentoCheck({ checkin, tutti, client }) {
   if (riga === undefined) return null;
   const salva = async (patch) => {
     const { error } = await supabase.from("commenti_check").update({ ...patch, updated_at: new Date().toISOString() }).eq("checkin_id", checkin.id);
-    if (error) { setMsg("Non sono riuscita a salvare"); return; }
+    if (error) { setMsg("Non siamo riusciti a salvare"); return; }
     setRiga((r) => ({ ...r, ...patch }));
     setMsg("Salvato ✓"); setTimeout(() => setMsg(""), 2000);
   };
@@ -5567,10 +5567,10 @@ function NuovoCheckForm({ clientId, sesso, checkin, onSalvato, onAnnulla }) {
     }
     if (checkin) {
       const { error: errUp } = await supabase.from("checkins").update(payload).eq("id", checkin.id);
-      if (errUp) { setSalvando(false); setErrore("Non sono riuscita a salvare il check: " + errUp.message); return; }
+      if (errUp) { setSalvando(false); setErrore("Non siamo riusciti a salvare il check: " + errUp.message); return; }
     } else {
       const { error: errIns } = await supabase.from("checkins").insert(payload);
-      if (errIns) { setSalvando(false); setErrore("Non sono riuscita a salvare il check: " + errIns.message); return; }
+      if (errIns) { setSalvando(false); setErrore("Non siamo riusciti a salvare il check: " + errIns.message); return; }
       // Il check lo inserisce la coach stessa: niente da rivedere e il promemoria non serve più.
       try {
         await supabase.from("notifiche").update({ coach_vista: true }).eq("client_id", clientId).like("proposta_luogo", "promemoria_check%");
@@ -5742,7 +5742,7 @@ function ImportaNutrizioneCSV({ clientId, onFatto }) {
         setMsg(error ? "Errore nell’importazione: " + error.message : `Importati ${nuovi.length} cicli alimentari ✓`);
         if (!error) onFatto?.();
       } else setMsg("Non riconosco il file: serve una colonna “kcal” (cicli) oppure “nome” + “kcal” (alimenti).");
-    } catch (e) { setMsg("Non riesco a leggere il file."); }
+    } catch (e) { setMsg("Non è stato possibile leggere il file."); }
     setLavoro(false);
   };
   return (
@@ -7469,9 +7469,9 @@ function EsercizioSchedaRiga({ es, onCambia, onElimina, onMuovi }) {
       </div>
       {mostraLibreria && (
         <SelettoreEsercizio libreria={libreria} onAnnulla={() => setMostraLibreria(false)}
-          onScegli={(scelto) => {
+          onScegli={async (scelto) => {
             if (scelto) onCambia({ esercizio_id: scelto.id, nome_libero: null });
-            else { const nome = prompt("Nome esercizio (testo libero):"); if (nome) onCambia({ esercizio_id: null, nome_libero: nome }); }
+            else { const nome = await chiediApp("Come si chiama l'esercizio?", { titolo: "Esercizio libero", placeholder: "Nome esercizio" }); if (nome) onCambia({ esercizio_id: null, nome_libero: nome }); }
             setMostraLibreria(false);
           }} />
       )}
@@ -8271,7 +8271,7 @@ async function esportaPerAnalisiEsterna(client, setInCorso, opz = {}) {
     } else {
       scaricaFile(`analisi-${opz.anonimo ? "" : (client.cognome || "").toLowerCase() + "-"}${(client.nome || "").toLowerCase()}-${formatDataLocale(new Date())}.md`.replace(/\s+/g, "-"), testoFinale, "text/markdown");
     }
-  } catch (e) { alert("Non sono riuscita a preparare il file: " + (e?.message || "riprova tra poco")); }
+  } catch (e) { alert("Non è stato possibile preparare il file: " + (e?.message || "riprova tra poco")); }
   setInCorso(false);
 }
 
@@ -8706,7 +8706,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
                   if (client.scheda_pdf_path) {
                     const { data } = await supabase.storage.from("workout-plans").createSignedUrl(client.scheda_pdf_path, 3600);
                     if (data?.signedUrl) window.open(data.signedUrl, "_blank");
-                    else alert("Non riesco ad aprire il PDF della scheda.");
+                    else alert("Non è stato possibile aprire il PDF del programma.");
                   } else {
                     window.open(client.link_scheda, "_blank");
                   }
@@ -8833,7 +8833,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             onElimina={async (r) => {
               if (!await confermaApp(`Eliminare il ciclo ${formattaPeriodo(r)} (${r.kcal} kcal)? Non si può annullare.`)) return;
               const { error } = await supabase.from("nutrition_plans").delete().eq("id", r.id);
-              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              if (error) { alert("Non è stato possibile eliminarlo."); return; }
               if (nutrizioneModifica?.id === r.id) setNutrizioneModifica(null);
               carica();
             }} />
@@ -8841,7 +8841,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             <button onClick={async () => {
               if (!await confermaApp(`Eliminare TUTTO lo storico nutrizione di questa cliente (${nutrizioneStorico.length} cicli)? Non si può annullare.`)) return;
               const { error } = await supabase.from("nutrition_plans").delete().eq("client_id", clientId);
-              if (error) { alert("Non sono riuscita a eliminarlo."); return; }
+              if (error) { alert("Non è stato possibile eliminarlo."); return; }
               setNutrizioneModifica(null);
               carica();
             }} className="w-full border border-slate-200 bg-slate-100 text-slate-800 text-xs font-medium rounded-lg py-2"><Ic n="trash"/> Elimina tutto lo storico nutrizione</button>
@@ -9589,7 +9589,7 @@ function AttivitaClienti({ clients, singola = false }) {
       if (error) throw error;
       if (nm?.id) inviaPush({ evento: "messaggio", messaggio_id: nm.id });
       setInviati((p) => ({ ...p, [c.id]: true }));
-    } catch (e) { alert("Non sono riuscita a mandare il messaggio. Riprova."); }
+    } catch (e) { alert("Il messaggio non è partito. Controlla la connessione e riprova."); }
     setInvio(null);
   };
   return (
@@ -10204,7 +10204,7 @@ function ChatMessaggi({ clientId, ruolo, onLetti, nomeCliente = "" }) {
   const cancellaChat = async () => {
     if (!await confermaApp("Cancello questa chat dalla tua vista? L'altra persona continua a vedere i suoi messaggi.")) return;
     const { error } = await supabase.rpc("nascondi_chat", { p_client_id: clientId });
-    if (error) { setErrore("Non sono riuscita a cancellare la chat, riprova."); return; }
+    if (error) { setErrore("Non è stato possibile cancellare la chat, riprova."); return; }
     setMsgs([]);
   };
   return (
@@ -10265,7 +10265,7 @@ function CommentoCoach({ n, onSalvato }) {
     setSalvando(true); setErrore("");
     const { error } = await supabase.from("notifiche").update({ commento_coach: t, commento_coach_il: new Date().toISOString(), stato: "inviata" }).eq("id", n.id);
     setSalvando(false);
-    if (error) { setErrore("Non sono riuscita a salvare, riprova 🫶🏻"); return; }
+    if (error) { setErrore("Non siamo riusciti a salvare, riprova 🫶🏻"); return; }
     n.commento_coach = t;
     inviaPush({ evento: "commento", notifica_id: n.id });
     setAperto(false);
@@ -10790,7 +10790,7 @@ function ListaAttesaPubblica() {
     });
     if (error) {
       if (error.code === "23505") { setStato("doppia"); return; }
-      setErrore("Non sono riuscita a iscriverti, riprova tra un attimo 🫶🏻"); setStato("form"); return;
+      setErrore("Non siamo riusciti a iscriverti, riprova tra un attimo 🫶🏻"); setStato("form"); return;
     }
     setStato("fatto");
   };
@@ -10868,7 +10868,7 @@ function ListaAttesaCoach({ onChanged, aperta = false }) {
   const salva = async () => {
     if (!f.nome.trim()) return;
     const { error } = await supabase.from("lista_attesa").insert({ nome: f.nome.trim(), email: f.email.trim() || null, whatsapp: f.whatsapp.trim() || null, servizio: "online", pacchetto: f.pacchetto || null, obiettivo: f.nota.trim() || null, consenso: true, promo_mese_gratis: promoDi(f.data), created_at: `${f.data}T12:00:00Z` });
-    if (error) { avviso(error.code === "23505" ? "Questa email è già in lista 🫶🏻" : "Non sono riuscita a salvare, riprova."); return; }
+    if (error) { avviso(error.code === "23505" ? "Questa email è già in lista 🫶🏻" : "Non è stato possibile salvare, riprova."); return; }
     setF({ ...f, nome: "", email: "", whatsapp: "", nota: "" }); setAggiungi(false); carica();
   };
   const importa = async () => {
@@ -10891,7 +10891,7 @@ function ListaAttesaCoach({ onChanged, aperta = false }) {
       codice: avvia.codice.trim(), nome: parti[0], cognome: parti.slice(1).join(" "), email: r.email || null, telefono: r.whatsapp || null,
       tipo_servizio: "online", piano: avvia.piano || "", data_inizio: avvia.data_inizio || null, stato_pacchetto: "in attivazione", mesi_omaggio: r.promo_mese_gratis ? 1 : 0,
     }).select("id").single();
-    if (error || !cl) { avviso("Non sono riuscita a creare la cliente: " + (error?.message || "riprova")); return; }
+    if (error || !cl) { avviso("Non è stato possibile creare la cliente: " + (error?.message || "riprova")); return; }
     await supabase.from("lista_attesa").update({ client_id: cl.id, contattata: true }).eq("id", r.id);
     setAvvia(null); avviso(`${parti[0]} è ora tra le tue clienti ✨`); carica(); onChanged && onChanged();
   };
@@ -11013,7 +11013,7 @@ function BilancioSettimanaleCliente({ client }) {
       client_id: client.id, settimana: sett, voto: f.voto, rispettato: f.rispettato, rispettato_meno: f.rispettato_meno,
       da_sistemare: f.da_sistemare.trim() || null, impegni: f.impegni.trim() || null, esito_precedente: f.esito_precedente, updated_at: new Date().toISOString(),
     }, { onConflict: "client_id,settimana" });
-    if (error) { setStato("Non sono riuscita a salvare, riprova."); return; }
+    if (error) { setStato("Non è stato possibile salvare, riprova."); return; }
     setStato("Salvato ✨"); carica();
   };
   const chip = (attivo, onClick, testo) => (
@@ -11128,7 +11128,7 @@ function FormBilancioCoach({ riga, clientId, sett, onFatto, onAnnulla }) {
     const punti = {}; Object.entries(f.punti).forEach(([k, v]) => { if (v >= 1 && v <= 5) punti[k] = v; });
     const riga2 = { client_id: clientId, settimana: sett, voto: f.voto, punti, peso_medio: num(f.peso), passi: num(f.passi, true), ore_sonno: num(f.ore), difficolta: f.dif, difficolta_note: f.note.trim() || null, obiettivo: f.obiettivo.trim() || null, impegni: f.impegni.trim() || null, rispettato: f.rispettato, rispettato_meno: f.meno, esito_precedente: f.esito, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("bilanci_avanzati").upsert(riga2, { onConflict: "client_id,settimana" });
-    if (error) { setStato("Non sono riuscita a salvare, riprova."); return; }
+    if (error) { setStato("Non è stato possibile salvare, riprova."); return; }
     onFatto();
   };
   const scala = (k, l) => (
@@ -11242,7 +11242,7 @@ function BilancioAvanzatoCliente({ client }) {
       ) : (
         <div className="flex gap-2">
           <button onClick={() => setModifica(true)} className="flex-1 py-2 rounded-xl text-xs font-semibold" style={{ background: "#E1EEFB", color: "#27466D" }}>{rigaSett ? "Modifica questo bilancio" : "Inserisci a mano"}</button>
-          {rigaSett && <button onClick={async () => { if (!await confermaApp(`Eliminare il bilancio della settimana ${etichettaSettimana(sett)}? Non si può annullare.`)) return; const { error } = await supabase.from("bilanci_avanzati").delete().eq("id", rigaSett.id); setStato(error ? "Non sono riuscita a eliminarlo, riprova." : "Bilancio eliminato ✨"); carica(); }} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>Elimina</button>}
+          {rigaSett && <button onClick={async () => { if (!await confermaApp(`Eliminare il bilancio della settimana ${etichettaSettimana(sett)}? Non si può annullare.`)) return; const { error } = await supabase.from("bilanci_avanzati").delete().eq("id", rigaSett.id); setStato(error ? "Non siamo riusciti a eliminarlo, riprova." : "Bilancio eliminato ✨"); carica(); }} className="px-4 py-2 rounded-xl text-xs font-semibold" style={{ background: "#FFFBEF", color: "#7a6a3a", border: "1px solid #F7E9BE" }}>Elimina</button>}
         </div>
       )}
       {n === 0 ? (
@@ -11835,7 +11835,7 @@ async function esportaCartelleClienti(clients, avanzamento = () => {}) {
       });
       zip.file(`${cartella}/Storico completo.xlsx`, r.buf);
       nErrori += r.fotoMancanti;
-    } catch (e) { nErrori++; zip.file(`${cartella}/ERRORE.txt`, `Non sono riuscita a esportare questa cliente: ${e?.message || e}`); }
+    } catch (e) { nErrori++; zip.file(`${cartella}/ERRORE.txt`, `Non è stato possibile esportare questa cliente: ${e?.message || e}`); }
   }
   avanzamento("Preparo il file ZIP (può servire un minuto)...");
   const blob = await zip.generateAsync({ type: "blob", compression: "STORE" }, (m) => avanzamento(`Preparo il file ZIP... ${Math.round(m.percent)}%`));
@@ -12323,7 +12323,7 @@ function PagamentoDettaglio({ pagamento, onClose, onSelectCliente, onSalvato }) 
     // Se cambia qualcosa che riguarda un pacchetto a cadenza fissa, la scadenza si riallinea allo storico
     if (!error && !spesa && pag.client_id && (MESI_PER_TIPO_PAGAMENTO[pag.tipo_piano] || MESI_PER_TIPO_PAGAMENTO[upd.tipo_piano])) await ricalcolaEAggiornaScadenza(pag.client_id);
     setSalvandoMod(false);
-    if (error) { setErroreMod("Non sono riuscita a salvare, riprova."); return; }
+    if (error) { setErroreMod("Non è stato possibile salvare, riprova."); return; }
     setPag({ ...pag, ...upd });
     setModifica(false);
     onSalvato?.();
@@ -13700,14 +13700,14 @@ function ModificaValutazione({ client, val, nPrecedenti, onFatto, onAnnulla }) {
       const { error } = await supabase.storage.from("progress-photos").upload(path, file, { upsert: true });
       if (error) throw error;
       setFoto((f) => ({ ...f, [slot]: path }));
-    } catch (e) { setErrore("Non sono riuscita a caricare la foto, riprova 🫶🏻"); }
+    } catch (e) { setErrore("Non siamo riusciti a caricare la foto, riprova 🫶🏻"); }
   };
   const salva = async () => {
     setSalvando(true); setErrore("");
     const riga = { client_id: client.id, data, titolo: titolo.trim() || null, anamnesi: an, test, restrizioni: restr, lavorare: lavorare.trim() || null, note: note.trim() || null, foto };
     const { error } = val ? await supabase.from("valutazioni_bulb").update(riga).eq("id", val.id) : await supabase.from("valutazioni_bulb").insert(riga);
     setSalvando(false);
-    if (error) { setErrore("Non sono riuscita a salvare, riprova."); return; }
+    if (error) { setErrore("Non siamo riusciti a salvare, riprova."); return; }
     onFatto();
   };
   return (
@@ -14026,7 +14026,7 @@ function CircuitoGruppo({ gruppo, membri, onChanged, inline = false }) {
     if (pulite.length < 2) { setMsg("Servono almeno 2 postazioni 🫶🏻"); setTimeout(() => setMsg(""), 3000); return; }
     const circ = { postazioni: pulite, giri: Math.max(1, Math.min(12, Number(giri) || pulite.length)), recupero: Number(recupero) || 45, lavoro: Number(lavoro) || 40, varianti };
     const { error } = await supabase.from("gruppi_bulb").update({ circuito: circ }).eq("id", gruppo.id);
-    if (error) { setMsg("Non sono riuscita a salvare: riprova 🫶🏻"); setTimeout(() => setMsg(""), 4000); return; }
+    if (error) { setMsg("Non è stato possibile salvare: riprova 🫶🏻"); setTimeout(() => setMsg(""), 4000); return; }
     setPostazioni(pulite); setModifica(false); setPronto(false); setMsg("Circuito salvato ✨"); onChanged(); setTimeout(() => setMsg(""), 3000);
   };
   const salvaVarianti = async (nuove) => {
@@ -14070,7 +14070,7 @@ function CircuitoGruppo({ gruppo, membri, onChanged, inline = false }) {
       leggiCoda().forEach((o) => { if (o.data === oggi) v[`${o.clientId}|${o.exerciseId}|${o.n}`] = { kg: o.payload.kg == null ? "" : String(o.payload.kg).replace(".", ","), rip: o.payload.ripetizioni || "" }; });
       const testo = {}; Object.entries(ult).forEach(([k, x]) => { testo[k] = `${String(x.kg).replace(".", ",")} kg${x.rip ? ` × ${x.rip}` : ""}`; });
       setIds(nuoviIds); setValori(v); setUltime(testo); setPronto(true); setMsg("");
-    } catch (e) { setMsg("Non sono riuscita a preparare il circuito: controlla la connessione e riprova 🫶🏻"); setTimeout(() => setMsg(""), 5000); }
+    } catch (e) { setMsg("Non è stato possibile preparare il circuito: controlla la connessione e riprova 🫶🏻"); setTimeout(() => setMsg(""), 5000); }
   };
   const giriTot = Math.max(1, Number(giri) || post.length || 4);
 
@@ -14259,7 +14259,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
     const nome = nuovoGiorno.trim() || `Sessione ${giorni.length + 1}`;
     const ordine = Math.max(-1, ...giorni.map((g) => g.ordine ?? 0)) + 1;
     const { data, error } = await supabase.from("training_days").insert({ client_id: cl.id, nome, ordine }).select("id").single();
-    if (error || !data) { avviso("Non sono riuscita a creare la sessione, riprova 🫶🏻"); return; }
+    if (error || !data) { avviso("Non è stato possibile creare la sessione, riprova 🫶🏻"); return; }
     setNuovoGiorno(""); setGiornoId(data.id); onCambiato();
   };
   const rinominaGiorno = async () => {
@@ -14280,7 +14280,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
     if (!giorno || !nuovoEs.nome.trim()) return;
     const ordine = Math.max(0, ...esercizi.map((e) => e.ordine ?? 0)) + 1;
     const { error } = await supabase.from("training_exercises").insert({ client_id: cl.id, training_day_id: giorno.id, nome: nuovoEs.nome.trim(), tipo: "forza", serie: nuovoEs.serie ? Number(nuovoEs.serie) : null, ripetizioni: nuovoEs.rip.trim() || null, ordine });
-    if (error) { avviso("Non sono riuscita ad aggiungerlo, riprova 🫶🏻"); return; }
+    if (error) { avviso("Non è stato possibile aggiungerlo, riprova 🫶🏻"); return; }
     setNuovoEs({ ...nuovoEs, nome: "" }); onCambiato();
   };
   const salvaEs = async (id, campi) => { await supabase.from("training_exercises").update(campi).eq("id", id); onCambiato(); };
@@ -14314,7 +14314,7 @@ function EditorProgrammaSessione({ cl, membri, giorni, giornoId, setGiornoId, es
         if (righe.length) { const { error: e2 } = await supabase.from("training_exercises").insert(righe); if (e2) throw e2; }
       }
       avviso(`Fatto ✨ Sessione copiata a ${altre.length} clienti`);
-    } catch (e) { avviso("Non sono riuscita a copiare tutto: controlla le altre clienti prima di riprovare."); }
+    } catch (e) { avviso("Non è stato possibile copiare tutto: controlla le altre clienti prima di riprovare."); }
   };
 
   return (
@@ -14769,7 +14769,7 @@ function PagamentoCondivisoGruppo({ membri, onFatto }) {
       setMsg(`Registrato ✨ ${creati} ${creati === 1 ? "pagamento" : "pagamenti"}${pacchetti ? ` e ${pacchetti} ${pacchetti === 1 ? "pacchetto creato" : "pacchetti creati"}` : ""}.`);
       setTot(""); setQuote({});
       onFatto && onFatto();
-    } catch (e) { setMsg("Non sono riuscita a registrare tutto: controlla lo storico pagamenti prima di riprovare."); }
+    } catch (e) { setMsg("Non è stato possibile registrare tutto: controlla lo storico pagamenti prima di riprovare."); }
     setSalvando(false);
   };
   const campo = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm";
@@ -14887,7 +14887,7 @@ function ProgrammaGruppo({ membri }) {
         }
       }
       setNuovaSess(""); await carica(); avviso(`Fatto ✨ ${lista.length === 1 ? "Sessione creata" : "Sessioni create"} per tutte le clienti`);
-    } catch (e) { avviso("Non sono riuscita a creare tutto: controlla e riprova 🫶🏻"); }
+    } catch (e) { avviso("Non è stato possibile creare tutto: controlla e riprova 🫶🏻"); }
     setLavoro(false);
   };
   const quanteSessioni = (n) => {
@@ -14895,7 +14895,7 @@ function ProgrammaGruppo({ membri }) {
     creaSessioni(Array.from({ length: n }, (_, i) => `Sessione ${base + i + 1}`));
   };
   const rinomina = async (nome) => {
-    const nuovo = (prompt("Nuovo nome della sessione:", nome) || "").trim();
+    const nuovo = ((await chiediApp("Nuovo nome della sessione", { titolo: "Rinomina", valore: nome })) || "").trim();
     if (!nuovo || nuovo === nome) return;
     await supabase.from("training_days").update({ nome: nuovo }).in("id", giorni.filter((g) => g.nome === nome).map((g) => g.id));
     setAperta(nuovo); await carica();
@@ -14920,7 +14920,7 @@ function ProgrammaGruppo({ membri }) {
         await supabase.from("training_exercises").insert({ client_id: g.client_id, training_day_id: g.id, nome: nomeEs, tipo: "forza", ordine: n + 1, serie: Number(f.serie) || null, ripetizioni: f.rip.trim() || null, note: note || null });
       }
       setF((x) => ({ ...x, nome: "", note: "" })); await carica();
-    } catch (e) { avviso("Non sono riuscita ad aggiungerlo: riprova 🫶🏻"); }
+    } catch (e) { avviso("Non è stato possibile aggiungerlo: riprova 🫶🏻"); }
     setLavoro(false);
   };
   const eliminaEsercizio = async (nomeSess, nomeEs) => {
@@ -15101,7 +15101,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
       await supabase.from("training_days").delete().in("client_id", ids);
       setMsg("Fatto ✨ Allenamenti svuotati per tutto il gruppo.");
       setMembri(null); await carica();
-    } catch (e) { setMsg("Non sono riuscita a eliminare tutto: riprova."); }
+    } catch (e) { setMsg("Non è stato possibile eliminare tutto: riprova."); }
     setTimeout(() => setMsg(""), 5000);
   };
 
@@ -15133,7 +15133,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
       setMenu(false);
       setMembri(null); await carica();
       setTimeout(() => setMsg(""), 4000);
-    } catch (e) { setMsg("Non sono riuscita a copiare tutto: controlla le schede prima di riprovare."); }
+    } catch (e) { setMsg("Non è stato possibile copiare tutto: controlla le schede prima di riprovare."); }
   };
 
   return (
@@ -15853,7 +15853,7 @@ function BilancioPubblico({ token }) {
   const invia = async () => {
     setErrore(""); setStato("invio");
     const { data, error } = await supabase.rpc("bilancio_invia", { p_token: token, p_esito: prec ? r.esito : null, p_voto: r.voto, p_rispettato: r.rispettato, p_meno: r.meno, p_da_sistemare: r.daSistemare, p_impegni: r.impegni });
-    if (error || data !== true) { setErrore("Non sono riuscita a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
+    if (error || data !== true) { setErrore("Non siamo riusciti a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
     setStato("fatto");
   };
   if (stato === "fatto") return (
@@ -15952,7 +15952,7 @@ function BilancioAvanzatoPubblico({ token }) {
       p_token: token, p_esito: prec ? r.esito : null, p_voto: r.voto, p_punti: r.punti, p_peso: numeroDa(r.peso), p_passi: numeroDa(r.passi, true),
       p_ore: numeroDa(r.ore), p_difficolta: r.dif, p_note: r.note, p_obiettivo: r.obiettivo, p_rispettato: r.rispettato, p_meno: r.meno, p_impegni: r.impegni,
     });
-    if (error || data !== true) { setErrore("Non sono riuscita a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
+    if (error || data !== true) { setErrore("Non siamo riusciti a inviare, riprova tra un attimo 🫶🏻"); setStato("form"); return; }
     setStato("fatto");
   };
   if (stato === "fatto") return (
