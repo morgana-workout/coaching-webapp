@@ -68,7 +68,7 @@ export default function DialoghiApp() {
       >
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <div style={{ width: 38, height: 38, flexShrink: 0, borderRadius: "50%", background: "#fff", border: "1.5px solid #C9E0F7", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-            <img src="/logo.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain", transform: "scale(1.55)" }} />
+            <img src="/logo.png" alt="" style={{ width: "84%", height: "84%", objectFit: "contain" }} />
           </div>
           <div style={{ fontSize: 16, fontWeight: 600, color: "#27466D", letterSpacing: "-0.01em" }}>{titolo}</div>
         </div>
