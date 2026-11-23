@@ -15065,10 +15065,10 @@ function PaginaGruppo({ gruppo, membri, onCambiato }) {
     if (!sess) return undefined;
     let vivo = true;
     (async () => {
-      const { data } = await supabase.from("gruppo_note_esercizio").select("client_id, data, esercizio, nota").eq("gruppo_id", gruppo.id).eq("sessione", sess).order("data", { ascending: false });
+      const { data } = await supabase.from("gruppo_note_esercizio").select("client_id, data, esercizio, nota").eq("gruppo_id", gruppo.id).eq("sessione", sess).is("client_id", null).order("data", { ascending: false });
       const nm = {}, np = {};
       (data || []).forEach((r) => {
-        const k = `${r.client_id}|${r.esercizio}`;
+        const k = r.esercizio;
         if (r.data === oggi) nm[k] = r.nota || "";
         else if (!np[k] && r.nota) np[k] = { nota: r.nota, data: r.data };
       });
@@ -15108,12 +15108,14 @@ function PaginaGruppo({ gruppo, membri, onCambiato }) {
     } catch (e) { avviso("Non sono riuscita a salvare: riprova 🫶🏻"); }
   };
 
-  const salvaNota = async (clientId, nomeEs, testo) => {
-    const k = `${clientId}|${nomeEs}`;
-    if ((noteMap[k] ?? "") === testo) return;
-    setNoteMap((m) => ({ ...m, [k]: testo }));
-    const { error } = await supabase.from("gruppo_note_esercizio").upsert({ gruppo_id: gruppo.id, client_id: clientId, data: oggi, sessione: sess, esercizio: nomeEs, nota: testo.trim() || null }, { onConflict: "gruppo_id,client_id,data,sessione,esercizio" });
-    if (error) avviso("La nota non si è salvata: riprova 🫶🏻");
+  const salvaNota = async (nomeEs, testo) => {
+    if ((noteMap[nomeEs] ?? "") === testo) return;
+    setNoteMap((m) => ({ ...m, [nomeEs]: testo }));
+    const { data: ex } = await supabase.from("gruppo_note_esercizio").select("id").eq("gruppo_id", gruppo.id).is("client_id", null).eq("data", oggi).eq("sessione", sess).eq("esercizio", nomeEs).limit(1);
+    const r = ex && ex.length
+      ? await supabase.from("gruppo_note_esercizio").update({ nota: testo.trim() || null }).eq("id", ex[0].id)
+      : await supabase.from("gruppo_note_esercizio").insert({ gruppo_id: gruppo.id, client_id: null, data: oggi, sessione: sess, esercizio: nomeEs, nota: testo.trim() || null });
+    if (r.error) avviso("La nota non si è salvata: riprova 🫶🏻");
   };
 
   const fmtD = (d) => d.split("-").reverse().slice(0, 2).join("/");
@@ -15130,42 +15132,40 @@ function PaginaGruppo({ gruppo, membri, onCambiato }) {
       ) : (
         <>
           <div className="flex gap-2">
-            {nomiSess.map((n) => <button key={n} onClick={() => { setSess(n); setAperto(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-bold" style={{ background: sess === n ? "#27466D" : "#fff", color: sess === n ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{n}</button>)}
+            {nomiSess.map((n) => <button key={n} onClick={() => setSess(n)} className="flex-1 py-2.5 rounded-xl text-sm font-bold" style={{ background: sess === n ? "#27466D" : "#fff", color: sess === n ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{n}</button>)}
           </div>
           {lista.length === 0 && <p className="text-xs text-slate-400 text-center">Questa scheda non ha ancora esercizi.</p>}
           {lista.map((e, idx) => {
-            const apertoQui = aperto === e.nome;
             const tot = parseInt(e.serie, 10) || 3;
+            const col = { display: "grid", gridTemplateColumns: `44px repeat(${membri.length}, minmax(0, 1fr))`, gap: 4, alignItems: "center" };
+            const inpCls = "w-full min-w-0 border rounded-lg py-2 text-center text-sm bg-white";
+            const np = notePrec[e.nome];
+            const cella = (m, campo, sugg) => {
+              const ex = exDi(m.id, e.nome);
+              if (!ex) return <span key={m.id} className="text-center text-[11px] text-slate-300">—</span>;
+              return <input key={m.id} value={val(ex, campo)} inputMode="decimal" placeholder={sugg(ex)} onChange={(ev) => setBozza((b) => ({ ...b, [`${ex.id}|${campo}`]: ev.target.value }))} onBlur={(ev) => commit(ex, campo, ev.target.value.trim())} onKeyDown={(ev) => ev.key === "Enter" && ev.currentTarget.blur()} className={inpCls} style={{ borderColor: val(ex, campo) !== "" ? "#4F8FD0" : "#C9E0F7", color: "#27466D" }} />;
+            };
             return (
-              <div key={e.id} className="bg-white rounded-2xl" style={{ border: `1.5px solid ${apertoQui ? "#4F8FD0" : "#C9E0F7"}` }}>
-                <button onClick={() => setAperto(apertoQui ? null : e.nome)} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
-                  <span className="flex-1 min-w-0"><span className="block text-[15px] font-bold truncate" style={{ color: "#27466D" }}>{idx + 1} · {e.nome}</span><span className="block text-xs" style={{ color: "#3F78B3" }}>{tot} serie{e.ripetizioni ? ` × ${e.ripetizioni}` : ""}{e.note ? ` · ${e.note}` : ""}</span></span>
-                  <ChevronRight size={16} stroke="#4F8FD0" className={`transition-transform ${apertoQui ? "rotate-90" : ""}`} />
-                </button>
-                {apertoQui && (
-                  <div className="px-3 pb-3 space-y-3">
-                    {membri.map((m, i) => {
-                      const ex = exDi(m.id, e.nome);
-                      if (!ex) return <p key={m.id} className="text-xs text-slate-400">{nomeBreve(m, i)}: non ha questo esercizio nella {sess}.</p>;
-                      const u = ultime[ex.id]; const k = `${m.id}|${e.nome}`; const np = notePrec[k];
-                      return (
-                        <div key={m.id} className="space-y-1" style={{ borderTop: i ? "1px solid #EEF3F8" : "none", paddingTop: i ? 8 : 0 }}>
-                          <div className="flex items-center gap-2">
-                            <span className="w-16 text-xs font-bold truncate" style={{ color: "#27466D" }}>{nomeBreve(m, i)}</span>
-                            <Stepper valore={val(ex, "kg")} suggerimento={u?.kg != null ? fmtNum(u.kg) : ""} passo={2.5} placeholder="kg" onChange={(v) => setBozza((b) => ({ ...b, [`${ex.id}|kg`]: v }))} onCommit={(v) => commit(ex, "kg", v)} />
-                            <Stepper valore={val(ex, "rip")} suggerimento={u?.rip || ""} passo={1} placeholder="rip" onChange={(v) => setBozza((b) => ({ ...b, [`${ex.id}|rip`]: v }))} onCommit={(v) => commit(ex, "rip", v)} />
-                          </div>
-                          <input defaultValue={noteMap[k] ?? ""} key={k + (noteMap[k] ?? "")} onBlur={(ev) => salvaNota(m.id, e.nome, ev.target.value)} placeholder={np ? `Ultima volta (${fmtD(np.data)}): ${np.nota}` : "Note su questo esercizio…"} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white" />
-                          {u && <p className="text-[10px]" style={{ color: "#7a8da3" }}>Ultima volta ({fmtD(u.data)}): {u.kg != null ? `${fmtNum(u.kg)} kg` : "—"}{u.rip ? ` × ${u.rip}` : ""}</p>}
-                        </div>
-                      );
-                    })}
-                    <p className="text-[11px]" style={{ color: "#7a8da3" }}>Il carico che scrivi vale per tutte le serie di oggi e finisce nello storico di ogni cliente. Per una serie diversa dalle altre usa la vista per cliente.</p>
-                  </div>
-                )}
+              <div key={e.id} className="bg-white rounded-2xl p-3 space-y-2" style={{ border: "1.5px solid #C9E0F7" }}>
+                <p className="text-[15px] font-bold" style={{ color: "#27466D" }}>{idx + 1} · {e.nome} <span className="text-xs font-normal" style={{ color: "#3F78B3" }}>{tot} × {e.ripetizioni || "—"}</span></p>
+                {e.note && <p className="text-[11px] text-slate-400 -mt-1">{e.note}</p>}
+                <div style={col}>
+                  <span />
+                  {membri.map((m, i) => <span key={m.id} className="text-center text-[11px] font-semibold truncate" style={{ color: "#7a8da3" }}>{nomeBreve(m, i)}</span>)}
+                </div>
+                <div style={col}>
+                  <span className="text-[11px] font-semibold" style={{ color: "#7a8da3" }}>kg</span>
+                  {membri.map((m) => cella(m, "kg", (ex) => (ultime[ex.id]?.kg != null ? fmtNum(ultime[ex.id].kg) : "")))}
+                </div>
+                <div style={col}>
+                  <span className="text-[11px] font-semibold" style={{ color: "#7a8da3" }}>rip</span>
+                  {membri.map((m) => cella(m, "rip", (ex) => ultime[ex.id]?.rip || ""))}
+                </div>
+                <textarea defaultValue={noteMap[e.nome] ?? ""} key={e.nome + sess + (noteMap[e.nome] ?? "")} onBlur={(ev) => salvaNota(e.nome, ev.target.value)} rows={2} placeholder={np ? `Ultima volta (${fmtD(np.data)}): ${np.nota}` : "Note: dettagli delle clienti su questo esercizio…"} className="w-full border border-dashed rounded-lg px-2.5 py-1.5 text-xs bg-white resize-none" style={{ borderColor: "#C9E0F7" }} />
               </div>
             );
           })}
+          <p className="text-[11px] text-center" style={{ color: "#7a8da3" }}>I numeri grigi sono l'ultima volta. Il carico vale per tutte le serie di oggi e va nello storico di ogni cliente. Per una serie diversa usa "Vista per cliente".</p>
         </>
       )}
       {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
