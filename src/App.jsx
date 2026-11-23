@@ -14997,6 +14997,182 @@ function ProgrammaGruppo({ membri }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* GRUPPO — pagina unica: clienti in alto, schede A/B, carichi e note  */
+/* ------------------------------------------------------------------ */
+function RigaClienteGruppo({ cl, nomeBreve, onSalva }) {
+  const [nome, setNome] = useState(cl.nome || "");
+  const [note, setNote] = useState(cl.note_particolari || "");
+  return (
+    <div className="bg-white rounded-xl px-2.5 py-2" style={{ border: "1.5px solid #C9E0F7" }}>
+      <input value={nome} onChange={(e) => setNome(e.target.value)} onBlur={() => nome.trim() && nome.trim() !== (cl.nome || "") && onSalva(cl.id, { nome: nome.trim() })} placeholder={nomeBreve} className="w-full bg-transparent text-sm font-bold focus:outline-none" style={{ color: "#27466D" }} />
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (cl.note_particolari || "") && onSalva(cl.id, { note_particolari: note.trim() || null })} rows={2} placeholder="Note (infortuni, limiti…)" className="w-full mt-1 text-[11px] bg-transparent text-slate-600 focus:outline-none resize-none" />
+    </div>
+  );
+}
+
+function PaginaGruppo({ gruppo, membri, onCambiato }) {
+  const oggi = formatDataLocale(new Date());
+  const ids = membri.map((m) => m.id);
+  const chiave = ids.join(",");
+  const [giorni, setGiorni] = useState(null);
+  const [esAll, setEsAll] = useState([]);
+  const [sess, setSess] = useState(null);
+  const [aperto, setAperto] = useState(null);
+  const [oggiMap, setOggiMap] = useState({}); // `${exId}` -> { kg, rip }
+  const [ultime, setUltime] = useState({}); // `${exId}` -> { kg, rip, data }
+  const [noteMap, setNoteMap] = useState({}); // `${clientId}|${esercizio}` -> testo
+  const [notePrec, setNotePrec] = useState({});
+  const [bozza, setBozza] = useState({});
+  const [msg, setMsg] = useState("");
+  const [rl, setRl] = useState(0);
+  const nomeBreve = (c, i) => (c.nome && c.nome.trim() ? c.nome.trim().split(" ")[0] : `Cliente ${i + 1}`);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      if (!ids.length) { setGiorni([]); return; }
+      const { data: g } = await supabase.from("training_days").select("id, client_id, nome, ordine, scheda_archiviata").in("client_id", ids).order("ordine");
+      const att = (g || []).filter((x) => !x.scheda_archiviata && x.nome !== "Circuito");
+      let es = [];
+      if (att.length) { const r = await supabase.from("training_exercises").select("id, client_id, training_day_id, nome, serie, ripetizioni, note, ordine, tipo").in("training_day_id", att.map((x) => x.id)).order("ordine"); es = (r.data || []).filter((e) => e.tipo !== "mobilita" && e.tipo !== "attivazione"); }
+      if (!vivo) return;
+      setGiorni(att); setEsAll(es);
+      setSess((cur) => { const nomi = [...new Set(att.map((x) => x.nome))]; return cur && nomi.includes(cur) ? cur : nomi[0] || null; });
+    })();
+    return () => { vivo = false; };
+  }, [chiave, rl]);
+
+  useEffect(() => {
+    if (!esAll.length) { setOggiMap({}); setUltime({}); return undefined; }
+    let vivo = true;
+    (async () => {
+      const exIds = esAll.map((e) => e.id);
+      const { data } = await supabase.from("training_entries").select("exercise_id, data, numero_serie, kg, ripetizioni").in("exercise_id", exIds).order("data", { ascending: false });
+      const om = {}, ul = {};
+      (data || []).forEach((r) => {
+        if (r.kg == null && !r.ripetizioni) return;
+        if (r.data === oggi) { if (!om[r.exercise_id] || r.numero_serie < om[r.exercise_id].n) om[r.exercise_id] = { n: r.numero_serie, kg: r.kg == null ? "" : fmtNum(r.kg), rip: r.ripetizioni || "" }; }
+        else if (!ul[r.exercise_id]) ul[r.exercise_id] = { kg: r.kg, rip: r.ripetizioni, data: r.data };
+      });
+      leggiCoda().forEach((o) => { if (o.data === oggi && exIds.includes(o.exerciseId)) om[o.exerciseId] = { n: o.n, kg: o.payload.kg == null ? "" : fmtNum(o.payload.kg), rip: o.payload.ripetizioni || "" }; });
+      if (vivo) { setOggiMap(om); setUltime(ul); setBozza({}); }
+    })();
+    return () => { vivo = false; };
+  }, [esAll, oggi]);
+
+  useEffect(() => {
+    if (!sess) return undefined;
+    let vivo = true;
+    (async () => {
+      const { data } = await supabase.from("gruppo_note_esercizio").select("client_id, data, esercizio, nota").eq("gruppo_id", gruppo.id).eq("sessione", sess).order("data", { ascending: false });
+      const nm = {}, np = {};
+      (data || []).forEach((r) => {
+        const k = `${r.client_id}|${r.esercizio}`;
+        if (r.data === oggi) nm[k] = r.nota || "";
+        else if (!np[k] && r.nota) np[k] = { nota: r.nota, data: r.data };
+      });
+      if (vivo) { setNoteMap(nm); setNotePrec(np); }
+    })();
+    return () => { vivo = false; };
+  }, [gruppo.id, sess, oggi]);
+
+  if (!giorni) return <Spinner />;
+  const nomiSess = [...new Set(giorni.map((g) => g.nome))];
+  const avviso = (t) => { setMsg(t); setTimeout(() => setMsg(""), 3500); };
+  const salvaCliente = async (id, campi) => { await supabase.from("clients").update(campi).eq("id", id); onCambiato && onCambiato(); };
+
+  // esercizi della sessione scelta: elenco di base = quello della prima cliente che ha la sessione
+  const giorniSess = giorni.filter((g) => g.nome === sess);
+  const base = giorniSess[0];
+  const lista = base ? esAll.filter((e) => e.training_day_id === base.id).sort((a, b) => (a.ordine ?? 0) - (b.ordine ?? 0)) : [];
+  const exDi = (clientId, nomeEs) => { const g = giorniSess.find((x) => x.client_id === clientId); return g ? esAll.find((e) => e.training_day_id === g.id && e.nome === nomeEs) : null; };
+  const val = (ex, campo) => { const k = `${ex.id}|${campo}`; if (k in bozza) return bozza[k]; return oggiMap[ex.id]?.[campo] ?? ""; };
+
+  const commit = async (ex, campo, v) => {
+    setBozza((b) => { const c = { ...b }; delete c[`${ex.id}|${campo}`]; return c; });
+    const kgT = campo === "kg" ? v : val(ex, "kg"); const ripT = campo === "rip" ? v : val(ex, "rip");
+    const prev = oggiMap[ex.id];
+    if ((prev?.kg ?? "") === kgT && (prev?.rip ?? "") === ripT) return;
+    if (kgT === "" && ripT === "" && !prev) return;
+    const kg = num(kgT);
+    const rip = ripT === "" || ripT == null ? null : String(ripT);
+    setOggiMap((m) => ({ ...m, [ex.id]: { n: 1, kg: kg == null ? "" : fmtNum(kg), rip: rip || "" } }));
+    const tot = parseInt(ex.serie, 10) || 3;
+    try {
+      for (let n = 1; n <= tot; n++) {
+        const op = { clientId: ex.client_id, exerciseId: ex.id, data: oggi, n, payload: { kg, ripetizioni: rip, completata: kg != null || !!rip } };
+        try { await scriviSerieRemoto(op); } catch (e) { accodaOp(op); }
+      }
+      if (kg != null) inviaPushCarichi();
+    } catch (e) { avviso("Non sono riuscita a salvare: riprova 🫶🏻"); }
+  };
+
+  const salvaNota = async (clientId, nomeEs, testo) => {
+    const k = `${clientId}|${nomeEs}`;
+    if ((noteMap[k] ?? "") === testo) return;
+    setNoteMap((m) => ({ ...m, [k]: testo }));
+    const { error } = await supabase.from("gruppo_note_esercizio").upsert({ gruppo_id: gruppo.id, client_id: clientId, data: oggi, sessione: sess, esercizio: nomeEs, nota: testo.trim() || null }, { onConflict: "gruppo_id,client_id,data,sessione,esercizio" });
+    if (error) avviso("La nota non si è salvata: riprova 🫶🏻");
+  };
+
+  const fmtD = (d) => d.split("-").reverse().slice(0, 2).join("/");
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-[11px] font-semibold tracking-wide text-slate-500 mb-2">LE CLIENTI</p>
+        <div className="grid grid-cols-2 gap-2">
+          {membri.map((m, i) => <RigaClienteGruppo key={m.id + (m.note_particolari || "")} cl={m} nomeBreve={nomeBreve(m, i)} onSalva={salvaCliente} />)}
+        </div>
+      </div>
+      {nomiSess.length === 0 ? (
+        <p className="text-sm text-slate-500 text-center py-4">Nessuna scheda ancora: creala da "Sessioni e programma" qui sotto 🫶🏻</p>
+      ) : (
+        <>
+          <div className="flex gap-2">
+            {nomiSess.map((n) => <button key={n} onClick={() => { setSess(n); setAperto(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-bold" style={{ background: sess === n ? "#27466D" : "#fff", color: sess === n ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{n}</button>)}
+          </div>
+          {lista.length === 0 && <p className="text-xs text-slate-400 text-center">Questa scheda non ha ancora esercizi.</p>}
+          {lista.map((e, idx) => {
+            const apertoQui = aperto === e.nome;
+            const tot = parseInt(e.serie, 10) || 3;
+            return (
+              <div key={e.id} className="bg-white rounded-2xl" style={{ border: `1.5px solid ${apertoQui ? "#4F8FD0" : "#C9E0F7"}` }}>
+                <button onClick={() => setAperto(apertoQui ? null : e.nome)} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
+                  <span className="flex-1 min-w-0"><span className="block text-[15px] font-bold truncate" style={{ color: "#27466D" }}>{idx + 1} · {e.nome}</span><span className="block text-xs" style={{ color: "#3F78B3" }}>{tot} serie{e.ripetizioni ? ` × ${e.ripetizioni}` : ""}{e.note ? ` · ${e.note}` : ""}</span></span>
+                  <ChevronRight size={16} stroke="#4F8FD0" className={`transition-transform ${apertoQui ? "rotate-90" : ""}`} />
+                </button>
+                {apertoQui && (
+                  <div className="px-3 pb-3 space-y-3">
+                    {membri.map((m, i) => {
+                      const ex = exDi(m.id, e.nome);
+                      if (!ex) return <p key={m.id} className="text-xs text-slate-400">{nomeBreve(m, i)}: non ha questo esercizio nella {sess}.</p>;
+                      const u = ultime[ex.id]; const k = `${m.id}|${e.nome}`; const np = notePrec[k];
+                      return (
+                        <div key={m.id} className="space-y-1" style={{ borderTop: i ? "1px solid #EEF3F8" : "none", paddingTop: i ? 8 : 0 }}>
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 text-xs font-bold truncate" style={{ color: "#27466D" }}>{nomeBreve(m, i)}</span>
+                            <Stepper valore={val(ex, "kg")} suggerimento={u?.kg != null ? fmtNum(u.kg) : ""} passo={2.5} placeholder="kg" onChange={(v) => setBozza((b) => ({ ...b, [`${ex.id}|kg`]: v }))} onCommit={(v) => commit(ex, "kg", v)} />
+                            <Stepper valore={val(ex, "rip")} suggerimento={u?.rip || ""} passo={1} placeholder="rip" onChange={(v) => setBozza((b) => ({ ...b, [`${ex.id}|rip`]: v }))} onCommit={(v) => commit(ex, "rip", v)} />
+                          </div>
+                          <input defaultValue={noteMap[k] ?? ""} key={k + (noteMap[k] ?? "")} onBlur={(ev) => salvaNota(m.id, e.nome, ev.target.value)} placeholder={np ? `Ultima volta (${fmtD(np.data)}): ${np.nota}` : "Note su questo esercizio…"} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white" />
+                          {u && <p className="text-[10px]" style={{ color: "#7a8da3" }}>Ultima volta ({fmtD(u.data)}): {u.kg != null ? `${fmtNum(u.kg)} kg` : "—"}{u.rip ? ` × ${u.rip}` : ""}</p>}
+                        </div>
+                      );
+                    })}
+                    <p className="text-[11px]" style={{ color: "#7a8da3" }}>Il carico che scrivi vale per tutte le serie di oggi e finisce nello storico di ogni cliente. Per una serie diversa dalle altre usa la vista per cliente.</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+    </div>
+  );
+}
+
 function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
   const [membri, setMembri] = useState(null);
   const [candidate, setCandidate] = useState([]);
@@ -15141,24 +15317,11 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
       <div className="p-3 space-y-3 max-w-[1500px] mx-auto">
         {!membri ? <Spinner /> : (
           <>
-            <button onClick={() => { setTelIniziale(null); setSessioneTel(true); }} className="w-full py-4 rounded-2xl text-base font-bold text-white" style={{ background: "#27466D" }}>▶ Avvia la sessione di oggi</button>
+            <button onClick={() => { setTelIniziale(null); setSessioneTel(true); }} className={completa ? "w-full py-4 rounded-2xl text-base font-bold text-white" : "hidden"} style={{ background: "#27466D" }}>▶ Avvia la sessione di oggi</button>
             {!completa && (
               <>
-                <div>
-                  <p className="text-[11px] font-semibold tracking-wide text-slate-500 mb-2">LE CLIENTI</p>
-                  <div className="space-y-2">
-                    {membri.map((m) => (
-                      <button key={m.id} onClick={() => { setTelIniziale(m.id); setSessioneTel(true); }} className="w-full flex items-center gap-3 text-left bg-white rounded-2xl px-3 py-3" style={{ border: "1.5px solid #C9E0F7" }}>
-                        <span className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "#E1EEFB", color: "#27466D" }}>{(m.nome || "?").trim().charAt(0).toUpperCase()}</span>
-                        <span className="flex-1 min-w-0">
-                          <span className="block text-sm font-semibold" style={{ color: "#27466D" }}>{`${m.nome || ""} ${m.cognome || ""}`.trim()}</span>
-                          <span className="block text-xs text-slate-500 truncate">{m.note_particolari || "—"}</span>
-                        </span>
-                        {serieOggi[m.id] > 0 && <span className="text-[11px] font-semibold px-2 py-1 rounded-full flex-shrink-0" style={{ background: "#E1EEFB", color: "#27466D" }}>{serieOggi[m.id]} serie oggi</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <PaginaGruppo key={membri.map((m) => m.id).join(",")} gruppo={gruppo} membri={membri} onCambiato={() => {}} />
+                <button onClick={() => { setTelIniziale(null); setSessioneTel(true); }} className="w-full py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Vista per cliente (serie per serie)</button>
                 <p className="text-[11px] font-semibold tracking-wide text-slate-500">STRUMENTI</p>
               </>
             )}
