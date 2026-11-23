@@ -11290,7 +11290,7 @@ function BilancioAvanzatoCliente({ client }) {
           <div>
             {voci.map(([k, l, inv]) => { const v = med(k, att); if (v == null) return null; const d = delta(k); return (
               <div key={k} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0 text-sm" style={{ color: "#27466D" }}>
-                <span>{l}</span><span className="font-semibold" style={{ color: coloreVoce(d, inv) }}>{fmt1(v)}{freccia(d, inv)}</span>
+                <span>{l}</span><span className="font-semibold" style={{ color: coloreVoce(d, inv) }}>{fmt1(v).replace(/,0$/, "")}<span className="text-[11px] font-normal" style={{ color: "#7a8da3" }}>/5</span>{freccia(d, inv)}</span>
               </div>
             ); })}
             {pesi.length > 0 && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Peso medio</span><span className="font-semibold">{fmt1(pesi[0].v)} kg{pesoKg != null ? ` · ${pesoKg > 0 ? "+" : "−"}${fmt1(Math.abs(pesoKg)).replace(",", ",")} kg/sett (${pesoPct > 0 ? "+" : "−"}${fmt1(Math.abs(pesoPct))}%)` : ""}</span></div>}
