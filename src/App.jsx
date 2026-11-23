@@ -11368,7 +11368,7 @@ function BilanciLunediCoach({ clients, onSelect }) {
       <div className="space-y-3">
         <Card className="p-3">
           <div className="flex items-center justify-between gap-2">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-xs" style={{ color: "#7a8da3" }}>Settimana {etichettaSettimana(sett)} · hanno risposto {risposto.length} su {attive.length}</p>
             </div>
             <div className="flex gap-1">
@@ -11387,9 +11387,9 @@ function BilanciLunediCoach({ clients, onSelect }) {
                 const link = linkWhatsappTesto(c.telefono, c.token_bilancio ? testoLinkBilancio(c.nome, c.token_bilancio) : testoLunedi(c.nome, x));
                 return (
                   <div key={c.id} className="flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0">
-                    <button onClick={() => onSelect && onSelect(c.id)} className="text-left min-w-0">
+                    <button onClick={() => onSelect && onSelect(c.id)} className="text-left min-w-0 flex-1">
                       <span className="block text-sm font-medium" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}</span>
-                      <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>{x ? `ultima volta: ${x}` : "nessun obiettivo ancora"}</span>
+                      <span className="block text-[11px] leading-snug" style={{ color: "#7a8da3", overflowWrap: "anywhere" }}>{x ? `ultima volta: ${x}` : "nessun obiettivo ancora"}</span>
                     </button>
                     {link ? <a href={link} target="_blank" rel="noreferrer" className="text-xs font-semibold flex-shrink-0" style={{ color: "#3F78B3" }}>Messaggio ›</a> : <span className="text-[10px] text-slate-400 flex-shrink-0">senza numero</span>}
                   </div>
@@ -11406,7 +11406,7 @@ function BilanciLunediCoach({ clients, onSelect }) {
                 const r = risposte.get(c.id);
                 return (
                   <button key={c.id} onClick={() => onSelect && onSelect(c.id)} className="w-full flex items-center justify-between gap-2 py-2.5 border-b border-slate-100 last:border-0 text-left">
-                    <span className="text-sm" style={{ color: "#27466D" }}>{c.nome} {c.cognome || ""}{r.obiettivo && <span className="block text-[11px] truncate" style={{ color: "#7a8da3" }}>obiettivo: {r.obiettivo}</span>}</span>
+                    <span className="text-sm min-w-0 flex-1" style={{ color: "#27466D", overflowWrap: "anywhere" }}>{c.nome} {c.cognome || ""}{r.obiettivo && <span className="block text-[11px] leading-snug" style={{ color: "#7a8da3" }}>obiettivo: {r.obiettivo}</span>}</span>
                     <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0" style={{ background: "#C9E0F7", color: "#27466D" }}>{r.voto != null ? `${r.voto}/10` : "ricevuto"}{r.esito_precedente ? ` · ${EMOJI_ESITO[r.esito_precedente]}` : ""}</span>
                   </button>
                 );
