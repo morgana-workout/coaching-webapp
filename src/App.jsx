@@ -8496,10 +8496,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
           {(client.tipo_servizio === "online" || client.tipo_servizio === "ibrido") && !client.gruppo_id && <BilancioEscludiCliente client={client} />}
           <AcquaCoach clientId={client.id} nome={client.nome} />
           <AndamentoCliente client={client} checkins={checkins} />
-          <div className="grid lg:grid-cols-2 gap-4 items-start">
-            <ConsigliProgramma client={client} />
-            <ValutazioneEstetica client={client} checkins={checkins} />
-          </div>
+          <ValutazioneEstetica client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-3 gap-4 items-start">
             <div className="space-y-3 min-w-0">
               <AttivitaClienti clients={[client]} singola />
@@ -8508,7 +8505,6 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
             </div>
             <Card className="p-4 space-y-3 min-w-0">
               <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Note</p>
-              <MessaggioPronto client={client} chiuso={false} soloCopia />
               <NoteRapide client={client} />
             </Card>
             <Card className="p-4 space-y-3 min-w-0">

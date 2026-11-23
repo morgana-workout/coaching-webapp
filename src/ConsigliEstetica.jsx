@@ -686,24 +686,34 @@ export function leggiBloccoAnalisi(testo) {
   return out;
 }
 
+export const ZONE_ESTETICA = [["generale", "Aspetto generale"], ["glutei", "Glutei"], ["gambe", "Gambe"], ["addome", "Addome e vita"], ["schiena", "Schiena e spalle"], ["braccia", "Braccia"]];
+const GIUDIZI = [["meglio", "▲ Migliorato"], ["uguale", "▬ Stabile"], ["peggio", "▼ Peggiorato"]];
+
 export function ValutazioneEstetica({ client, checkins }) {
   const ordinati = [...(checkins || [])].filter((c) => c.data_check).sort((a, b) => a.data_check.localeCompare(b.data_check));
-  const [val, setVal] = useState({}); // checkin_id -> voti
+  const [val, setVal] = useState({}); // checkin_id -> voti (vecchia valutazione, conservata)
+  const [giud, setGiud] = useState({}); // checkin_id -> { zona: "meglio" | "uguale" | "peggio" }
   const [analisi, setAnalisi] = useState({}); // checkin_id -> testo analisi importata dalla chat
   const [apriImporta, setApriImporta] = useState(false);
   const [testoImporta, setTestoImporta] = useState("");
   const [esitoImporta, setEsitoImporta] = useState("");
-  const [idA, setIdA] = useState(""); const [idB, setIdB] = useState("");
+  const [idB, setIdB] = useState("");
   useEffect(() => {
     let vivo = true;
-    supabase.from("valutazione_estetica").select("checkin_id, voti, analisi").eq("client_id", client.id).then(({ data }) => { if (vivo) { const m = {}, an = {}; (data || []).forEach((x) => { m[x.checkin_id] = x.voti || {}; if (x.analisi) an[x.checkin_id] = x.analisi; }); setVal(m); setAnalisi(an); } });
+    supabase.from("valutazione_estetica").select("checkin_id, voti, analisi, giudizio").eq("client_id", client.id).then(({ data }) => { if (vivo) { const m = {}, an = {}, g = {}; (data || []).forEach((x) => { m[x.checkin_id] = x.voti || {}; if (x.analisi) an[x.checkin_id] = x.analisi; if (x.giudizio) g[x.checkin_id] = x.giudizio; }); setVal(m); setAnalisi(an); setGiud(g); } }, () => {});
     return () => { vivo = false; };
   }, [client.id]);
-  useEffect(() => { setIdA(ordinati[0]?.id || ""); setIdB(ordinati.length > 1 ? ordinati[ordinati.length - 1].id : ""); }, [client.id, ordinati.length]);
-  const salva = async (c, k, v) => {
-    const voti = { ...(val[c.id] || {}), [k]: v };
-    setVal((p) => ({ ...p, [c.id]: voti }));
-    try { await supabase.from("valutazione_estetica").upsert({ client_id: client.id, checkin_id: c.id, data_check: c.data_check, voti, updated_at: new Date().toISOString() }, { onConflict: "client_id,checkin_id" }); window.dispatchEvent(new Event("estetica-aggiornata")); } catch (e) { /* ignora */ }
+  useEffect(() => { setIdB(ordinati.length ? ordinati[ordinati.length - 1].id : ""); }, [client.id, ordinati.length]);
+  const iB = ordinati.findIndex((c) => c.id === idB);
+  const B = iB >= 0 ? ordinati[iB] : null;
+  const A = iB > 0 ? ordinati[iB - 1] : null; // il check precedente
+  const dm = (c) => c.data_check.split("-").reverse().join("/");
+  const scegli = async (zona, v) => {
+    if (!B) return;
+    const attuale = giud[B.id] || {};
+    const nuovo = { ...attuale }; if (attuale[zona] === v) delete nuovo[zona]; else nuovo[zona] = v;
+    setGiud((p) => ({ ...p, [B.id]: nuovo }));
+    try { await supabase.from("valutazione_estetica").upsert({ client_id: client.id, checkin_id: B.id, data_check: B.data_check, voti: val[B.id] || {}, giudizio: nuovo, updated_at: new Date().toISOString() }, { onConflict: "client_id,checkin_id" }); window.dispatchEvent(new Event("estetica-aggiornata")); } catch (e) { /* ignora */ }
   };
   const importa = async () => {
     const r = leggiBloccoAnalisi(testoImporta);
@@ -719,60 +729,38 @@ export function ValutazioneEstetica({ client, checkins }) {
     try {
       const { error } = await supabase.from("valutazione_estetica").upsert({ client_id: client.id, checkin_id: c.id, data_check: c.data_check, voti, analisi: an, updated_at: new Date().toISOString() }, { onConflict: "client_id,checkin_id" });
       if (error) throw error;
-    } catch (e) { setEsitoImporta("Non sono riuscita a salvare. Riprova."); return; }
+    } catch (e) { setEsitoImporta("Non è stato possibile salvare. Riprova."); return; }
     setVal((p) => ({ ...p, [c.id]: voti })); setAnalisi((p) => ({ ...p, [c.id]: an }));
     setIdB(c.id);
     window.dispatchEvent(new Event("estetica-aggiornata"));
     setEsitoImporta(`Fatto ✨ Analisi salvata nel check del ${c.data_check.split("-").reverse().join("/")}.`);
     setTestoImporta("");
   };
-  const A = ordinati.find((c) => c.id === idA), B = ordinati.find((c) => c.id === idB);
-  const dm = (c) => c.data_check.split("-").reverse().join("/");
-  const Voti = ({ c, k }) => (
-    <span className="inline-flex gap-1">{[1, 2, 3, 4, 5].map((n) => <button key={n} onClick={() => salva(c, k, n)} className={`w-6 h-6 rounded-md text-[11px] border ${val[c.id]?.[k] === n ? "bg-sky-700 text-white border-sky-700" : "bg-white text-slate-600 border-sky-200"}`}>{n}</button>)}</span>
-  );
-  const iA = A ? indiceEstetico(val[A.id]) : null, iB = B ? indiceEstetico(val[B.id]) : null;
-  const Sel = ({ valore, onChange }) => <select value={valore} onChange={(e) => onChange(e.target.value)} className="border border-sky-200 rounded-lg px-2 py-1 text-[12px] bg-white">{ordinati.map((c) => <option key={c.id} value={c.id}>{dm(c)}</option>)}</select>;
+  const gB = B ? giud[B.id] || {} : {};
   return (
     <div className="bg-white border border-sky-200 rounded-2xl p-4 min-w-0">
-      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Valutazione estetica · confronto tra due check</p>
-      {ordinati.length < 1 ? <p className="text-sm text-slate-400">Nessun check con foto da valutare.</p> : (
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium mb-1">Valutazione estetica</p>
+      {ordinati.length < 1 ? <p className="text-sm text-slate-400">Nessun check con foto da valutare.</p> : !A ? <p className="text-sm text-slate-400">Serve almeno un secondo check per confrontare l'aspetto.</p> : (
         <>
-          <p className="text-[12px] text-slate-500 mb-2">Guarda le foto e assegna un voto da 1 (scarso) a 5 (ottimo) a ogni aspetto. Il confronto si aggiorna da solo.</p>
           <div className="flex flex-wrap items-center gap-2 mb-2 text-[12px] text-slate-600">
-            <span>Confronta</span><Sel valore={idA} onChange={setIdA} />
-            {ordinati.length > 1 && <><span>con</span><Sel valore={idB} onChange={setIdB} /></>}
+            <span>Check del</span>
+            <select value={idB} onChange={(e) => setIdB(e.target.value)} className="border border-sky-200 rounded-lg px-2 py-1 text-[12px] bg-white">{ordinati.slice(1).map((c) => <option key={c.id} value={c.id}>{dm(c)}</option>)}</select>
+            <span>rispetto al {dm(A)}</span>
           </div>
-          {ASPETTI.map(([k, label]) => {
-            const a = Number(val[A?.id]?.[k]) || null, b = Number(val[B?.id]?.[k]) || null;
-            const doppio = B && A && B.id !== A.id;
-            const d = a && b && doppio ? b - a : null;
-            return (
-              <div key={k} className="py-2 border-b border-sky-100 last:border-0">
-                <div className="flex items-center justify-between text-[13px]">
-                  <span className="text-slate-700">{label}</span>
-                  <span className={`text-xs font-semibold ${d > 0 ? "text-sky-700" : d < 0 ? "text-slate-800" : "text-slate-400"}`}>{d === null ? "" : d > 0 ? "▲ +" + d : d < 0 ? "▼ " + d : "▬ 0"}</span>
-                </div>
-                <div className="flex flex-wrap gap-x-5 gap-y-1 mt-1">
-                  {A && <span className="inline-flex items-center gap-2"><span className="text-[11px] text-slate-500 w-12">{dm(A).slice(0, 5)}</span><Voti c={A} k={k} /></span>}
-                  {doppio && <span className="inline-flex items-center gap-2"><span className="text-[11px] text-slate-500 w-12">{dm(B).slice(0, 5)}</span><Voti c={B} k={k} /></span>}
-                </div>
+          {ZONE_ESTETICA.map(([k, label]) => (
+            <div key={k} className="py-2 border-b border-sky-100 last:border-0">
+              <p className="text-[13px] text-slate-700 mb-1">{label}</p>
+              <div className="flex gap-1.5">
+                {GIUDIZI.map(([v, l]) => <button key={v} onClick={() => scegli(k, v)} className="flex-1 py-2 rounded-lg text-[11px] font-semibold" style={gB[k] === v ? { background: "#27466D", color: "#fff", border: "1.5px solid #27466D", touchAction: "manipulation" } : { background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7", touchAction: "manipulation" }}>{l}</button>)}
               </div>
-            );
-          })}
-          {(iA !== null || iB !== null) && (
-            <div className="mt-3 bg-sky-100 rounded-xl px-3 py-2 text-[13px] text-sky-700 font-semibold">
-              Indice estetico {iA !== null ? iA + "%" : "—"}{B && B.id !== A?.id ? " → " + (iB !== null ? iB + "%" : "—") : ""}
-              {iA !== null && iB !== null && B.id !== A.id ? "  (" + (iB - iA >= 0 ? "▲ +" : "▼ ") + (iB - iA) + ")" : ""}
-              <p className="text-[11px] font-normal text-slate-600 mt-0.5">Entra nel dominio "Composizione corporea" del quadro andamento: peso stabile con foto migliori non risulta più come stallo.</p>
             </div>
-          )}
+          ))}
           {[B, A].filter((c, i, arr) => c && analisi[c.id] && arr.findIndex((y) => y?.id === c.id) === i).map((c) => {
             const a = analisi[c.id];
             const blocchi = [["sintesi", "Lettura del check"], ["forti", "Punti di forza"], ["migliorare", "Da migliorare"], ["osservazioni", "Osservazioni coach considerate"], ["suggerimenti", "Suggerimenti per te"], ["qualita", "Affidabilità dei dati"]];
             return (
               <div key={c.id} className="mt-3 bg-sky-50 border border-sky-200 rounded-xl p-3 text-[12.5px] text-slate-700 space-y-1.5">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">Analisi AI · check del {dm(c)}</p>
+                <p className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">Analisi · check del {dm(c)}</p>
                 {blocchi.filter(([k]) => a[k]).map(([k, l]) => <p key={k} className="whitespace-pre-line"><b className="text-slate-900">{l}: </b>{a[k]}</p>)}
               </div>
             );
