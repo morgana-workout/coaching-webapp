@@ -1937,10 +1937,12 @@ function AndamentoGenerale({ checkins, obiettivo, obiettivoDal }) {
 }
 
 async function salvaMotivoRiduzione(clientId, r, codici) {
-  const { data: righe } = await supabase.from("training_entries").select("id, numero_serie").eq("client_id", clientId).eq("exercise_id", r.exId).eq("data", r.data).order("numero_serie");
+  const { data: righe, error: e0 } = await supabase.from("training_entries").select("id, numero_serie").eq("client_id", clientId).eq("exercise_id", r.exId).eq("data", r.data).order("numero_serie");
+  if (e0) throw e0;
   if (!righe || !righe.length) return false;
   const prima = righe.find((x) => x.numero_serie === 1) || righe[0];
-  await supabase.from("training_entries").update({ motivo_calo: codici.join(",") || null }).eq("id", prima.id);
+  const { error } = await supabase.from("training_entries").update({ motivo_calo: codici.join(",") || null }).eq("id", prima.id);
+  if (error) throw error;
   const altre = righe.filter((x) => x.id !== prima.id);
   if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
   return true;
@@ -1954,16 +1956,23 @@ function RiduzioniCarico({ lista, clientId, onRicarica }) {
   const fmt = (n) => String(n).replace(".", ",");
   const dd = (d) => d.split("-").reverse().slice(0, 2).join("/");
   const visibili = (solo === "senza" ? lista.filter((r) => !r.motivi.length && !r.inScarico) : lista);
+  const [errore, setErrore] = useState("");
   const scegli = async (r, codice) => {
+    if (occupato) return; // un tocco alla volta: evita che due salvataggi si sovrappongano
     const k = `${r.exId}|${r.data}`;
-    setOccupato(k);
+    setOccupato(k); setErrore("");
     const nuovi = r.motivi.includes(codice) ? r.motivi.filter((x) => x !== codice) : [...r.motivi, codice];
-    try { await salvaMotivoRiduzione(clientId, r, nuovi); onRicarica(); } catch (e) { /* ignora */ }
+    try {
+      const ok = await salvaMotivoRiduzione(clientId, r, nuovi);
+      if (!ok) setErrore("Non trovo i carichi di quel giorno: il motivo non si può salvare qui.");
+      onRicarica();
+    } catch (e) { setErrore("Non è riuscito a salvare: riprova tra un attimo 🫶🏻"); }
     setOccupato(null);
   };
   return (
     <div className="pt-1">
       <button onClick={() => setAperto(!aperto)} className="text-xs font-semibold underline" style={{ color: "#3F78B3" }}>{aperto ? "Chiudi l'elenco dei carichi scesi" : `Apri i ${lista.length} carichi scesi e indica il motivo`}</button>
+      {aperto && errore && <p className="text-xs mt-1" style={{ color: "#7a6a3a" }}>{errore}</p>}
       {aperto && (
         <div className="mt-2 space-y-2">
           <div className="flex gap-1.5">
@@ -1982,7 +1991,7 @@ function RiduzioniCarico({ lista, clientId, onRicarica }) {
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {MOTIVI_CALO.filter((m) => m[0] !== "scarico").map(([k, l]) => {
                     const on = r.motivi.includes(k);
-                    return <button key={k} onClick={() => scegli(r, k)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
+                    return <button key={k} onClick={() => scegli(r, k)} disabled={!!occupato} className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}`, touchAction: "manipulation" }}>{l}</button>;
                   })}
                 </div>
               )}
@@ -4335,17 +4344,30 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
   const fatteTot = Array.from({ length: nSerie }).filter((_, i) => fatta(i + 1)).length;
   // carico più basso dell'ultima volta (stessa serie): si chiede il motivo
   const calo = Array.from({ length: nSerie }).some((_, i) => { const e = entryDi(i + 1); const u = ultime[i + 1]; return !!e && e.kg != null && !!u && u.kg != null && Number(e.kg) < Number(u.kg); });
-  const motiviSalvati = ((entries.find((e) => e.motivo_calo) || {}).motivo_calo || "").split(",").filter(Boolean);
+  const motiviDb = ((entries.find((e) => e.motivo_calo) || {}).motivo_calo || "").split(",").filter(Boolean);
+  const motiviChiave = motiviDb.join(",");
+  const motiviOttimistici = React.useRef(null);
+  const codaMotivi = React.useRef(Promise.resolve());
+  const [, rinfrescaMotivi] = useState(0);
+  useEffect(() => { motiviOttimistici.current = null; rinfrescaMotivi((n) => n + 1); }, [motiviChiave, data]);
+  const motiviSalvati = motiviOttimistici.current || motiviDb;
   // seduta segnata come altra palestra o attrezzi diversi: il confronto con le altre sedute non conta
   const dopoCambio = altraPalestra; // allenamento di oggi segnato come altra palestra / attrezzi diversi
-  const scegliMotivo = async (codice) => {
-    const nuovi = motiviSalvati.includes(codice) ? motiviSalvati.filter((x) => x !== codice) : [...motiviSalvati, codice];
+  const scegliMotivo = (codice) => {
     const riga = entries.find((x) => x.numero_serie === 1) || entries[0];
     if (!riga) return;
-    await supabase.from("training_entries").update({ motivo_calo: nuovi.join(",") || null }).eq("id", riga.id);
-    const altre = entries.filter((x) => x.id !== riga.id && x.motivo_calo);
-    if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
-    onSaved();
+    // subito visibile sul telefono; i salvataggi partono uno dopo l'altro, così due tocchi veloci non si cancellano
+    const attuali = motiviOttimistici.current || motiviDb;
+    const nuovi = attuali.includes(codice) ? attuali.filter((x) => x !== codice) : [...attuali, codice];
+    motiviOttimistici.current = nuovi; rinfrescaMotivi((n) => n + 1);
+    codaMotivi.current = codaMotivi.current.then(async () => {
+      try {
+        await supabase.from("training_entries").update({ motivo_calo: nuovi.join(",") || null }).eq("id", riga.id);
+        const altre = entries.filter((x) => x.id !== riga.id && x.motivo_calo);
+        if (altre.length) await supabase.from("training_entries").update({ motivo_calo: null }).in("id", altre.map((x) => x.id));
+        onSaved();
+      } catch (e) { motiviOttimistici.current = null; rinfrescaMotivi((n) => n + 1); }
+    });
   };
 
   const valore = (n, campo, p = 1) => {
@@ -4494,7 +4516,7 @@ function EsercizioDiario({ es, aperto, onToggle, entries, ultime, data, clientId
               <div className="flex flex-wrap gap-2 mt-2.5">
                 {MOTIVI_CALO.filter((m) => m[0] !== "scarico" && !MOTIVI_SOLO_COACH.includes(m[0]) && (mostraCiclo || m[0] !== "ciclo")).map(([k, l]) => {
                   const on = motiviSalvati.includes(k);
-                  return <button key={k} onClick={() => scegliMotivo(k)} className="px-3 py-1.5 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}` }}>{l}</button>;
+                  return <button key={k} onClick={() => scegliMotivo(k)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: on ? "#27466D" : "#fff", color: on ? "#fff" : "#3F78B3", border: `1.5px solid ${on ? "#27466D" : "#C9E0F7"}`, touchAction: "manipulation" }}>{l}</button>;
                 })}
               </div>
             </div>
@@ -10633,6 +10655,8 @@ function CaricheInCaloCoach({ onChanged }) {
   const [righe, setRighe] = useState(null);
   const [ambito, setAmbito] = useState({}); // chiave riga -> "esercizio" | "sessione"
   const [occupato, setOccupato] = useState(null);
+  const [fatti, setFatti] = useState({}); // righe appena motivate: spariscono subito
+  const [errore, setErrore] = useState("");
   const dd = (d) => d.split("-").reverse().slice(0, 2).join("/");
   const fmt = (n) => String(Number(n)).replace(".", ",");
   const carica = async () => {
@@ -10651,21 +10675,32 @@ function CaricheInCaloCoach({ onChanged }) {
     try { const { data: cp } = await supabase.from("cambi_palestra").select("client_id, dal").in("client_id", [...new Set(lista.map((x) => x.client_id))]); cambiAll = cp || []; } catch (e) { /* senza tabella: nessun filtro */ }
     // allenamento segnato come "altra palestra o attrezzi diversi": il calo è strumentale, non va motivato
     const primaDopoCambio = (r) => cambiAll.some((c) => c.client_id === r.client_id && c.dal === r.data);
-    setRighe(lista.filter((r) => !conMotivo.has(`${r.exercise_id}|${r.data}`) && !inScar(r) && !primaDopoCambio(r)).map((r) => ({ ...r, nome: nomi[r.client_id] || "Cliente" })));
+    setRighe(lista.filter((r) => !r.motivo && !conMotivo.has(`${r.exercise_id}|${r.data}`) && !inScar(r) && !primaDopoCambio(r)).map((r) => ({ ...r, nome: nomi[r.client_id] || "Cliente" })));
   };
   useEffect(() => { carica(); }, []);
   if (!righe || righe.length === 0) return null;
   const scegli = async (r, codice) => {
+    if (occupato) return; // un tocco alla volta
     const k = `${r.exercise_id}|${r.data}`;
-    setOccupato(k);
+    setOccupato(k); setErrore("");
     const lista = (ambito[k] || "esercizio") === "sessione" ? righe.filter((x) => x.client_id === r.client_id && x.data === r.data) : [r];
-    try { for (const x of lista) await salvaMotivoRiduzione(x.client_id, { exId: x.exercise_id, data: x.data }, [codice]); } catch (e) { /* ignora */ }
-    setOccupato(null); await carica(); onChanged && onChanged();
+    let fallite = 0;
+    for (const x of lista) {
+      // il motivo si salva sulla segnalazione stessa (sempre possibile) e, se ci sono, sulle serie registrate (per le analisi)
+      const { error } = await supabase.from("carichi_calo_log").update({ motivo: codice }).eq("id", x.id);
+      if (error) { fallite++; continue; }
+      try { await salvaMotivoRiduzione(x.client_id, { exId: x.exercise_id, data: x.data }, [codice]); } catch (e) { /* il motivo resta comunque sulla segnalazione */ }
+    }
+    if (fallite < lista.length) setFatti((f) => { const n = { ...f }; lista.forEach((x) => { n[x.id] = true; }); return n; });
+    if (fallite) setErrore("Qualche motivo non si è salvato: riprova 🫶🏻");
+    setOccupato(null);
+    await carica(); onChanged && onChanged();
   };
   return (
     <div className="space-y-2">
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Carichi in calo da motivare ({righe.length})</p>
-      {righe.map((r) => {
+      {errore && <p className="text-xs" style={{ color: "#7a6a3a" }}>{errore}</p>}
+      {righe.filter((r) => !fatti[r.id]).map((r) => {
         const k = `${r.exercise_id}|${r.data}`; const amb = ambito[k] || "esercizio";
         const stessaSess = righe.filter((x) => x.client_id === r.client_id && x.data === r.data).length;
         return (
@@ -10674,12 +10709,12 @@ function CaricheInCaloCoach({ onChanged }) {
             <p className="text-xs text-slate-600">{fmt(r.kg_prima)} kg{r.data_prima ? ` (${dd(r.data_prima)})` : ""} → <span className="font-semibold">{fmt(r.kg_oggi)} kg</span> ({dd(r.data)})</p>
             <div className="flex gap-1.5">
               {[["esercizio", "Solo questo esercizio"], ["sessione", `Tutta la sessione${stessaSess > 1 ? ` (${stessaSess})` : ""}`]].map(([v, l]) => (
-                <button key={v} onClick={() => setAmbito({ ...ambito, [k]: v })} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: amb === v ? "#27466D" : "#fff", color: amb === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
+                <button key={v} onClick={() => setAmbito((a) => ({ ...a, [k]: v }))} className="flex-1 py-2 rounded-lg text-[11px] font-semibold" style={{ background: amb === v ? "#27466D" : "#fff", color: amb === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7", touchAction: "manipulation" }}>{l}</button>
               ))}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {MOTIVI_CALO.filter((m) => m[0] !== "scarico").map(([c, l]) => (
-                <button key={c} onClick={() => scegli(r, c)} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
+                <button key={c} onClick={() => scegli(r, c)} disabled={!!occupato} className="px-3 py-2 rounded-full text-[12px] font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7", touchAction: "manipulation" }}>{l}</button>
               ))}
             </div>
           </Card>
