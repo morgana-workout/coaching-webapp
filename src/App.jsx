@@ -8471,7 +8471,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "riepilogo" && (
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
-          {(client.tipo_servizio === "online" || client.tipo_servizio === "ibrido") && !client.gruppo_id && <BilancioAvanzatoCliente client={client} />}
+          {(client.tipo_servizio === "online" || client.tipo_servizio === "ibrido") && !client.gruppo_id && <BilancioEscludiCliente client={client} />}
           <AcquaCoach clientId={client.id} nome={client.nome} />
           <AndamentoCliente client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-2 gap-4 items-start">
@@ -11297,6 +11297,22 @@ function BilancioAvanzatoCliente({ client }) {
   );
 }
 
+function BilancioEscludiCliente({ client }) {
+  const [escluso, setEscluso] = useState(!!client.bilancio_escluso);
+  const cambia = async () => {
+    const nuovo = !escluso;
+    setEscluso(nuovo);
+    const { error } = await supabase.from("clients").update({ bilancio_escluso: nuovo }).eq("id", client.id);
+    if (error) setEscluso(!nuovo);
+  };
+  return (
+    <>
+      {!escluso && <BilancioAvanzatoCliente client={client} />}
+      <button onClick={cambia} className="text-xs underline text-slate-400 -mt-2">{escluso ? "Bilancio settimanale escluso per questa cliente: includila di nuovo" : "Escludi questa cliente dal bilancio settimanale"}</button>
+    </>
+  );
+}
+
 function BilanciLunediCoach({ clients, onSelect }) {
   const [offset, setOffset] = useState(0);
   const [righe, setRighe] = useState(null);
@@ -11306,7 +11322,7 @@ function BilanciLunediCoach({ clients, onSelect }) {
     supabase.from("bilanci_avanzati").select("client_id, settimana, voto, punti, obiettivo, esito_precedente").in("settimana", [sett, prec]).then(({ data }) => setRighe(data || []), () => setRighe([]));
   }, [sett]);
   if (!righe) return null;
-  const attive = (clients || []).filter((c) => !c.archiviato && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") && !c.gruppo_id);
+  const attive = (clients || []).filter((c) => !c.archiviato && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") && !c.gruppo_id && !c.bilancio_escluso);
   const risposte = new Map(righe.filter((r) => r.settimana === sett).map((r) => [r.client_id, r]));
   const daSistemarePrec = new Map(righe.filter((r) => r.settimana === prec && r.obiettivo).map((r) => [r.client_id, r.obiettivo]));
   const risposto = attive.filter((c) => risposte.has(c.id));

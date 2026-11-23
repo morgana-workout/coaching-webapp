@@ -588,7 +588,7 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
     <div className="fixed inset-0 bg-black/50 z-[65] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={(e) => { if (e.target === e.currentTarget) chiudi(); }}>
       <div className="bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl max-h-[88vh] overflow-y-auto p-5 space-y-4">
         {nuovo ? (
-          <FormAlimento clientId={clientId} isAdmin={isAdmin} alimento={null} nomeIniziale={q.trim()} onAnnulla={() => setNuovo(false)} onSalvato={creato} />
+          <FormAlimento clientId={clientId} isAdmin={isAdmin} alimento={null} nomeIniziale={q.trim()} avviaScanner={nuovo === "scan"} onAnnulla={() => setNuovo(false)} onSalvato={creato} />
         ) : !food ? (
           <>
             <div className="flex items-center justify-between">
@@ -602,7 +602,10 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
                 <button key={k || "tutti"} onClick={() => setMarchio(k)} className="text-xs rounded-full px-3 py-1 whitespace-nowrap flex-shrink-0 font-medium" style={marchio === k ? { background: "#27466D", color: "#fff", border: "1px solid #27466D" } : { background: "#fff", color: "#27466D", border: "1px solid #C9E0F7" }}>{l}</button>
               ))}
             </div>
-            <button onClick={() => setNuovo(true)} className="w-full border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">+ Nuovo alimento{q.trim() ? ` «${q.trim()}»` : ""}</button>
+            <div className="flex gap-2">
+              <button onClick={() => setNuovo(true)} className="flex-1 border border-sky-200 bg-sky-50 text-sky-700 text-sm font-medium rounded-xl py-2.5">+ Nuovo alimento{q.trim() ? ` «${q.trim()}»` : ""}</button>
+              <button onClick={() => setNuovo("scan")} className="px-4 border border-sky-200 bg-white text-sky-700 text-sm font-medium rounded-xl py-2.5">Scansiona</button>
+            </div>
             <div className="space-y-1 max-h-[50vh] overflow-y-auto">
               {risultati.map((f) => (
                 <button key={f.id} onClick={() => scegli(f)} className="w-full flex items-center justify-between text-left border-b border-slate-100 py-2.5">
@@ -688,68 +691,110 @@ function LibreriaAlimenti({ clientId, isAdmin = false, foods, onCambiato }) {
   );
 }
 
-/* Scanner codice a barre: fotocamera (BarcodeDetector, oppure lettore ZXing sui telefoni che non lo hanno) + inserimento manuale */
+/* Scanner codice a barre: fotocamera (BarcodeDetector, oppure lettore ZXing sui telefoni che non lo hanno) + inserimento manuale.
+   Accetta solo codici con cifra di controllo valida e letti due volte uguali: niente più prodotti sbagliati per una lettura storta. */
+function eanValido(c) {
+  const d = String(c || "").replace(/\D/g, "");
+  if (![8, 12, 13].includes(d.length)) return false;
+  const cifre = d.split("").map(Number); const ctrl = cifre.pop();
+  const somma = cifre.reverse().reduce((a, x, i) => a + x * (i % 2 === 0 ? 3 : 1), 0);
+  return (10 - (somma % 10)) % 10 === ctrl;
+}
 function ScannerBarcode({ onCodice, onChiudi }) {
   const videoRef = React.useRef(null);
+  const trackRef = React.useRef(null);
   const [errore, setErrore] = useState("");
   const [manuale, setManuale] = useState("");
+  const [torcia, setTorcia] = useState(false);
+  const [torciaOk, setTorciaOk] = useState(false);
+  const [letto, setLetto] = useState("");
   useEffect(() => {
     let attivo = true; let stream = null; let controlli = null; let timer = null;
+    let ultimo = ""; let volte = 0;
+    const lettura = (testo) => {
+      if (!attivo) return;
+      const c = String(testo || "").replace(/\D/g, "");
+      if (!eanValido(c)) return;
+      if (c === ultimo) volte++; else { ultimo = c; volte = 1; }
+      setLetto(c);
+      if (volte >= 2) { attivo = false; try { navigator.vibrate && navigator.vibrate(60); } catch (e) { /* ok */ } onCodice(c); }
+    };
     (async () => {
       try {
+        const vincoli = { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: "continuous" }] }, audio: false };
+        stream = await navigator.mediaDevices.getUserMedia(vincoli);
+        if (!attivo) { stream.getTracks().forEach((t) => t.stop()); return; }
+        const tr = stream.getVideoTracks()[0]; trackRef.current = tr;
+        try { const cap = tr.getCapabilities ? tr.getCapabilities() : {}; if (cap.torch) setTorciaOk(true); if (cap.focusMode && cap.focusMode.includes("continuous")) await tr.applyConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) { /* non supportato */ }
+        videoRef.current.srcObject = stream; await videoRef.current.play();
         if ("BarcodeDetector" in window) {
           const det = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
-          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-          if (!attivo) { stream.getTracks().forEach((t) => t.stop()); return; }
-          videoRef.current.srcObject = stream; await videoRef.current.play();
           timer = setInterval(async () => {
-            try { const r = await det.detect(videoRef.current); if (r.length && attivo) { attivo = false; onCodice(r[0].rawValue); } } catch (e) { /* frame non leggibile */ }
-          }, 350);
+            try { const r = await det.detect(videoRef.current); if (r.length) lettura(r[0].rawValue); } catch (e) { /* frame non leggibile */ }
+          }, 200);
         } else {
           // lettore compatibile caricato solo al bisogno (nessuna installazione): libreria ZXing da CDN
           if (!window.ZXing) await new Promise((ok, ko) => { const sc = document.createElement("script"); sc.src = "https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"; sc.onload = ok; sc.onerror = ko; document.head.appendChild(sc); });
-          const rd = new window.ZXing.BrowserMultiFormatReader();
+          const Z = window.ZXing;
+          const hints = new Map();
+          hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]);
+          hints.set(Z.DecodeHintType.TRY_HARDER, true);
+          const rd = new Z.BrowserMultiFormatReader(hints, 150);
           controlli = { stop: () => rd.reset() };
-          rd.decodeFromVideoDevice(null, videoRef.current, (res) => { if (res && attivo) { attivo = false; onCodice(res.getText()); } });
+          rd.decodeFromVideoElement(videoRef.current, (res) => { if (res) lettura(res.getText()); });
         }
       } catch (e) { setErrore("Non riusciamo ad aprire la fotocamera. Controlla che l'app abbia il permesso, oppure scrivi il numero qui sotto 🫶🏻"); }
     })();
     return () => { attivo = false; if (timer) clearInterval(timer); try { controlli?.stop(); } catch (e) { /* ok */ } if (stream) stream.getTracks().forEach((t) => t.stop()); };
   }, []);
+  const accendi = async () => { try { await trackRef.current.applyConstraints({ advanced: [{ torch: !torcia }] }); setTorcia(!torcia); } catch (e) { /* ok */ } };
+  const okManuale = manuale.length >= 8 && eanValido(manuale);
   return (
     <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl w-full max-w-sm p-4 space-y-3">
         <div className="flex items-center justify-between"><p className="font-semibold text-slate-800 text-sm">Inquadra il codice a barre</p><button onClick={onChiudi} className="text-slate-400"><X size={18} /></button></div>
-        <video ref={videoRef} playsInline muted className="w-full rounded-xl bg-slate-100 aspect-[4/3] object-cover" />
+        <div className="relative">
+          <video ref={videoRef} playsInline muted className="w-full rounded-xl bg-slate-100 aspect-[4/3] object-cover" />
+          <div className="absolute inset-x-8 top-1/2 -translate-y-1/2 h-16 rounded-lg pointer-events-none" style={{ border: "2px solid rgba(255,255,255,.9)", boxShadow: "0 0 0 999px rgba(0,0,0,.25)" }} />
+        </div>
+        <p className="text-[11px] text-slate-500">Tieni il codice dentro il riquadro, ben fermo e a circa 15 cm. {letto ? `Letto ${letto}: lo controllo…` : "Se è buio accendi la luce."}</p>
+        {torciaOk && <button onClick={accendi} className="w-full py-2 rounded-lg text-xs font-semibold" style={{ border: "1.5px solid #C9E0F7", color: "#27466D" }}>{torcia ? "Spegni la luce" : "Accendi la luce"}</button>}
         {errore && <p className="text-xs text-slate-600">{errore}</p>}
         <div className="flex gap-2">
           <input value={manuale} onChange={(e) => setManuale(e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="Oppure scrivi il numero" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-          <button onClick={() => manuale.length >= 8 && onCodice(manuale)} className="px-3 rounded-lg text-sm text-white" style={{ background: "#27466D" }}>Cerca</button>
+          <button onClick={() => okManuale ? onCodice(manuale) : alert("Il numero non sembra corretto: controlla le cifre sotto le barre ✨")} className="px-3 rounded-lg text-sm text-white" style={{ background: "#27466D" }}>Cerca</button>
         </div>
       </div>
     </div>
   );
 }
 
-function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvato, nomeIniziale = "" }) {
+function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvato, nomeIniziale = "", avviaScanner = false }) {
   const x = alimento || { nome: nomeIniziale, marca: "", unit: "g", uname: "", per: 100, kcal: "", proteine: "", carboidrati: "", grassi: "", sale: "", quantita_abituale: "" };
   const [f, setF] = useState({ ...x, marca: x.marca || "", sale: x.sale == null ? "" : x.sale });
   const [perTutte, setPerTutte] = useState(false); // solo coach: nuovo alimento nella libreria comune
   const [salvando, setSalvando] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
-  const [scanner, setScanner] = useState(false);
+  const [scanner, setScanner] = useState(!!avviaScanner);
   const [cerca, setCerca] = useState("");
   const daCodice = async (codice) => {
     setScanner(false); setCerca("Cerco il prodotto...");
+    const prova = async (host) => { const r = await fetch(`https://${host}/api/v2/product/${codice}.json?fields=product_name,product_name_it,brands,nutriments`); return r.json(); };
     try {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${codice}.json?fields=product_name,brands,nutriments`);
-      const j = await r.json();
+      let j = null;
+      for (const host of ["world.openfoodfacts.org", "it.openfoodfacts.org"]) {
+        try { const x = await prova(host); if (x?.status === 1 && x.product?.nutriments) { j = x; break; } } catch (e) { /* prossimo server */ }
+      }
       const n = j?.product?.nutriments;
-      if (j?.status !== 1 || !n) { setCerca(`Codice ${codice} non trovato: inserisci i valori a mano, ci metti un attimo 🫶🏻`); return; }
+      if (!n) { setCerca(`Codice ${codice} non trovato nella banca dati: inserisci i valori a mano (etichetta, per 100 g), ci metti un attimo 🫶🏻`); return; }
       const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] != null ? n["energy_100g"] / 4.184 : null);
       const r1 = (v) => (v == null || isNaN(Number(v)) ? "" : String(Math.round(Number(v) * 10) / 10));
-      setF((s) => ({ ...s, nome: j.product.product_name || s.nome, marca: (j.product.brands || "").split(",")[0].trim() || s.marca, unit: "g", per: 100, kcal: r1(kcal), proteine: r1(n.proteins_100g), carboidrati: r1(n.carbohydrates_100g), grassi: r1(n.fat_100g), sale: r1(n.salt_100g) }));
-      setCerca("Trovato ✨ Valori per 100 g: controllali prima di salvare.");
+      const r2 = (v) => (v == null || isNaN(Number(v)) ? "" : String(Math.round(Number(v) * 100) / 100));
+      const sale = n.salt_100g != null ? n.salt_100g : n.sodium_100g != null ? Number(n.sodium_100g) * 2.5 : null;
+      const p = j.product;
+      setF((s) => ({ ...s, nome: p.product_name_it || p.product_name || s.nome, marca: (p.brands || "").split(",")[0].trim() || s.marca, unit: "g", per: 100, kcal: r1(kcal), proteine: r1(n.proteins_100g), carboidrati: r1(n.carbohydrates_100g), grassi: r1(n.fat_100g), sale: r2(sale) }));
+      const mancano = [kcal == null && "kcal", n.proteins_100g == null && "proteine", n.carbohydrates_100g == null && "carboidrati", n.fat_100g == null && "grassi", sale == null && "sale"].filter(Boolean);
+      setCerca(`Trovato ✨ Valori per 100 g: controllali con l'etichetta prima di salvare.${mancano.length ? ` Mancano nella banca dati: ${mancano.join(", ")}.` : ""}`);
     } catch (e) { setCerca("Non riusciamo a collegarci ora: riprova tra poco oppure inserisci a mano."); }
   };
 

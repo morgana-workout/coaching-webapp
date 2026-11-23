@@ -27,7 +27,7 @@ const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,
 const PAROLE_NUM = { un: 1, uno: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9, dieci: 10, mezzo: 0.5, mezza: 0.5, venti: 20, trenta: 30, quaranta: 40, cinquanta: 50, sessanta: 60, settanta: 70, ottanta: 80, novanta: 90, cento: 100, duecento: 200, trecento: 300, quattrocento: 400, cinquecento: 500 };
 // unità riconosciute → { tipo, f: fattore verso g/ml, stima }
 const UNITA = {
-  g: { t: "g", f: 1 }, gr: { t: "g", f: 1 }, grammo: { t: "g", f: 1 }, grammi: { t: "g", f: 1 },
+  g: { t: "g", f: 1 }, gr: { t: "g", f: 1 }, grammo: { t: "g", f: 1 }, grammi: { t: "g", f: 1 }, grami: { t: "g", f: 1 }, gramma: { t: "g", f: 1 }, gram: { t: "g", f: 1 }, grm: { t: "g", f: 1 }, mg: { t: "g", f: 0.001 },
   kg: { t: "g", f: 1000 }, chilo: { t: "g", f: 1000 }, chili: { t: "g", f: 1000 }, kili: { t: "g", f: 1000 },
   etto: { t: "g", f: 100 }, etti: { t: "g", f: 100 },
   ml: { t: "ml", f: 1 }, millilitri: { t: "ml", f: 1 }, l: { t: "ml", f: 1000 }, litro: { t: "ml", f: 1000 }, litri: { t: "ml", f: 1000 },
@@ -122,7 +122,24 @@ function tokensAlimento(f) {
   return { nome, marca };
 }
 
-export function trovaCandidati(cibo, foods) {
+/* parole sentite male dal microfono: "iogurt", "yogurth", "pasta" con doppie, ecc. */
+const foneti = (w) => w.replace(/h/g, "").replace(/(.)\1+/g, "$1").replace(/c(?=[ei])/g, "c").replace(/y/g, "i").replace(/z/g, "s");
+function dist1(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return diff + (a.length - i) + (b.length - j) <= 1;
+}
+const ALIAS_KEY = "voce_alias_v1";
+const leggiAlias = () => { try { return JSON.parse(localStorage.getItem(ALIAS_KEY) || "{}"); } catch (e) { return {}; } };
+export const chiaveCibo = (cibo) => cibo.map(stem).sort().join(" ");
+export function ricordaScelta(cibo, f) { try { if (!cibo.length) return; const m = leggiAlias(); if (f) m[chiaveCibo(cibo)] = f.id; else delete m[chiaveCibo(cibo)]; localStorage.setItem(ALIAS_KEY, JSON.stringify(m)); } catch (e) { /* ok */ } }
+
+export function trovaCandidati(cibo, foods, fuzzy = false) {
   const fr = cibo.map(stem);
   const out = [];
   foods.forEach((f) => {
@@ -130,7 +147,7 @@ export function trovaCandidati(cibo, foods) {
     const tutti = [...nome, ...marca].map(stem);
     if (!tutti.length) return;
     let ok = 0;
-    fr.forEach((p) => { if (tutti.some((q) => q === p || (p.length >= 4 && q.startsWith(p)) || (q.length >= 4 && p.startsWith(q)))) ok++; });
+    fr.forEach((p) => { if (tutti.some((q) => q === p || (p.length >= 4 && q.startsWith(p)) || (q.length >= 4 && p.startsWith(q)) || (fuzzy && p.length >= 3 && (foneti(q) === foneti(p) || (p.length >= 5 && dist1(foneti(q), foneti(p))))))) ok++; });
     if (ok !== fr.length) return;
     let score = 1 + ok / tutti.length;
     const marcaDetta = marca.length && marca.map(stem).some((q) => fr.includes(q));
@@ -142,7 +159,12 @@ export function trovaCandidati(cibo, foods) {
     if (f.proteine == null) score -= 0.1; // meglio gli alimenti con i valori completi
     out.push({ f, score });
   });
-  return out.sort((a, b) => b.score - a.score || a.f.nome.localeCompare(b.f.nome, "it")).slice(0, 8).map((x) => x.f);
+  const lista = out.sort((a, b) => b.score - a.score || a.f.nome.localeCompare(b.f.nome, "it")).slice(0, 8).map((x) => x.f);
+  if (!fuzzy && !lista.length) return trovaCandidati(cibo, foods, true);
+  // scelta già fatta in passato per la stessa frase: va in cima
+  const ricordata = leggiAlias()[chiaveCibo(cibo)];
+  if (ricordata) { const f = foods.find((x) => x.id === ricordata); if (f) return [f, ...lista.filter((x) => x.id !== f.id)].slice(0, 8); }
+  return lista;
 }
 
 function pesoPezzo(f) {
@@ -204,27 +226,48 @@ export function VoceAggiungi({ clientId, isAdmin, date, meal, foods, onChiudi, o
 
   useEffect(() => () => { try { recRef.current && recRef.current.stop(); } catch (e) { /* niente */ } }, []);
 
-  const ferma = () => { try { recRef.current && recRef.current.stop(); } catch (e) { /* niente */ } setAscolto(false); };
+  const volontario = useRef(false);
+  const testoRef = useRef("");
+  useEffect(() => { testoRef.current = testo; }, [testo]);
+  const ferma = () => { volontario.current = true; try { recRef.current && recRef.current.stop(); } catch (e) { /* niente */ } setAscolto(false); };
+  // toglie le frasi ripetute due volte di fila (capita sui telefoni che rimandano il testo già detto)
+  const senzaRipetizioni = (t) => {
+    const w = t.split(/\s+/).filter(Boolean);
+    for (let n = Math.min(8, Math.floor(w.length / 2)); n >= 2; n--) {
+      for (let i = 0; i + 2 * n <= w.length; i++) {
+        if (w.slice(i, i + n).join(" ").toLowerCase() === w.slice(i + n, i + 2 * n).join(" ").toLowerCase()) { w.splice(i + n, n); i = -1; }
+      }
+    }
+    return w.join(" ");
+  };
   const avvia = () => {
     setErrMic("");
     if (!SR) { setErrMic("Su questo telefono il microfono dell'app non è disponibile: usa il microfono della tastiera 🫶🏻"); return; }
-    try {
-      const r = new SR();
-      r.lang = "it-IT"; r.interimResults = true; r.continuous = true;
-      const base = testo.trim();
-      r.onresult = (e) => {
-        let fin = "", tmp = "";
-        for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t + " "; else tmp += t; }
-        setTesto((base + " " + fin + tmp).trim());
-      };
-      r.onerror = (e) => {
-        if (e.error === "not-allowed" || e.error === "service-not-allowed") setErrMic("Il microfono non è autorizzato per questa app. Puoi permetterlo dalle impostazioni del telefono, oppure usare il microfono della tastiera 🫶🏻");
-        else if (e.error !== "no-speech" && e.error !== "aborted") setErrMic("Non siamo riusciti ad ascoltarti: riprova, oppure usa il microfono della tastiera 🫶🏻");
-        setAscolto(false);
-      };
-      r.onend = () => setAscolto(false);
-      recRef.current = r; r.start(); setAscolto(true);
-    } catch (e) { setErrMic("Il microfono non è partito: usa quello della tastiera 🫶🏻"); setAscolto(false); }
+    volontario.current = false;
+    let tentativi = 0;
+    const parti = () => {
+      try {
+        const r = new SR();
+        r.lang = "it-IT"; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
+        const base = testoRef.current.trim();
+        r.onresult = (e) => {
+          let fin = "", tmp = "";
+          for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t + " "; else tmp += t; }
+          setTesto(senzaRipetizioni((base + " " + fin + tmp).trim()));
+        };
+        r.onerror = (e) => {
+          if (e.error === "not-allowed" || e.error === "service-not-allowed") { volontario.current = true; setErrMic("Il microfono non è autorizzato per questa app. Puoi permetterlo dalle impostazioni del telefono, oppure usare il microfono della tastiera 🫶🏻"); }
+          else if (e.error !== "no-speech" && e.error !== "aborted") { volontario.current = true; setErrMic("Non siamo riusciti ad ascoltarti: riprova, oppure usa il microfono della tastiera 🫶🏻"); }
+        };
+        // il telefono chiude l'ascolto dopo una pausa: se non l'hai fermato tu, riparte da solo senza perdere il testo
+        r.onend = () => {
+          if (!volontario.current && tentativi < 6) { tentativi++; setTimeout(() => { if (!volontario.current) parti(); }, 150); }
+          else setAscolto(false);
+        };
+        recRef.current = r; r.start(); setAscolto(true);
+      } catch (e) { setErrMic("Il microfono non è partito: usa quello della tastiera 🫶🏻"); setAscolto(false); }
+    };
+    parti();
   };
 
   const interpreta = () => {
@@ -238,6 +281,7 @@ export function VoceAggiungi({ clientId, isAdmin, date, meal, foods, onChiudi, o
   const cambiaRiga = (id, patch) => setRighe((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const scegliFood = (r, fid) => {
     const f = r.cand.find((c) => c.id === fid) || null;
+    ricordaScelta(r.seg.cibo, f);
     const { q, nota } = quantitaPer(f, r.seg);
     cambiaRiga(r.id, { sel: f ? f.id : null, qty: q == null ? r.qty : String(q), nota });
   };
