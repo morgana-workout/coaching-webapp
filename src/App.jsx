@@ -11278,7 +11278,7 @@ function BilancioAvanzatoCliente({ client }) {
           <div className="grid grid-cols-4 gap-2">
             {[["Voto", med("voto", att), delta("voto"), "/10"], ["Aderenza", aderenza, delta("aderenza"), "/5"], ["Recupero", recupero, delta("recupero"), "/5"]].map(([l, v, d, u]) => (
               <div key={l} className="rounded-xl p-2 text-center" style={{ background: "#F5FAFE", border: "1px solid #dbe7f3" }}>
-                <p className="text-base font-semibold" style={{ color: "#27466D" }}>{fmt1(v)}<span className="text-[9px]" style={{ color: "#7a8da3" }}>{u}</span></p>
+                <p className="text-base font-semibold" style={{ color: "#27466D" }}>{fmt1(v).replace(/,0$/, "")}<span className="text-[9px]" style={{ color: "#7a8da3" }}>{u}</span></p>
                 <p className="text-[10px]" style={{ color: "#7a8da3" }}>{l}{d != null && Math.abs(d) >= 0.15 ? ` ${d > 0 ? "+" : "−"}${fmt1(Math.abs(d))}` : ""}</p>
               </div>
             ))}
@@ -11287,10 +11287,11 @@ function BilancioAvanzatoCliente({ client }) {
               <p className="text-[10px]" style={{ color: "#7a8da3" }}>Bilanci</p>
             </div>
           </div>
+          <p className="text-[10px] -mt-1" style={{ color: "#7a8da3" }}>Voto globale su 10. Le singole voci sono su 5 (1 = per niente, 5 = al massimo); Aderenza e Recupero sono la media delle loro voci. Nel Recupero fame, stress e dolori contano al contrario, perché meno è meglio. «Bilanci» = quanti ricevuti sulle ultime 4 settimane.</p>
           <div>
             {voci.map(([k, l, inv]) => { const v = med(k, att); if (v == null) return null; const d = delta(k); return (
               <div key={k} className="flex justify-between py-1.5 border-b border-slate-100 last:border-0 text-sm" style={{ color: "#27466D" }}>
-                <span>{l}</span><span className="font-semibold" style={{ color: coloreVoce(d, inv) }}>{fmt1(v).replace(/,0$/, "")}<span className="text-[11px] font-normal" style={{ color: "#7a8da3" }}>/5</span>{freccia(d, inv)}</span>
+                <span>{l}{inv && <span className="text-[10px] ml-1" style={{ color: "#7a8da3" }}>(più basso = meglio)</span>}</span><span className="font-semibold" style={{ color: coloreVoce(d, inv) }}>{fmt1(v).replace(/,0$/, "")}<span className="text-[11px] font-normal" style={{ color: "#7a8da3" }}>/5</span>{freccia(d, inv)}</span>
               </div>
             ); })}
             {pesi.length > 0 && <div className="flex justify-between py-1.5 border-b border-slate-100 text-sm" style={{ color: "#27466D" }}><span>Peso medio</span><span className="font-semibold">{fmt1(pesi[0].v)} kg{pesoKg != null ? ` · ${pesoKg > 0 ? "+" : "−"}${fmt1(Math.abs(pesoKg)).replace(",", ",")} kg/sett (${pesoPct > 0 ? "+" : "−"}${fmt1(Math.abs(pesoPct))}%)` : ""}</span></div>}
