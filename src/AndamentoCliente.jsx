@@ -104,6 +104,23 @@ function calcola(client, d) {
     else aree.push({ k: "Monitoraggio ciclo", v: 0, p: null, nota: "mai registrato" });
   }
 
+  // BILANCI SETTIMANALI (bilanci_avanzati): aderenza (piano, allenamenti, cardio, prestazioni) e recupero (sonno, energia, fame, stress, dolori, digestione), scala 1-5 -> 0-100
+  if (online && (d.bil || []).length) {
+    const inR = (r) => d.bil.filter((x) => dentro(x.settimana, r));
+    const pc = (v) => (v === null || v === undefined ? null : ((v - 1) / 4) * 100);
+    const adM = (rows) => media(rows.map((x) => media(["piano", "allenamenti", "cardio", "prestazioni"].map((k) => x.punti?.[k] ?? null))));
+    const reM = (rows) => media(rows.map((x) => media([x.punti?.sonno, x.punti?.energia, x.punti?.digestione, x.punti?.fame != null ? 6 - x.punti.fame : null, x.punti?.stress != null ? 6 - x.punti.stress : null, x.punti?.dolori != null ? 6 - x.punti.dolori : null])));
+    const bc = inR(rangeCorr), bp = inR(rangePrec);
+    const f1 = (n) => (n === null ? null : n.toFixed(1).replace(".", ","));
+    if (bc.length) {
+      const a = pc(adM(bc)), ap = bp.length ? pc(adM(bp)) : null;
+      const r = pc(reM(bc)), rp = bp.length ? pc(reM(bp)) : null;
+      const voto = media(bc.map((x) => x.voto)), sonno = media(bc.map((x) => Number(x.ore_sonno) || null)), passi = media(bc.map((x) => Number(x.passi) || null)), pm = media(bc.map((x) => Number(x.peso_medio) || null));
+      if (a !== null) aree.push({ k: "Aderenza al bilancio", v: Math.round(a), p: ap === null ? null : Math.round(ap), nota: bc.length + " bilanci in 30 gg" + (voto !== null ? " · autovalutazione media " + f1(voto) + "/10" : "") + (passi ? " · " + Math.round(passi) + " passi/die" : "") });
+      if (r !== null) aree.push({ k: "Recupero e abitudini", v: Math.round(r), p: rp === null ? null : Math.round(rp), nota: "indice di recupero (sonno, energia, fame, stress, dolori, digestione)" + (sonno ? " · sonno " + f1(sonno) + " h" : "") + (pm ? " · peso medio " + f1(pm) + " kg" : "") });
+    }
+  }
+
   // andamento settimanale (8 settimane): allenamenti (obiettivo 3/sett) e diario (obiettivo 5 gg/sett)
   const settT = [], settK = [];
   for (let w = 7; w >= 0; w--) {
@@ -124,6 +141,8 @@ function Linea({ valori }) {
 const AREE = [
   ["allenamento", "Aderenza all'allenamento", true],
   ["alimentazione", "Aderenza nutrizionale", true],
+  ["bilancio", "Aderenza al bilancio", false],
+  ["recupero", "Recupero e abitudini", false],
   ["corpo", "Composizione corporea", false],
   ["check", "Aderenza al monitoraggio", false],
   ["ciclo", "Monitoraggio ciclo", false],
@@ -207,8 +226,8 @@ export default function AndamentoCliente({ client, checkins }) {
   const [dettaglio, setDettaglio] = useState(false);
   const [est, setEst] = useState([]);
   const caricaEst = async () => {
-    const { data } = await supabase.from("valutazione_estetica").select("data_check, voti").eq("client_id", client.id).order("data_check");
-    setEst((data || []).map((x) => ({ data: x.data_check, idx: indiceEstetico(x.voti) })).filter((x) => x.idx !== null));
+    const { data } = await supabase.from("valutazione_estetica").select("data_check, voti, giudizio").eq("client_id", client.id).order("data_check");
+    setEst((data || []).map((x) => ({ data: x.data_check, idx: indiceEstetico(x.voti), giu: x.giudizio || null })).filter((x) => x.idx !== null || (x.giu && Object.keys(x.giu).length)));
   };
   useEffect(() => { caricaEst(); const h = () => caricaEst(); window.addEventListener("estetica-aggiornata", h); return () => window.removeEventListener("estetica-aggiornata", h); }, [client.id]);
   useEffect(() => {
@@ -218,12 +237,13 @@ export default function AndamentoCliente({ client, checkins }) {
         const da = giorniFa(60);
         const tr = await leggi(() => supabase.from("training_entries").select("exercise_id, data, kg").eq("client_id", client.id).gte("data", da).order("id"));
         const kc = await leggi(() => supabase.from("kcal_voci").select("data, proteine").eq("client_id", client.id).gte("data", da).order("created_at"));
+        const { data: bil } = await supabase.from("bilanci_avanzati").select("settimana, voto, punti, peso_medio, passi, ore_sonno").eq("client_id", client.id).gte("settimana", da);
         const { data: ci } = await supabase.from("ciclo_mestruale").select("data_inizio").eq("client_id", client.id);
         const { data: im } = await supabase.from("ciclo_impostazioni").select("attivo").eq("client_id", client.id).maybeSingle();
         const { data: an } = await supabase.from("analisi_cibo_impostazioni").select("fase").eq("client_id", client.id).maybeSingle();
         const { data: pi } = await supabase.from("nutrition_plans").select("*").eq("client_id", client.id).order("data_aggiornamento", { ascending: false }).limit(1).maybeSingle();
         const { data: ai } = await supabase.from("andamento_impostazioni").select("impostazioni").eq("client_id", client.id).maybeSingle();
-        if (vivo) { setRaw(calcola(client, { tr, kc, ci: ci || [], ck: checkins || [], cicloAttivo: im?.attivo, fase: an?.fase, piano: pi })); setImp(ai?.impostazioni || {}); }
+        if (vivo) { setRaw(calcola(client, { tr, kc, bil: bil || [], ci: ci || [], ck: checkins || [], cicloAttivo: im?.attivo, fase: an?.fase, piano: pi })); setImp(ai?.impostazioni || {}); }
       } catch (e) { if (vivo) setRaw({ errore: true }); }
     })();
     return () => { vivo = false; };
@@ -242,7 +262,12 @@ export default function AndamentoCliente({ client, checkins }) {
     if (m === "escludi") return [];
     if (m === "manuale" && manualePossibile) { const v = imp[id]?.val || "parz"; return [{ k: label, v: VAL_MANUALE[v], p: null, nota: "indicato da te: " + ETICHETTA_MANUALE[v].toLowerCase(), manuale: true }]; }
     let r0 = raw.aree.find((x) => x.k === label);
-    if (id === "corpo" && est.length >= 2) {
+    if (id === "corpo" && est.length && est[est.length - 1].giu && Object.keys(est[est.length - 1].giu).length) {
+      const g = Object.values(est[est.length - 1].giu), mg = g.filter((x) => x === "meglio").length, pg = g.filter((x) => x === "peggio").length;
+      const eg = Math.round(clamp(50 + (50 * (mg - pg)) / g.length));
+      const notaG = "aspetto: " + mg + " zone migliorate, " + (g.length - mg - pg) + " stabili, " + pg + " peggiorate";
+      r0 = r0 && r0.v !== null ? { ...r0, v: Math.round((r0.v + eg) / 2), nota: r0.nota + " · " + notaG } : { k: label, v: eg, p: null, nota: notaG };
+    } else if (id === "corpo" && est.length >= 2 && est[est.length - 1].idx !== null && est[est.length - 2].idx !== null) {
       const a = est[est.length - 2], b = est[est.length - 1];
       const es = Math.round(clamp(50 + 2.5 * (b.idx - a.idx)));
       const notaE = "valutazione estetica " + a.idx + "% → " + b.idx + "%";
@@ -326,7 +351,7 @@ export default function AndamentoCliente({ client, checkins }) {
         </div>
       )}
     </div>
-    {dettaglio && <DettaglioCorpo est={est} checkins={checkins} fase={raw.fase} punteggio={aree.find((x) => x.k === "Composizione corporea")?.v ?? null} onChiudi={() => setDettaglio(false)} />}
+    {dettaglio && <DettaglioCorpo est={est.filter((x) => x.idx !== null)} checkins={checkins} fase={raw.fase} punteggio={aree.find((x) => x.k === "Composizione corporea")?.v ?? null} onChiudi={() => setDettaglio(false)} />}
     </div>
   );
 }

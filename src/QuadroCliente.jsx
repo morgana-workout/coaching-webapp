@@ -134,9 +134,8 @@ export function TraguardiENotifiche({ client }) {
     </div>
   );
   return (
-    <div className="grid lg:grid-cols-2 gap-4">
+    <div className="grid gap-4">
       <Box titolo="Traguardi log allenamento" righe={tr} vuoto="Ancora nessun traguardo registrato" cosa />
-      <Box titolo="Ultime notifiche inviate alla cliente" righe={nt} vuoto="Nessuna notifica inviata" />
     </div>
   );
 }
