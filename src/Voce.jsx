@@ -39,15 +39,52 @@ const UNITA = {
 };
 const STOP = new Set(["di", "del", "dello", "della", "dei", "degli", "delle", "d", "dell", "l", "il", "lo", "la", "le", "i", "gli", "un", "una", "uno", "al", "alla", "allo", "ai", "con", "e", "poi", "piu", "anche", "ho", "mangiato", "bevuto", "preso", "oggi", "a", "in", "su", "per", "circa", "ancora", "ed"]);
 const CONNETTORI = new Set(["e", "ed", "poi", "piu", "con", "anche", "inoltre"]);
-const stem = (t) => (t.length > 4 ? t.replace(/[aeio]$/, "") : t);
+const stem = (t) => (t.length > 3 ? t.replace(/[aeio]$/, "") : t);
 const isNum = (t) => /^\d+(\.\d+)?$/.test(t);
 
-function tokensDi(testo) { return norm(testo).split(" ").filter(Boolean); }
+/* numeri detti a parole ("centocinquanta", "cento cinquanta", "duecentoventi") → cifre */
+const UNI = { uno: 1, un: 1, una: 1, due: 2, tre: 3, quattro: 4, cinque: 5, sei: 6, sette: 7, otto: 8, nove: 9 };
+const TEENS = { dieci: 10, undici: 11, dodici: 12, tredici: 13, quattordici: 14, quindici: 15, sedici: 16, diciassette: 17, diciotto: 18, diciannove: 19 };
+const DECINE = { vent: 20, trent: 30, quarant: 40, cinquant: 50, sessant: 60, settant: 70, ottant: 80, novant: 90 };
+function numeroDaParola(w) {
+  if (!w || w.length < 4 || isNum(w)) return null;
+  let rest = w, tot = 0, trovato = false;
+  const m = rest.match(/^(due|tre|quattro|cinque|sei|sette|otto|nove)?cento/);
+  if (m) { tot += (m[1] ? UNI[m[1]] : 1) * 100; rest = rest.slice(m[0].length); trovato = true; }
+  if (rest) {
+    const d = rest.match(/^(vent|trent|quarant|cinquant|sessant|settant|ottant|novant)[ai]?/);
+    if (d) { tot += DECINE[d[1]]; rest = rest.slice(d[0].length); trovato = true; if (rest) { if (UNI[rest] && rest !== "un" && rest !== "una") { tot += UNI[rest]; rest = ""; } } }
+    else if (TEENS[rest] != null) { tot += TEENS[rest]; rest = ""; trovato = true; }
+    else if (UNI[rest] != null && m && rest !== "un" && rest !== "una") { tot += UNI[rest]; rest = ""; }
+  }
+  return trovato && rest === "" ? tot : null;
+}
+function numeriInCifre(tk) {
+  const out = [];
+  for (let i = 0; i < tk.length; i++) {
+    let v = numeroDaParola(tk[i]);
+    if (v == null) { out.push(tk[i]); continue; }
+    let j = i + 1;
+    while (j < tk.length) {
+      const n = numeroDaParola(tk[j]) ?? (UNI[tk[j]] != null && tk[j] !== "un" && tk[j] !== "una" ? UNI[tk[j]] : null);
+      if (n != null && ((v % 100 === 0 && n < 100) || (v % 10 === 0 && v < 100 && n < 10))) { v += n; j++; } else break;
+    }
+    out.push(String(v)); i = j - 1;
+  }
+  return out;
+}
+const PLURALI = { uova: "uovo", uovi: "uovo" };
+function tokensDi(testo) {
+  let t = numeriInCifre(norm(testo).split(" ").filter(Boolean)).join(" ");
+  // "un etto e mezzo", "due chili e mezzo" → 1.5 etto, 2.5 chili
+  t = t.replace(/\b(\d+(?:\.\d+)?|un|una)\s+(etto|etti|chilo|chili|kg|litro|litri|l)\s+e\s+mezz[oa]\b/g, (_, n, u) => `${(n === "un" || n === "una" ? 1 : Number(n)) + 0.5} ${u}`);
+  return t.split(" ").filter(Boolean).map((x) => PLURALI[x] || x);
+}
 function paroleCibo(tokens) { return tokens.filter((t) => !STOP.has(t) && !isNum(t)); }
 
 export function dividiTesto(testoGrezzo) {
   let pasto = null;
-  let t = norm(testoGrezzo);
+  let t = tokensDi(testoGrezzo).join(" ");
   const m = t.match(/\b(colazione|pranzo|cena|spuntino|spuntini|merenda)\b/);
   if (m) { pasto = m[1] === "spuntino" || m[1] === "merenda" ? "spuntini" : m[1]; t = t.replace(m[0], " ").replace(/\s+/g, " ").trim(); }
   const tk = t.split(" ").filter(Boolean);
@@ -182,7 +219,7 @@ export function VoceAggiungi({ clientId, isAdmin, date, meal, foods, onChiudi, o
       };
       r.onerror = (e) => {
         if (e.error === "not-allowed" || e.error === "service-not-allowed") setErrMic("Il microfono non è autorizzato per questa app. Puoi permetterlo dalle impostazioni del telefono, oppure usare il microfono della tastiera 🫶🏻");
-        else if (e.error !== "no-speech" && e.error !== "aborted") setErrMic("Non sono riuscita ad ascoltarti: riprova, oppure usa il microfono della tastiera 🫶🏻");
+        else if (e.error !== "no-speech" && e.error !== "aborted") setErrMic("Non siamo riusciti ad ascoltarti: riprova, oppure usa il microfono della tastiera 🫶🏻");
         setAscolto(false);
       };
       r.onend = () => setAscolto(false);
@@ -233,7 +270,7 @@ export function VoceAggiungi({ clientId, isAdmin, date, meal, foods, onChiudi, o
     });
     const { error } = await supabase.from("kcal_voci").insert(daInserire);
     setSalvando(false);
-    if (error) { alert("Non sono riuscita a salvare: riprova tra un attimo 🫶🏻"); return; }
+    if (error) { alert("Non siamo riusciti a salvare: riprova tra un attimo 🫶🏻"); return; }
     onFatto();
   };
 

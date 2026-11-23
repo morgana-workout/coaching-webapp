@@ -2973,7 +2973,7 @@ function ClientNutrizione({ piano, storico, daNutrizionista = false }) {
     <div className="px-5 pt-6 pb-24 space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">{daNutrizionista ? "Il programma della tua nutrizionista" : "Nutrizione"}</h1>
-        <p className="text-slate-500 text-sm mt-1">{daNutrizionista ? "Macros indicativi in linea con il tuo programma, " : "Valori indicativi, "}{formattaPeriodo(piano)}</p>
+        <p className="text-slate-500 text-sm mt-1">{daNutrizionista ? "Macros indicativi in linea con il tuo programma" : "Valori indicativi"}{piano.data_fine && piano.data_fine === piano.data_inizio ? "" : `, ${formattaPeriodo(piano)}`}</p>
       </div>
       <div className="rounded-2xl border border-slate-700 shadow-sm p-5 bg-slate-800">
         <div className="flex items-center gap-2 text-slate-300 text-xs uppercase tracking-wide font-medium mb-1"><Apple size={14} /> Kcal indicative giornaliere</div>

@@ -81,7 +81,9 @@ export default function DiarioKcal({ clientId, isAdmin = false, pianoNode = null
       comuni = (cm || []).map((x) => ({ ...x, comune: true }));
     } catch (e) { /* senza libreria comune si usa quella personale */ }
     const chiaviComuni = new Set(comuni.map(chiaveAl));
-    let alimenti = [...comuni, ...(fd || []).filter((f) => !chiaviComuni.has(chiaveAl(f)))].sort((x, y) => x.nome.localeCompare(y.nome, "it"));
+    // una copia personale che ha il sale inserito sostituisce l'alimento comune identico (che non ha il dato)
+    const chiaviPersConSale = new Set((fd || []).filter((f) => f.sale != null).map(chiaveAl));
+    let alimenti = [...comuni.filter((c) => c.sale != null || !chiaviPersConSale.has(chiaveAl(c))), ...(fd || []).filter((f) => !chiaviComuni.has(chiaveAl(f)) || f.sale != null)].sort((x, y) => x.nome.localeCompare(y.nome, "it"));
     // Libreria completamente vuota (cliente nuova): inserisce gli alimenti base, che poi si possono modificare o eliminare
     if (alimenti.length === 0 && !(vc || []).length && !cl?.libreria_con && !comuni.length) {
       try {
@@ -493,6 +495,8 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
   const [salvando, setSalvando] = useState(false);
   const [nuovo, setNuovo] = useState(false); // creazione di un alimento direttamente dal pasto
   const [marchio, setMarchio] = useState(""); // "" = tutti, "__none" = senza marchio
+  const [saleTxt, setSaleTxt] = useState("");
+  const [savSale, setSavSale] = useState(false);
 
   // In modifica di una voce già salvata, ricostruiamo un "alimento" equivalente a partire
   // dalla voce stessa (così la modifica funziona anche se l'alimento originale è stato
@@ -524,11 +528,31 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
 
   const chiudi = () => setSheet(null);
 
+  // aggiunge il dato del sale a un alimento che non lo ha: il coach lo salva dove sta l'alimento,
+  // la cliente su una sua copia personale (la libreria comune non si tocca)
+  const salvaSale = async () => {
+    const n = Number(String(saleTxt).replace(",", "."));
+    if (!String(saleTxt).trim() || isNaN(n) || n < 0) { alert("Scrivi il sale in grammi (anche 0) ✨"); return; }
+    setSavSale(true);
+    let agg = null;
+    const reale = foods.find((f) => f.id === food.id);
+    if (reale && (!reale.comune || isAdmin)) {
+      const { data, error } = await supabase.from(reale.comune ? "kcal_foods_comuni" : "kcal_foods").update({ sale: n }).eq("id", reale.id).select().single();
+      if (!error && data) agg = { ...data, comune: !!reale.comune };
+    } else {
+      const { data, error } = await supabase.from("kcal_foods").insert({ client_id: clientId, nome: food.nome, marca: food.marca || null, unit: food.unit, uname: food.uname || null, per: food.per, kcal: food.kcal, proteine: food.proteine ?? null, carboidrati: food.carboidrati ?? null, grassi: food.grassi ?? null, sale: n, quantita_abituale: food.quantita_abituale ?? null }).select().single();
+      if (!error && data) agg = data;
+    }
+    setSavSale(false);
+    if (!agg) { alert("Non siamo riusciti a salvare il sale. Riprova tra un attimo 🫶🏻"); return; }
+    setFood(agg); setSaleTxt(""); onSalvato();
+  };
+
   const scegli = (f) => { setFood(f); setAmt(f.quantita_abituale || (f.unit === "pz" ? 1 : f.per)); };
 
   const conferma = async () => {
     const a = Number(String(amt).replace(",", "."));
-    if (!a || a <= 0) { alert("Inserisci una quantità maggiore di zero."); return; }
+    if (!a || a <= 0) { alert("Inserisci una quantità maggiore di zero ✨"); return; }
     setSalvando(true);
     const m = macroFor(food, a);
     const riga = {
@@ -614,7 +638,13 @@ function SchedaAggiungi({ clientId, isAdmin, date, foods, sheet, setSheet, onSal
             <div className="text-center py-2">
               <div className="text-3xl font-semibold text-slate-800">{Math.round(foodKcal(food, Number(amt || 0)))} <span className="text-base font-normal text-slate-400">kcal</span></div>
               <div className="text-slate-400 text-sm mt-1">{mLine(macroFor(food, Number(amt || 0)), saleFor(food, Number(amt || 0)))}</div>
-              {food.sale == null && <div className="text-slate-400 text-xs mt-1">Sale non inserito per questo alimento</div>}
+              {food.sale == null && (
+                <div className="mt-2 flex items-center justify-center gap-2 text-xs text-slate-400">
+                  <span>Sale (g per {perLabel(food)})</span>
+                  <input type="number" inputMode="decimal" step="any" min="0" value={saleTxt} onChange={(e) => setSaleTxt(e.target.value)} placeholder="es. 0,5" className="w-20 border border-slate-200 rounded-lg px-2 py-1 text-center text-sm text-slate-800" />
+                  <button onClick={salvaSale} disabled={savSale} className="px-3 py-1 rounded-lg text-xs font-medium border disabled:opacity-50" style={{ color: "#27466D", borderColor: "#C9E0F7" }}>{savSale ? "Salvo..." : "Aggiungi"}</button>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button onClick={conferma} disabled={salvando} className="flex-1 bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5 disabled:opacity-50">{salvando ? "Salvo..." : sheet.entryId ? "Salva modifica" : `Aggiungi a ${nomeTitolo}`}</button>
@@ -644,7 +674,7 @@ function LibreriaAlimenti({ clientId, isAdmin = false, foods, onCambiato }) {
       <button onClick={() => setModifica(null)} className="w-full bg-slate-800 text-white text-sm font-medium rounded-xl py-2.5">+ Nuovo alimento</button>
       <Card className="divide-y divide-slate-100">
         {[...foods].sort((a, b) => a.nome.localeCompare(b.nome, "it")).map((f) => (
-          <button key={f.id} onClick={() => { if (f.comune && !isAdmin) return; setModifica(f); }} className="w-full flex items-center justify-between text-left px-4 py-3">
+          <button key={f.id} onClick={() => setModifica(f.comune && !isAdmin ? { ...f, id: undefined, comune: false } : f)} className="w-full flex items-center justify-between text-left px-4 py-3">
             <div className="min-w-0">
               <div className="font-medium text-slate-800 text-sm">{f.nome}</div>
               <div className="text-slate-400 text-xs">{f.marca ? <b style={{ color: "#3F78B3" }}>{f.marca}</b> : "Senza marchio"} · {mLine(hasMacro(f) ? macroFor(f, f.per) : null, f.sale)}{f.comune ? " · libreria comune" : ""}{f.da_controllare && isAdmin ? " · da controllare" : ""}</div>
@@ -682,7 +712,7 @@ function ScannerBarcode({ onCodice, onChiudi }) {
           controlli = { stop: () => rd.reset() };
           rd.decodeFromVideoDevice(null, videoRef.current, (res) => { if (res && attivo) { attivo = false; onCodice(res.getText()); } });
         }
-      } catch (e) { setErrore("Non riesco ad aprire la fotocamera. Controlla che l'app abbia il permesso, oppure scrivi il numero qui sotto 🫶🏻"); }
+      } catch (e) { setErrore("Non riusciamo ad aprire la fotocamera. Controlla che l'app abbia il permesso, oppure scrivi il numero qui sotto 🫶🏻"); }
     })();
     return () => { attivo = false; if (timer) clearInterval(timer); try { controlli?.stop(); } catch (e) { /* ok */ } if (stream) stream.getTracks().forEach((t) => t.stop()); };
   }, []);
@@ -720,14 +750,14 @@ function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvat
       const r1 = (v) => (v == null || isNaN(Number(v)) ? "" : String(Math.round(Number(v) * 10) / 10));
       setF((s) => ({ ...s, nome: j.product.product_name || s.nome, marca: (j.product.brands || "").split(",")[0].trim() || s.marca, unit: "g", per: 100, kcal: r1(kcal), proteine: r1(n.proteins_100g), carboidrati: r1(n.carbohydrates_100g), grassi: r1(n.fat_100g), sale: r1(n.salt_100g) }));
       setCerca("Trovato ✨ Valori per 100 g: controllali prima di salvare.");
-    } catch (e) { setCerca("Non riesco a collegarmi ora: riprova tra poco oppure inserisci a mano."); }
+    } catch (e) { setCerca("Non riusciamo a collegarci ora: riprova tra poco oppure inserisci a mano."); }
   };
 
   const salva = async (e) => {
     e.preventDefault();
     const nome = f.nome.trim();
     const kcal = Number(String(f.kcal).replace(",", "."));
-    if (!nome || !kcal || kcal < 0) { alert("Servono almeno nome e kcal."); return; }
+    if (!nome || !kcal || kcal < 0) { alert("Per salvare servono almeno il nome e le kcal ✨"); return; }
     const per = f.unit === "pz" ? 1 : (Number(String(f.per).replace(",", ".")) || 100);
     const mv = (v) => { const n = Number(String(v).replace(",", ".")); return v === "" || isNaN(n) ? null : n; };
     const riga = {
@@ -743,7 +773,7 @@ function FormAlimento({ clientId, isAdmin = false, alimento, onAnnulla, onSalvat
       ? await supabase.from(tab).update(riga).eq("id", alimento.id).select().single()
       : await supabase.from(tab).insert(riga).select().single();
     setSalvando(false);
-    if (error) { alert("Non sono riuscita a salvare l'alimento. Riprova tra un attimo 🫶🏻"); return; }
+    if (error) { alert("Non siamo riusciti a salvare l'alimento. Riprova tra un attimo 🫶🏻"); return; }
     onSalvato(salvato && tab === "kcal_foods_comuni" ? { ...salvato, comune: true } : salvato);
   };
 
