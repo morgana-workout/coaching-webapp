@@ -1320,7 +1320,7 @@ function AttivaNotifichePush({ ruolo, clientId = null, modalita = "tutto" }) {
   return (
     <Card className="p-4 space-y-2">
       <p className="text-sm font-medium text-slate-700"><Ic n="bell"/> {ruolo === "coach" ? "Notifiche sul telefono" : "Non perderti nulla ✨"}</p>
-      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per nuove chat, check, richieste di lezione, record e carichi in calo." : "Attiva le notifiche: ti avviso io quando ti scrivo, quando fai un record e prima delle tue lezioni 🫶🏻"}</p>
+      <p className="text-xs text-slate-500">{ruolo === "coach" ? "Ricevi un avviso per chat, check, richieste di lezione e di pacchetto, call, note delle clienti, scadenze dei pacchetti e promemoria check." : "Attiva le notifiche: ti avviso io quando ti scrivo, quando fai un record e prima delle tue lezioni 🫶🏻"}</p>
       <button onClick={attiva} disabled={lavoro} className="w-full bg-sky-500 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{lavoro ? "Attivo..." : "Attiva le notifiche"}</button>
       {errore && <p className="text-slate-800 text-xs">{errore}</p>}
     </Card>
@@ -8240,7 +8240,7 @@ async function esportaPerAnalisiEsterna(client, setInCorso, opz = {}) {
       giorniEs.sort((a, b) => a[0].localeCompare(b[0])).forEach(([d, arr]) => r.push(`- ${d}: ${arr.map((s) => `${n(s.kg)}×${n(s.ripetizioni)}${s.completata ? "✓" : ""}`).join(", ")}${arr.some((s) => s.motivo_calo) ? ` [motivo carico ridotto: ${arr.find((s) => s.motivo_calo).motivo_calo}]` : ""}`));
     });
     r.push("");
-    if (calo.length) { r.push("## Carichi scesi rispetto alla volta prima"); calo.forEach((c) => r.push(`- ${c.data}: ${c.esercizio} ${n(c.kg_prima)} → ${n(c.kg_oggi)} kg`)); r.push(""); }
+    if (calo.length) { r.push("## Carichi scesi rispetto alla volta prima"); calo.forEach((c) => r.push(`- ${c.data}: ${c.esercizio} ${n(c.kg_prima)}${c.data_prima ? ` (${c.data_prima})` : ""} → ${n(c.kg_oggi)} kg`)); r.push(""); }
     if (cambiPal.length) { r.push("## Allenamenti in altra palestra o con attrezzi diversi"); r.push("Queste sedute NON sono confrontabili con le altre (macchinari, leve e tarature diversi): le differenze di carico non indicano progressione né regressione di forza."); cambiPal.forEach((x) => r.push(`- ${x.dal}: ${x.tipo}${x.nota ? " — " + x.nota : ""}`)); r.push(""); }
     if (scarichi.length) { r.push("## Settimane di scarico programmato"); scarichi.forEach((s) => r.push(`- dal ${s.dal} al ${s.al}${s.nota ? " — " + s.nota : ""}`)); r.push(""); }
     if (nlog.length) { r.push("## Note finali degli allenamenti"); nlog.forEach((x) => r.push(`- ${x.data}: ${String(x.nota || "").replace(/\s+/g, " ")}`)); r.push(""); }
@@ -8471,7 +8471,7 @@ function AdminClientDetail({ clientId, onBack, onChanged }) {
       {tab === "riepilogo" && (
         <div className="space-y-4">
           <QuadroGenerale client={client} checkins={checkins} />
-          <BilancioAvanzatoCliente client={client} />
+          {(client.tipo_servizio === "online" || client.tipo_servizio === "ibrido") && !client.gruppo_id && <BilancioAvanzatoCliente client={client} />}
           <AcquaCoach clientId={client.id} nome={client.nome} />
           <AndamentoCliente client={client} checkins={checkins} />
           <div className="grid lg:grid-cols-2 gap-4 items-start">
@@ -10671,7 +10671,7 @@ function CaricheInCaloCoach({ onChanged }) {
         return (
           <Card key={r.id} className="p-3 space-y-2" style={{ opacity: occupato === k ? 0.5 : 1 }}>
             <p className="text-sm font-semibold" style={{ color: "#27466D" }}>{r.nome} · {r.esercizio}</p>
-            <p className="text-xs text-slate-600">{fmt(r.kg_prima)} kg → <span className="font-semibold">{fmt(r.kg_oggi)} kg</span> · {dd(r.data)}</p>
+            <p className="text-xs text-slate-600">{fmt(r.kg_prima)} kg{r.data_prima ? ` (${dd(r.data_prima)})` : ""} → <span className="font-semibold">{fmt(r.kg_oggi)} kg</span> ({dd(r.data)})</p>
             <div className="flex gap-1.5">
               {[["esercizio", "Solo questo esercizio"], ["sessione", `Tutta la sessione${stessaSess > 1 ? ` (${stessaSess})` : ""}`]].map(([v, l]) => (
                 <button key={v} onClick={() => setAmbito({ ...ambito, [k]: v })} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: amb === v ? "#27466D" : "#fff", color: amb === v ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>{l}</button>
@@ -11306,7 +11306,7 @@ function BilanciLunediCoach({ clients, onSelect }) {
     supabase.from("bilanci_avanzati").select("client_id, settimana, voto, punti, obiettivo, esito_precedente").in("settimana", [sett, prec]).then(({ data }) => setRighe(data || []), () => setRighe([]));
   }, [sett]);
   if (!righe) return null;
-  const attive = (clients || []).filter((c) => !c.archiviato);
+  const attive = (clients || []).filter((c) => !c.archiviato && (c.tipo_servizio === "online" || c.tipo_servizio === "ibrido") && !c.gruppo_id);
   const risposte = new Map(righe.filter((r) => r.settimana === sett).map((r) => [r.client_id, r]));
   const daSistemarePrec = new Map(righe.filter((r) => r.settimana === prec && r.obiettivo).map((r) => [r.client_id, r.obiettivo]));
   const risposto = attive.filter((c) => risposte.has(c.id));
