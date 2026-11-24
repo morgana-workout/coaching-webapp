@@ -6827,7 +6827,42 @@ function StoricoPacchetti({ pacchetti }) {
   );
 }
 
-function LezioniPacchetto({ client, onCompletato }) {
+/* Pacchetto lezioni unico per un gruppo: `client` è la cliente di riferimento, `altri` le altre del gruppo.
+   Svolta, nota, numero di lezioni, lezione extra e nuovo pacchetto si ripetono su tutte; data/ora/sede passano da rispecchiaLezioneGruppo. */
+async function pacchettoAttivoDi(clienteId) {
+  const { data } = await supabase.from("pacchetti_lezioni").select("*").eq("client_id", clienteId).eq("stato", "attivo").order("creato_il", { ascending: false }).limit(1).maybeSingle();
+  return data || null;
+}
+async function assicuraRighePacchetto(clienteId, pacc) {
+  const { data: righe } = await supabase.from("lezioni_svolte").select("id, numero").eq("pacchetto_id", pacc.id);
+  const mancanti = [];
+  const hanno = new Set((righe || []).map((r) => r.numero));
+  for (let n = 1; n <= pacc.numero_lezioni; n++) if (!hanno.has(n)) mancanti.push({ client_id: clienteId, pacchetto_id: pacc.id, numero: n, fatta: false });
+  if (mancanti.length) await supabase.from("lezioni_svolte").insert(mancanti);
+}
+async function chiudiPacchettoSeFinito(clienteId, pacchettoId) {
+  const { data: righe } = await supabase.from("lezioni_svolte").select("fatta").eq("pacchetto_id", pacchettoId);
+  if ((righe || []).length > 0 && righe.every((r) => r.fatta)) {
+    await supabase.from("pacchetti_lezioni").update({ stato: "completato", completato_il: new Date().toISOString() }).eq("id", pacchettoId);
+    await supabase.from("clients").update({ stato_pacchetto: "scaduto" }).eq("id", clienteId);
+  }
+}
+function LezioniPacchettoGruppo({ gruppo, membri }) {
+  const capo = (membri || [])[0];
+  if (!capo) return <p className="text-sm text-slate-500 text-center py-6">Nessuna cliente nel gruppo.</p>;
+  const altri = membri.filter((m) => m.id !== capo.id);
+  const nomi = membri.map((m) => m.nome).join(", ");
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs text-slate-600">
+        <p className="font-semibold text-sky-800 mb-0.5">Pacchetto lezioni del gruppo · {gruppo.nome}</p>
+        <p>Un unico elenco per tutte ({nomi}): quello che imposti qui (data, ora, sede, nota, lezione svolta, numero di lezioni) vale per ognuna, e in calendario resta un solo appuntamento per lezione.</p>
+      </div>
+      <LezioniPacchetto key={capo.id + "|" + altri.map((a) => a.id).join(",")} client={capo} altri={altri} />
+    </div>
+  );
+}
+function LezioniPacchetto({ client, onCompletato, altri = [] }) {
   const [pacchetti, setPacchetti] = useState([]);
   const [lezioni, setLezioni] = useState([]);
   const [caricando, setCaricando] = useState(true);
@@ -6855,6 +6890,17 @@ function LezioniPacchetto({ client, onCompletato }) {
         righe = [...righe, ...(creati || [])].sort((a, b) => a.numero - b.numero);
       }
       setLezioni(righe);
+      for (const m of altri) {
+        try {
+          let pm = await pacchettoAttivoDi(m.id);
+          if (!pm) {
+            const { data: nuovoM } = await supabase.from("pacchetti_lezioni").insert({ client_id: m.id, numero_lezioni: attivo.numero_lezioni, stato: "attivo" }).select().single();
+            pm = nuovoM;
+            if (pm) await supabase.from("clients").update({ pacchetto_lezioni: String(attivo.numero_lezioni), stato_pacchetto: "attivo" }).eq("id", m.id);
+          }
+          if (pm) await assicuraRighePacchetto(m.id, pm);
+        } catch (e) { /* una cliente non blocca le altre */ }
+      }
     } else {
       setLezioni([]);
     }
@@ -6866,10 +6912,46 @@ function LezioniPacchetto({ client, onCompletato }) {
   const pacchettoAttivo = pacchetti.find((p) => p.stato === "attivo");
   const pacchettiCompletati = [...pacchetti.filter((p) => p.stato === "completato")].sort((a, b) => new Date(b.completato_il) - new Date(a.completato_il));
 
+  // righe delle altre clienti del gruppo che corrispondono a questa lezione (stesso appuntamento, altrimenti stesso numero)
+  const righeAltri = async (lezione) => {
+    if (!altri.length) return [];
+    let sorelle = [];
+    if (lezione.calendar_event_id) {
+      const { data: ev } = await supabase.from("calendar_events").select("data, ora").eq("id", lezione.calendar_event_id).maybeSingle();
+      if (ev) {
+        let q = supabase.from("calendar_events").select("id, client_id").eq("gruppo_id", client.gruppo_id).eq("tipo", "lezione").eq("data", ev.data).neq("client_id", client.id);
+        q = ev.ora ? q.eq("ora", ev.ora) : q.is("ora", null);
+        const { data: sr } = await q; sorelle = sr || [];
+      }
+    }
+    const out = [];
+    for (const m of altri) {
+      let riga = null;
+      const e = sorelle.find((x) => x.client_id === m.id);
+      if (e) { const { data: r } = await supabase.from("lezioni_svolte").select("*").eq("calendar_event_id", e.id).maybeSingle(); riga = r; }
+      if (!riga) {
+        const pm = await pacchettoAttivoDi(m.id);
+        if (pm) { const { data: r } = await supabase.from("lezioni_svolte").select("*").eq("pacchetto_id", pm.id).eq("numero", lezione.numero).maybeSingle(); riga = r; }
+      }
+      if (riga) out.push({ m, riga });
+    }
+    return out;
+  };
+
   const cambiaFatta = async (id, fatta) => {
+    const lezCorr = lezioni.find((l) => l.id === id);
     setLezioni((prev) => prev.map((l) => (l.id === id ? { ...l, fatta } : l)));
     await supabase.from("lezioni_svolte").update({ fatta }).eq("id", id);
     if (fatta) inviaPush({ evento: "lezione", client_id: client.id });
+    if (lezCorr && altri.length) {
+      try {
+        for (const { m, riga } of await righeAltri(lezCorr)) {
+          await supabase.from("lezioni_svolte").update({ fatta }).eq("id", riga.id);
+          if (fatta) inviaPush({ evento: "lezione", client_id: m.id });
+          if (fatta && riga.pacchetto_id) await chiudiPacchettoSeFinito(m.id, riga.pacchetto_id);
+        }
+      } catch (e) { /* ignora */ }
+    }
     const tutteFatte = lezioni.filter((l) => (l.id === id ? fatta : l.fatta)).length === lezioni.length;
     if (tutteFatte && lezioni.length > 0 && pacchettoAttivo) {
       await supabase.from("pacchetti_lezioni").update({ stato: "completato", completato_il: new Date().toISOString() }).eq("id", pacchettoAttivo.id);
@@ -6880,6 +6962,10 @@ function LezioniPacchetto({ client, onCompletato }) {
   };
 
   const onRigaSalvata = (lezioneAggiornata) => {
+    const prima = lezioni.find((l) => l.id === lezioneAggiornata.id);
+    if (altri.length && prima && (prima.nota || "") !== (lezioneAggiornata.nota || "")) {
+      righeAltri(lezioneAggiornata).then(async (rr) => { for (const { riga } of rr) await supabase.from("lezioni_svolte").update({ nota: lezioneAggiornata.nota || null }).eq("id", riga.id); }).catch(() => {});
+    }
     setLezioni((prev) => prev.map((l) => (l.id === lezioneAggiornata.id ? lezioneAggiornata : l)));
   };
 
@@ -6888,6 +6974,13 @@ function LezioniPacchetto({ client, onCompletato }) {
     const prossimoNumero = lezioni.length + 1;
     const { data } = await supabase.from("lezioni_svolte").insert({ client_id: client.id, pacchetto_id: pacchettoAttivo.id, numero: prossimoNumero, fatta: false }).select().single();
     if (data) setLezioni((prev) => [...prev, data]);
+    for (const m of altri) {
+      try {
+        const pm = await pacchettoAttivoDi(m.id); if (!pm) continue;
+        const { data: rr } = await supabase.from("lezioni_svolte").select("numero").eq("pacchetto_id", pm.id).order("numero", { ascending: false }).limit(1);
+        await supabase.from("lezioni_svolte").insert({ client_id: m.id, pacchetto_id: pm.id, numero: (rr?.[0]?.numero || 0) + 1, fatta: false });
+      } catch (e) { /* ignora */ }
+    }
   };
 
   const modificaNumeroPacchetto = async (valoreInserito) => {
@@ -6913,12 +7006,35 @@ function LezioniPacchetto({ client, onCompletato }) {
       setLezioni((prev) => prev.filter((l) => !daRimuovere.some((d) => d.id === l.id)));
     }
     setPacchetti((prev) => prev.map((p) => (p.id === pacchettoAttivo.id ? { ...p, numero_lezioni: nuovoNumero } : p)));
+    for (const m of altri) {
+      try {
+        const pm = await pacchettoAttivoDi(m.id); if (!pm) continue;
+        const { data: rr } = await supabase.from("lezioni_svolte").select("id, numero, fatta").eq("pacchetto_id", pm.id).order("numero");
+        const righeM = rr || [];
+        await supabase.from("pacchetti_lezioni").update({ numero_lezioni: nuovoNumero }).eq("id", pm.id);
+        await supabase.from("clients").update({ pacchetto_lezioni: String(nuovoNumero) }).eq("id", m.id);
+        if (nuovoNumero > righeM.length) {
+          const manc = []; for (let n = righeM.length + 1; n <= nuovoNumero; n++) manc.push({ client_id: m.id, pacchetto_id: pm.id, numero: n, fatta: false });
+          await supabase.from("lezioni_svolte").insert(manc);
+        } else if (nuovoNumero < righeM.length) {
+          const via = righeM.filter((l) => !l.fatta).sort((a, b) => b.numero - a.numero).slice(0, righeM.length - nuovoNumero);
+          if (via.length) await supabase.from("lezioni_svolte").delete().in("id", via.map((l) => l.id));
+        }
+      } catch (e) { /* ignora */ }
+    }
   };
 
   const iniziaNuovoPacchetto = async () => {
     const { data: nuovo } = await supabase.from("pacchetti_lezioni").insert({ client_id: client.id, numero_lezioni: Number(nuovoNumero), stato: "attivo" }).select().single();
     if (nuovo) {
       await supabase.from("clients").update({ pacchetto_lezioni: nuovoNumero, stato_pacchetto: "attivo" }).eq("id", client.id);
+      for (const m of altri) {
+        try {
+          if (await pacchettoAttivoDi(m.id)) continue;
+          const { data: nm } = await supabase.from("pacchetti_lezioni").insert({ client_id: m.id, numero_lezioni: Number(nuovoNumero), stato: "attivo" }).select().single();
+          if (nm) await supabase.from("clients").update({ pacchetto_lezioni: nuovoNumero, stato_pacchetto: "attivo" }).eq("id", m.id);
+        } catch (e) { /* ignora */ }
+      }
       await carica();
     }
   };
@@ -6932,14 +7048,14 @@ function LezioniPacchetto({ client, onCompletato }) {
       <div className="space-y-3">
         <Card className="p-6 space-y-3">
           <p className="text-center text-slate-400 text-sm">
-            {pacchettiCompletati.length > 0 ? "Nessun pacchetto attivo — l'ultimo è stato completato." : "Imposta prima un pacchetto lezioni nel tab Dati."}
+            {pacchettiCompletati.length > 0 ? "Nessun pacchetto attivo — l'ultimo è stato completato." : altri.length ? "Il gruppo non ha ancora un pacchetto lezioni: sceglilo qui sotto e vale per tutte." : "Imposta prima un pacchetto lezioni nel tab Dati."}
           </p>
-          {pacchettiCompletati.length > 0 && (
+          {(pacchettiCompletati.length > 0 || altri.length > 0) && (
             <div className="flex items-center gap-2">
               <select value={nuovoNumero} onChange={(e) => setNuovoNumero(e.target.value)} className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm">
                 {opzioniPacchetto.map((n) => <option key={n} value={n}>{n} lezioni</option>)}
               </select>
-              <button onClick={iniziaNuovoPacchetto} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">Inizia nuovo pacchetto</button>
+              <button onClick={iniziaNuovoPacchetto} className="bg-slate-800 text-white text-sm font-medium rounded-lg px-4 py-2">{pacchettiCompletati.length ? "Inizia nuovo pacchetto" : "Crea pacchetto"}</button>
             </div>
           )}
         </Card>
@@ -15377,6 +15493,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Prenota lezione</button>
               <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
               <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Presenze</button>
+              <button onClick={() => setPannello(pannello === "lezioni" ? null : "lezioni")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "lezioni" ? "#27466D" : "#fff", color: pannello === "lezioni" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Lezioni pacchetto</button>
               <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Pagamento</button>
               <button onClick={() => { setCompleta(true); setModoVal(true); }} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: "#fff", color: "#3F78B3", border: "1.5px solid #C9E0F7" }}>Valutazioni</button>
               <button onClick={() => setProgAperto(!progAperto)} className="px-3 py-2 rounded-full text-xs font-semibold" style={{ background: progAperto ? "#27466D" : "#fff", color: progAperto ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Sessioni e programma</button>
@@ -15399,6 +15516,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
               <button onClick={() => setPrenota(!prenota)} className="px-3 py-2 rounded-xl text-xs font-semibold text-white" style={{ background: "#27466D" }}>Prenota lezione per il gruppo</button>
               <CircuitoGruppo gruppo={gruppo} membri={membri} onChanged={onChanged} />
               <button onClick={() => setPannello(pannello === "presenze" ? null : "presenze")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "presenze" ? "#27466D" : "#fff", color: pannello === "presenze" ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>Presenze</button>
+              <button onClick={() => setPannello(pannello === "lezioni" ? null : "lezioni")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "lezioni" ? "#27466D" : "#fff", color: pannello === "lezioni" ? "#fff" : "#3F78B3", border: "1.5px solid #C9E0F7" }}>Lezioni pacchetto</button>
               <button onClick={() => setPannello(pannello === "pagamento" ? null : "pagamento")} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: pannello === "pagamento" ? "#27466D" : "#fff", color: pannello === "pagamento" ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>Pagamento condiviso</button>
               <button onClick={() => setCsvAperto(!csvAperto)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: "#fff", color: "#27466D", border: "1.5px solid #C9E0F7" }}>Importa programma da CSV (mobilità e stretching)</button>
               <button onClick={() => setModoVal(!modoVal)} className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: modoVal ? "#27466D" : "#fff", color: modoVal ? "#fff" : "#27466D", border: "1.5px solid #C9E0F7" }}>{modoVal ? "Chiudi le valutazioni" : "Valutazioni di tutte"}</button>
@@ -15407,6 +15525,7 @@ function SessioneGruppo({ gruppo, onClose, onChanged, onSelect }) {
             <StatoPagamentiGruppo membri={membri} chiave={chiavePag} />
             <RecuperiGruppo membri={membri} />
             {pannello === "presenze" && <PresenzeGruppo gruppo={gruppo} membri={membri} />}
+            {pannello === "lezioni" && <LezioniPacchettoGruppo gruppo={gruppo} membri={membri} />}
             {pannello === "pagamento" && <PagamentoCondivisoGruppo membri={membri} onFatto={() => setChiavePag((k) => k + 1)} />}
             {progAperto && <ProgrammaGruppo key={(membri || []).map((m) => m.id).join(",")} membri={membri} />}
             {csvAperto && (
