@@ -12863,8 +12863,13 @@ function calcolaFidelizzazione(pagamenti, pacchetti, clients, oggiStr) {
 async function leggiOpzioniFiscali() {
   try {
     const { data } = await supabase.from("ricevute_config").select("opzioni").eq("id", 1).maybeSingle();
-    return { includi_satispay: data?.opzioni?.includi_satispay !== false };
-  } catch (e) { return { includi_satispay: true }; }
+    const o = data?.opzioni || {};
+    return { includi_satispay: o.includi_satispay !== false, costo_singola: Number(o.costo_singola ?? 9.1), costo_gruppo: Number(o.costo_gruppo ?? 18.1) };
+  } catch (e) { return { includi_satispay: true, costo_singola: 9.1, costo_gruppo: 18.1 }; }
+}
+async function salvaOpzioniFiscali(patch) {
+  const { data } = await supabase.from("ricevute_config").select("opzioni").eq("id", 1).maybeSingle();
+  await supabase.from("ricevute_config").upsert({ id: 1, opzioni: { ...(data?.opzioni || {}), ...patch }, updated_at: new Date().toISOString() });
 }
 const metodoEscluso = (m, op) => m === "contanti" || (!op.includi_satispay && m === "satispay");
 function OpzioneSatispay({ onCambiata }) {
@@ -12872,7 +12877,7 @@ function OpzioneSatispay({ onCambiata }) {
   useEffect(() => { leggiOpzioniFiscali().then((o) => setIncl(o.includi_satispay)); }, []);
   const cambia = async (v) => {
     setIncl(v);
-    try { await supabase.from("ricevute_config").upsert({ id: 1, opzioni: { includi_satispay: v }, updated_at: new Date().toISOString() }); } catch (e) { /* ignora */ }
+    try { await salvaOpzioniFiscali({ includi_satispay: v }); } catch (e) { /* ignora */ }
     onCambiata?.(v);
   };
   if (incl === null) return null;
@@ -13145,6 +13150,69 @@ function StatisticheCoach({ clients }) {
   );
 }
 
+/* Costo reale della sala Bulb: ogni lezione fatta costa (singola / gruppo), indipendentemente da quando compri i crediti. */
+function CostoSalaBulb({ pagamenti }) {
+  const [ev, setEv] = useState(null);
+  const [prezzi, setPrezzi] = useState({ singola: "9,10", gruppo: "18,10" });
+  const [salvato, setSalvato] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const o = await leggiOpzioniFiscali();
+      setPrezzi({ singola: String(o.costo_singola).replace(".", ","), gruppo: String(o.costo_gruppo).replace(".", ",") });
+      try { setEv(await leggiTutto(() => supabase.from("calendar_events").select("data, ora, luogo, client_id, gruppo_id").eq("tipo", "lezione").eq("stato", "confermato").gte("data", "2026-01-01").lte("data", formatDataLocale(new Date())).order("data"))); } catch (e) { setEv([]); }
+    })();
+  }, []);
+  const n = (s) => { const v = Number(String(s).replace(",", ".")); return isNaN(v) ? 0 : v; };
+  const salva = async () => { await salvaOpzioniFiscali({ costo_singola: n(prezzi.singola), costo_gruppo: n(prezzi.gruppo) }); setSalvato(true); setTimeout(() => setSalvato(false), 2000); };
+  if (ev === null) return null;
+  const SEDI = new Set(LUOGHI);
+  const viste = new Set(); const perMese = {};
+  ev.filter((e) => SEDI.has(e.luogo)).forEach((e) => {
+    const k = `${e.data}|${e.ora || ""}|${e.gruppo_id || e.client_id}`;
+    if (viste.has(k)) return; viste.add(k);
+    const m = e.data.slice(0, 7); const r = (perMese[m] = perMese[m] || { s: 0, g: 0 });
+    if (e.gruppo_id) r.g += 1; else r.s += 1;
+  });
+  const mesi = Object.keys(perMese).sort();
+  if (!mesi.length) return null;
+  const incassi = pagamenti.filter((p) => p.stato === "saldato" && Number(p.importo) > 0);
+  const speseTutte = pagamenti.filter((p) => p.stato === "spesa");
+  const eBulb = (p) => /bulb/i.test(`${p.note || ""} ${p.tipo_piano || ""}`);
+  const per = (lista, m) => lista.filter((p) => (p.data_pagamento || "").slice(0, 7) === m).reduce((s, p) => s + Math.abs(Number(p.importo)), 0);
+  const righe = mesi.map((m) => {
+    const r = perMese[m]; const costo = r.s * n(prezzi.singola) + r.g * n(prezzi.gruppo);
+    const inc = per(incassi, m); const altre = per(speseTutte.filter((p) => !eBulb(p)), m);
+    return { m, s: r.s, g: r.g, costo, inc, altre, utile: inc - altre - costo, coin: per(speseTutte.filter(eBulb), m) };
+  });
+  const tot = righe.reduce((a, r) => ({ s: a.s + r.s, g: a.g + r.g, costo: a.costo + r.costo, inc: a.inc + r.inc, altre: a.altre + r.altre, utile: a.utile + r.utile, coin: a.coin + r.coin }), { s: 0, g: 0, costo: 0, inc: 0, altre: 0, utile: 0, coin: 0 });
+  const eu = (v) => v.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const lab = (k) => { const [a, m] = k.split("-").map(Number); return new Date(a, m - 1, 1).toLocaleDateString("it-IT", { month: "short", year: "2-digit" }); };
+  return (
+    <Card className="p-4 space-y-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Utile reale con il costo della sala Bulb</p>
+      <p className="text-[12px] text-slate-500">Ogni lezione fatta a Bulb viene contata col suo costo, al posto dei crediti comprati a blocchi. Così l'utile di ogni mese è quello vero.</p>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-slate-500">Lezione singola (€)<input value={prezzi.singola} onChange={(e) => setPrezzi({ ...prezzi, singola: e.target.value })} onBlur={salva} inputMode="decimal" className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800" /></label>
+        <label className="text-[11px] text-slate-500">Lezione di gruppo (€)<input value={prezzi.gruppo} onChange={(e) => setPrezzi({ ...prezzi, gruppo: e.target.value })} onBlur={salva} inputMode="decimal" className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm text-slate-800" /></label>
+      </div>
+      {salvato && <p className="text-[11px] text-sky-700">Prezzi salvati ✓</p>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="text-slate-400 text-left"><th className="py-1 font-medium">Mese</th><th className="font-medium text-right">Lez. sing.</th><th className="font-medium text-right">Lez. gruppo</th><th className="font-medium text-right">Costo sala</th><th className="font-medium text-right">Incassato</th><th className="font-medium text-right">Utile reale</th></tr></thead>
+          <tbody>
+            {righe.map((r) => (
+              <tr key={r.m} className="border-t border-slate-100 text-slate-700"><td className="py-1 capitalize">{lab(r.m)}</td><td className="text-right">{r.s}</td><td className="text-right">{r.g}</td><td className="text-right">{eu(r.costo)}</td><td className="text-right">{eu(r.inc)}</td><td className="text-right font-semibold">{eu(r.utile)}</td></tr>
+            ))}
+            <tr className="border-t-2 border-slate-200 font-semibold text-slate-800"><td className="py-1">Totale</td><td className="text-right">{tot.s}</td><td className="text-right">{tot.g}</td><td className="text-right">{eu(tot.costo)}</td><td className="text-right">{eu(tot.inc)}</td><td className="text-right">{eu(tot.utile)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-slate-500">Crediti Bulb comprati nello stesso periodo: <b>{eu(tot.coin)} €</b> · consumati (stimati dalle lezioni): <b>{eu(tot.costo)} €</b> · differenza: <b>{eu(tot.coin - tot.costo)} €</b> (credito che ti resta, se a inizio periodo eri a zero).</p>
+      <p className="text-[11px] text-slate-400">Conto solo le lezioni confermate e già fatte, nelle due sedi Bulb, segnate in calendario (più lezioni di gruppo contate una volta sola). Le spese diverse da Bulb (dominio, ecc.) sono già tolte dall'utile. Il calendario parte da giugno: prima non ci sono lezioni registrate. L'utile qui tiene conto di tutti i pagamenti incassati, contanti inclusi.</p>
+    </Card>
+  );
+}
+
 function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
   const [pagamenti, setPagamenti] = useState([]);
   const [billing, setBilling] = useState([]);
@@ -13371,6 +13439,7 @@ function GuadagniCoach({ clients, onSelect, onClientiCambiati }) {
           {totalePrevisti > 0 && <p className="text-[10px] text-slate-400 leading-tight">di cui {totalePrevisti.toFixed(2)}€ rinnovi previsti</p>}
         </Card>
       </div>
+      <CostoSalaBulb pagamenti={pagamenti} />
       {previsti.length > 0 && (
         <Card className="p-4">
           <div className="flex items-baseline justify-between mb-2">
