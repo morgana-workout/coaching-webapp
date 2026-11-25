@@ -16140,7 +16140,7 @@ function RicevuteOccasionali() {
     setLavoro(true); setMsg(""); setRighe(null);
     try {
       const { data: pag } = await supabase.from("payments").select("id, client_id, data_pagamento, tipo_piano, importo, metodo_pagamento, stato, note").gte("data_pagamento", da).lte("data_pagamento", a).eq("stato", "saldato").gt("importo", 0).order("data_pagamento");
-      const lista = (pag || []).filter((p) => !/vinted/i.test(p.tipo_piano || "") && !/vinted/i.test(p.note || ""));
+      const lista = (pag || []).filter((p) => p.metodo_pagamento !== "contanti" && !/vinted/i.test(p.tipo_piano || "") && !/vinted/i.test(p.note || "")); // i contanti restano solo nei guadagni, mai nelle ricevute
       const { data: cl } = await supabase.from("clients").select("id, nome, cognome");
       const nomi = Object.fromEntries((cl || []).map((c) => [c.id, `${c.nome || ""} ${c.cognome || ""}`.trim()]));
       const ids = lista.map((p) => p.id);
@@ -16198,7 +16198,7 @@ function RicevuteOccasionali() {
   const totale = sel.reduce((s, r) => s + r.importo, 0);
   return (
     <div className="space-y-3">
-      <p className="text-xs text-slate-600">Scegli il periodo: ti mostro i pagamenti incassati, li completi se serve, e crei una ricevuta per foglio (numerate n/anno, con dicitura per prestazione occasionale e marca da bollo oltre 77,47 €). Le ricevute create restano salvate: ristampandole mantengono lo stesso numero.</p>
+      <p className="text-xs text-slate-600">Scegli il periodo: ti mostro i pagamenti incassati con metodo tracciabile (i contanti restano fuori), li completi se serve, e crei una ricevuta per foglio (numerate n/anno, con dicitura per prestazione occasionale e marca da bollo oltre 77,47 €). Le ricevute create restano salvate: ristampandole mantengono lo stesso numero.</p>
       <button onClick={() => setDatiAperti(!datiAperti)} className="text-xs font-medium text-sky-700">{datiAperti ? "▴" : "▾"} I tuoi dati sulla ricevuta</button>
       {datiAperti && (
         <div className="space-y-1.5">
