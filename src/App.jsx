@@ -16031,6 +16031,7 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
       )}
 
       <div className="pt-2 border-t border-slate-100">
+        <Sezione id="ricevute" titolo="Ricevute prestazione occasionale"><RicevuteOccasionali /></Sezione>
         <Sezione id="esportazioni" titolo="Esportazioni e backup">
         <div className="grid grid-cols-2 gap-2">
           <BottoneCartelleClienti clients={clients} className="col-span-2" />
@@ -16058,6 +16059,180 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
 
 function conTimeout(promise, ms = 4000) {
   return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+}
+
+/* ------------------------------------------------------------------ */
+/* RICEVUTE PER PRESTAZIONE OCCASIONALE — dal periodo scelto crea una   */
+/* ricevuta per foglio, numerata (n/anno), da stampare o salvare in PDF */
+/* ------------------------------------------------------------------ */
+const SOGLIA_BOLLO = 77.47;
+const descrizioneRicevuta = (tipo) => {
+  const t = String(tipo || "").toLowerCase();
+  if (t.includes("coaching") || ["mensile", "trimestrale", "semestrale", "variabile", "annuale"].includes(t.trim())) return "Consulenza e coaching online (programma di allenamento e alimentazione)";
+  if (t.includes("foto")) return "Servizio fotografico";
+  if (t.includes("prenotazione")) return "Prenotazione sala per allenamento";
+  if (t.includes("tecnica")) return "Lezione tecnica di allenamento personale";
+  return "Lezione di allenamento personale";
+};
+const eurIt = (n) => Number(n || 0).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const escHtml = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const dmyR = (s) => (s ? String(s).split("-").reverse().join("/") : "");
+const nomeIncompleto = (n) => { const t = String(n || "").trim(); return !t || !t.includes(" ") || / e /i.test(t); };
+
+function htmlRicevute(lista, p) {
+  const pagine = lista.map((r) => `<section class="p">
+<div class="top"><h1>RICEVUTA PER PRESTAZIONE OCCASIONALE</h1><div class="n">n. ${escHtml(r.numero)}/${escHtml(r.anno)}</div></div>
+<p class="d">Emessa il ${escHtml(dmyR(r.data_emissione))} &middot; pagamento ricevuto il ${escHtml(dmyR(r.data_pagamento))}</p>
+<h3>Prestatore</h3><p>${escHtml(p.nome)}${p.cf ? " &mdash; C.F. " + escHtml(p.cf) : ""}<br>${escHtml(p.indirizzo)}${p.telefono ? " &mdash; tel. " + escHtml(p.telefono) : ""}</p>
+<h3>Committente</h3><p>${escHtml(r.committente)}</p>
+<h3>Descrizione della prestazione</h3><p>${escHtml(r.descrizione)}</p>
+<div class="imp">Compenso: &euro; ${eurIt(r.importo)}</div>
+<p class="s">Pagamento ricevuto${r.metodo ? " con " + escHtml(r.metodo) : ""}.</p>
+<p class="s">Prestazione di lavoro autonomo occasionale (art. 2222 c.c.), non soggetta a IVA ai sensi dell'art. 5 DPR 633/72, in quanto resa senza abitualit&agrave;.</p>
+<p class="s">Non soggetta a ritenuta d'acconto (art. 25 DPR 600/73): il committente non &egrave; sostituto d'imposta.</p>
+${r.bollo ? `<div class="bollo"><b>MARCA DA BOLLO &euro; 2,00</b><br>n. identificativo ______________________</div><p class="s">Importo superiore a &euro; 77,47: imposta di bollo da &euro; 2,00 (art. 13 DPR 642/72).</p>` : ""}
+<p class="f">Firma del prestatore &nbsp; ______________________________</p>
+</section>`).join("\n");
+  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Ricevute</title><style>
+@page{size:A4;margin:22mm 20mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#222;font-size:12px;margin:0}
+.p{page-break-after:always;min-height:240mm;position:relative}.p:last-child{page-break-after:auto}
+.top{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid #27466D;padding-bottom:6px;margin-bottom:6px}
+h1{font-size:18px;color:#27466D;margin:0}.n{font-size:15px;font-weight:bold;color:#27466D}.d{color:#555;margin:0 0 18px}
+h3{font-size:12px;margin:16px 0 3px;color:#27466D}p{margin:0 0 4px;line-height:1.5}.imp{font-size:18px;font-weight:bold;margin:26px 0 8px}.s{font-size:11px;color:#444}
+.bollo{width:230px;border:1.5px solid #222;padding:10px;font-size:11px;margin:16px 0 8px;height:70px}.f{margin-top:50px}
+</style></head><body>${pagine}</body></html>`;
+}
+
+function RigaRicevuta({ r, onChange }) {
+  const inc = nomeIncompleto(r.committente);
+  return (
+    <div className={`rounded-xl border p-2.5 space-y-1.5 ${r.includi ? "border-sky-200 bg-white" : "border-slate-200 bg-slate-50 opacity-60"}`}>
+      <div className="flex items-center gap-2">
+        <input type="checkbox" checked={r.includi} onChange={(e) => onChange({ includi: e.target.checked })} className="w-4 h-4" />
+        <span className="text-[11px] text-slate-500 flex-shrink-0">{dmyR(r.data_pagamento)}</span>
+        {r.numero ? <span className="text-[11px] font-semibold text-sky-700 flex-shrink-0">n. {r.numero}/{r.anno}</span> : <span className="text-[11px] text-slate-400 flex-shrink-0">nuova</span>}
+        <span className="ml-auto text-sm font-semibold text-slate-800">€ {eurIt(r.importo)}</span>
+      </div>
+      <input value={r.committente} onChange={(e) => onChange({ committente: e.target.value })} placeholder="Nome e cognome del committente"
+        className={`w-full border rounded-lg px-2.5 py-1.5 text-[13px] ${inc ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
+      <input value={r.descrizione} onChange={(e) => onChange({ descrizione: e.target.value })} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs" />
+      <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+        <input type="checkbox" checked={r.bollo} onChange={(e) => onChange({ bollo: e.target.checked })} /> Marca da bollo da 2 € {r.importo > SOGLIA_BOLLO ? "(importo oltre 77,47 €)" : "(non richiesta sotto 77,47 €)"}
+      </label>
+    </div>
+  );
+}
+
+function RicevuteOccasionali() {
+  const oggi = formatDataLocale(new Date());
+  const [da, setDa] = useState(oggi.slice(0, 4) + "-01-01");
+  const [a, setA] = useState(oggi);
+  const [emissione, setEmissione] = useState(oggi);
+  const [righe, setRighe] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [lavoro, setLavoro] = useState(false);
+  const [pre, setPre] = useState({ nome: "", cf: "", indirizzo: "", telefono: "" });
+  const [datiAperti, setDatiAperti] = useState(false);
+  useEffect(() => { supabase.from("ricevute_config").select("prestatore").eq("id", 1).maybeSingle().then(({ data }) => { if (data?.prestatore) setPre((p) => ({ ...p, ...data.prestatore })); }, () => {}); }, []);
+  const salvaPre = async () => { const { error } = await supabase.from("ricevute_config").upsert({ id: 1, prestatore: pre, updated_at: new Date().toISOString() }); setMsg(error ? "Non sono riuscita a salvare i tuoi dati." : "I tuoi dati sono salvati ✓"); };
+
+  const mostra = async () => {
+    setLavoro(true); setMsg(""); setRighe(null);
+    try {
+      const { data: pag } = await supabase.from("payments").select("id, client_id, data_pagamento, tipo_piano, importo, metodo_pagamento, stato, note").gte("data_pagamento", da).lte("data_pagamento", a).eq("stato", "saldato").gt("importo", 0).order("data_pagamento");
+      const lista = (pag || []).filter((p) => !/vinted/i.test(p.tipo_piano || "") && !/vinted/i.test(p.note || ""));
+      const { data: cl } = await supabase.from("clients").select("id, nome, cognome");
+      const nomi = Object.fromEntries((cl || []).map((c) => [c.id, `${c.nome || ""} ${c.cognome || ""}`.trim()]));
+      const ids = lista.map((p) => p.id);
+      let emesse = [];
+      if (ids.length) { const { data: em } = await supabase.from("ricevute").select("*").in("payment_id", ids); emesse = em || []; }
+      const perPag = Object.fromEntries(emesse.map((e) => [e.payment_id, e]));
+      setRighe(lista.map((p) => {
+        const e = perPag[p.id];
+        if (e) return { pid: p.id, ricId: e.id, numero: e.numero, anno: e.anno, committente: e.committente, descrizione: e.descrizione, importo: Number(e.importo), data_pagamento: e.data_pagamento, metodo: e.metodo, data_emissione: e.data_emissione, bollo: e.bollo, includi: true };
+        return { pid: p.id, ricId: null, numero: null, anno: null, committente: nomi[p.client_id] || "", descrizione: descrizioneRicevuta(p.tipo_piano), importo: Number(p.importo), data_pagamento: p.data_pagamento, metodo: p.metodo_pagamento || "", data_emissione: null, bollo: Number(p.importo) > SOGLIA_BOLLO, includi: true };
+      }));
+    } catch (e) { setMsg("Non sono riuscita a leggere i pagamenti: riprova."); }
+    setLavoro(false);
+  };
+  const cambia = (pid, patch) => setRighe((rs) => rs.map((r) => (r.pid === pid ? { ...r, ...patch } : r)));
+
+  const crea = async (modo) => {
+    const scelte = (righe || []).filter((r) => r.includi);
+    if (!scelte.length) { setMsg("Seleziona almeno un pagamento."); return; }
+    if (!pre.nome.trim()) { setMsg("Compila prima i tuoi dati (nome) nel riquadro qui sopra."); setDatiAperti(true); return; }
+    const vuoti = scelte.filter((r) => !r.committente.trim());
+    if (vuoti.length) { setMsg(`Mancano ${vuoti.length} nomi del committente: compilali (evidenziati).`); return; }
+    setLavoro(true); setMsg("Preparo le ricevute…");
+    try {
+      const anno = Number(emissione.slice(0, 4));
+      const { data: mx } = await supabase.from("ricevute").select("numero").eq("anno", anno).order("numero", { ascending: false }).limit(1);
+      let prossimo = (mx?.[0]?.numero || 0) + 1;
+      const finali = [];
+      for (const r of [...scelte].sort((x, y) => (x.numero ? 0 : 1) - (y.numero ? 0 : 1) || String(x.data_pagamento).localeCompare(String(y.data_pagamento)))) {
+        const campi = { committente: r.committente.trim(), descrizione: r.descrizione.trim(), importo: r.importo, data_pagamento: r.data_pagamento, metodo: r.metodo || null, bollo: r.bollo };
+        if (r.ricId) {
+          const { error } = await supabase.from("ricevute").update(campi).eq("id", r.ricId); if (error) throw error;
+          finali.push({ ...r, ...campi });
+        } else {
+          const { data: nuova, error } = await supabase.from("ricevute").insert({ ...campi, payment_id: r.pid, anno, numero: prossimo, data_emissione: emissione }).select().single();
+          if (error) throw error; prossimo += 1;
+          finali.push({ ...r, ...campi, ricId: nuova.id, numero: nuova.numero, anno: nuova.anno, data_emissione: nuova.data_emissione });
+        }
+      }
+      finali.sort((x, y) => x.anno - y.anno || x.numero - y.numero);
+      setRighe((rs) => rs.map((r) => finali.find((f) => f.pid === r.pid) || r));
+      const html = htmlRicevute(finali, pre);
+      if (modo === "file") scaricaFile("ricevute.html", html, "text/html");
+      else {
+        const f = document.createElement("iframe"); f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+        document.body.appendChild(f); f.contentDocument.open(); f.contentDocument.write(html); f.contentDocument.close();
+        setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { scaricaFile("ricevute.html", html, "text/html"); } setTimeout(() => f.remove(), 120000); }, 500);
+      }
+      setMsg(`Fatto ✨ ${finali.length} ricevute (n. ${finali[0].numero}–${finali[finali.length - 1].numero}). Nella finestra di stampa scegli "Salva come PDF".`);
+    } catch (e) { setMsg("Qualcosa non ha funzionato nel salvataggio: nessuna stampa fatta, riprova."); }
+    setLavoro(false);
+  };
+
+  const sel = (righe || []).filter((r) => r.includi);
+  const totale = sel.reduce((s, r) => s + r.importo, 0);
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-600">Scegli il periodo: ti mostro i pagamenti incassati, li completi se serve, e crei una ricevuta per foglio (numerate n/anno, con dicitura per prestazione occasionale e marca da bollo oltre 77,47 €). Le ricevute create restano salvate: ristampandole mantengono lo stesso numero.</p>
+      <button onClick={() => setDatiAperti(!datiAperti)} className="text-xs font-medium text-sky-700">{datiAperti ? "▴" : "▾"} I tuoi dati sulla ricevuta</button>
+      {datiAperti && (
+        <div className="space-y-1.5">
+          {[["nome", "Nome e cognome"], ["cf", "Codice fiscale"], ["indirizzo", "Indirizzo"], ["telefono", "Telefono"]].map(([k, l]) => (
+            <input key={k} value={pre[k] || ""} onChange={(e) => setPre({ ...pre, [k]: e.target.value })} placeholder={l} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[13px]" />
+          ))}
+          <button onClick={salvaPre} className="w-full rounded-lg py-2 text-xs font-semibold text-white" style={{ background: "#27466D" }}>Salva i miei dati</button>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-slate-500">Dal<InputData value={da} onChange={(e) => setDa(e.target.value)} /></label>
+        <label className="text-[11px] text-slate-500">Al<InputData value={a} onChange={(e) => setA(e.target.value)} /></label>
+      </div>
+      <button onClick={mostra} disabled={lavoro} className="w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{lavoro && !righe ? "Cerco…" : "Mostra i pagamenti del periodo"}</button>
+      {righe && righe.length === 0 && <p className="text-sm text-slate-400 text-center py-2">Nessun pagamento incassato in questo periodo.</p>}
+      {righe && righe.length > 0 && (
+        <>
+          <div className="flex items-center justify-between text-xs text-slate-600">
+            <span>{sel.length} di {righe.length} selezionati · € {eurIt(totale)}</span>
+            <button onClick={() => setRighe(righe.map((r) => ({ ...r, includi: !sel.length || sel.length < righe.length })))} className="text-sky-700 font-medium">{sel.length < righe.length ? "Seleziona tutti" : "Deseleziona tutti"}</button>
+          </div>
+          <label className="block text-[11px] text-slate-500">Data di emissione (oggi di default)<InputData value={emissione} onChange={(e) => setEmissione(e.target.value)} /></label>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-0.5">
+            {righe.map((r) => <RigaRicevuta key={r.pid} r={r} onChange={(patch) => cambia(r.pid, patch)} />)}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => crea("stampa")} disabled={lavoro} className="rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>Crea e stampa / PDF</button>
+            <button onClick={() => crea("file")} disabled={lavoro} className="rounded-xl py-2.5 text-sm font-medium border border-slate-200 bg-white text-slate-700 disabled:opacity-50">Crea e scarica pagina</button>
+          </div>
+        </>
+      )}
+      {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+    </div>
+  );
 }
 
 function scaricaFile(nomeFile, contenuto, tipo) {
