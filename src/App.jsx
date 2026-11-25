@@ -3895,6 +3895,151 @@ function BloccoPreparazione({ clientId, isAdmin, libreriaVideo = [] }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* LOG OFFLINE — si scarica una pagina da compilare sul telefono anche */
+/* senza rete; poi il file compilato si carica qui e finisce nel log   */
+/* ------------------------------------------------------------------ */
+const PAGINA_OFFLINE = `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Log allenamento offline</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#F3F8FD;color:#27466D;padding:16px 14px 90px}
+h1{font-size:19px;margin:0 0 2px}p.s{font-size:12.5px;color:#5b7a9b;margin:0 0 12px}
+.box{background:#fff;border:1.5px solid #C9E0F7;border-radius:16px;padding:12px;margin-bottom:12px}
+select,input{font:inherit;color:#27466D}input[type=date],select{width:100%;padding:10px;border:1.5px solid #C9E0F7;border-radius:10px;background:#fff;margin-top:4px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.tabs button{flex:1 1 auto;min-width:44px;padding:10px 6px;border-radius:10px;border:1.5px solid #C9E0F7;background:#fff;color:#3F78B3;font-weight:600}
+.tabs button.on{background:#27466D;color:#fff;border-color:#27466D}
+.ex h2{font-size:15px;margin:0}.ex .t{font-size:12px;color:#5b7a9b;margin:2px 0 8px}
+.r{display:grid;grid-template-columns:52px 1fr 1fr;gap:6px;align-items:center;margin-bottom:6px}.r span{font-size:12px;color:#5b7a9b}
+.r input{width:100%;padding:10px;border:1.5px solid #C9E0F7;border-radius:10px;text-align:center;font-size:16px}
+.u{grid-column:2/4;font-size:11px;color:#8aa3bd;margin:-3px 0 2px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1.5px solid #C9E0F7;padding:10px 14px;display:flex;gap:8px}
+.bar button{flex:1;padding:12px;border-radius:12px;border:0;font-weight:700;font-size:14px}.p{background:#27466D;color:#fff}.q{background:#E6F1FC;color:#27466D}
+textarea{width:100%;height:110px;font-size:11px;border:1.5px solid #C9E0F7;border-radius:10px;padding:8px}
+</style></head><body>
+<h1>Il mio allenamento ✨</h1><p class="s">Compila anche senza internet: quello che scrivi resta salvato su questo telefono. Quando hai finito tocca <b>Salva il file</b> e caricalo nell'app.</p>
+<div class="box"><label style="font-size:12px;color:#5b7a9b">Data dell'allenamento<input type="date" id="d"></label><div class="tabs" id="tabs"></div></div>
+<div id="lista"></div>
+<div class="box" id="cod" style="display:none"><p class="s">Se il file non si scarica, copia questo testo e incollalo nell'app:</p><textarea id="txt" readonly></textarea></div>
+<div class="bar"><button class="q" id="bc">Copia il testo</button><button class="p" id="bs">Salva il file</button></div>
+<script>
+var D=__DATI__;var K="logoffline_"+D.clientId;var st={};try{st=JSON.parse(localStorage.getItem(K)||"{}")}catch(e){}
+function sv(){try{localStorage.setItem(K,JSON.stringify(st))}catch(e){}}
+var g=D.giorni[0]?D.giorni[0].id:null;
+var de=document.getElementById("d");var t=new Date();de.value=t.getFullYear()+"-"+("0"+(t.getMonth()+1)).slice(-2)+"-"+("0"+t.getDate()).slice(-2);
+de.onchange=draw;
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;")}
+function tabs(){var h="";D.giorni.forEach(function(x,i){h+='<button class="'+(x.id===g?"on":"")+'" data-g="'+x.id+'">'+esc(x.nome||("Giorno "+(i+1)))+"</button>"});document.getElementById("tabs").innerHTML=h;
+Array.prototype.forEach.call(document.querySelectorAll("#tabs button"),function(b){b.onclick=function(){g=b.getAttribute("data-g");tabs();draw()}})}
+function draw(){var h="";var gi=D.giorni.filter(function(x){return x.id===g})[0];if(!gi){document.getElementById("lista").innerHTML="";return}
+gi.esercizi.forEach(function(e){h+='<div class="box ex"><h2>'+esc(e.nome)+'</h2><div class="t">'+esc(e.serie+" serie"+(e.rip?" × "+e.rip:""))+(e.note?" · "+esc(e.note):"")+"</div>";
+for(var n=1;n<=e.serie;n++){var k=de.value+"|"+e.id+"|"+n;var v=st[k]||{};var u=e.ultimo&&e.ultimo[n];
+h+='<div class="r"><span>Serie '+n+'</span><input inputmode="decimal" placeholder="kg" data-k="'+k+'" data-f="kg" value="'+esc(v.kg)+'"><input placeholder="rip" data-k="'+k+'" data-f="rip" value="'+esc(v.rip)+'">'+(u?'<div class="u">ultima volta: '+esc((u.kg!=null?u.kg+" kg":"-")+(u.rip?" × "+u.rip:""))+"</div>":"")+"</div>"}
+h+="</div>"});document.getElementById("lista").innerHTML=h;
+Array.prototype.forEach.call(document.querySelectorAll("#lista input"),function(i){i.oninput=function(){var k=i.getAttribute("data-k");st[k]=st[k]||{};st[k][i.getAttribute("data-f")]=i.value;sv()}})}
+function out(){var r=[];Object.keys(st).forEach(function(k){var v=st[k];if(!v||(!v.kg&&!v.rip))return;var p=k.split("|");r.push({data:p[0],exerciseId:p[1],n:Number(p[2]),kg:v.kg||"",rip:v.rip||""})});
+return JSON.stringify({tipo:"log-offline",v:1,clientId:D.clientId,creato:new Date().toISOString(),righe:r})}
+document.getElementById("bs").onclick=function(){var s=out();try{var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([s],{type:"application/json"}));a.download="log-compilato-"+de.value+".json";document.body.appendChild(a);a.click();document.body.removeChild(a)}catch(e){}
+document.getElementById("txt").value=s;document.getElementById("cod").style.display="block"};
+document.getElementById("bc").onclick=function(){var s=out();document.getElementById("txt").value=s;document.getElementById("cod").style.display="block";try{navigator.clipboard.writeText(s)}catch(e){var x=document.getElementById("txt");x.select()}};
+tabs();draw();
+</script></body></html>`;
+
+function LogOffline({ clientId, giorni }) {
+  const [aperto, setAperto] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [testo, setTesto] = useState("");
+  const [anteprima, setAnteprima] = useState(null); // { righe, saltateSconosciute }
+  const [invio, setInvio] = useState(false);
+
+  const scarica = async () => {
+    setMsg("Preparo il file…");
+    try {
+      const ids = giorni.map((g) => g.id);
+      const { data: es } = await supabase.from("training_exercises").select("id, nome, serie, ripetizioni, note, ordine, training_day_id").eq("client_id", clientId).in("training_day_id", ids).order("ordine");
+      const { data: ent } = await supabase.from("training_entries").select("exercise_id, data, numero_serie, kg, ripetizioni").eq("client_id", clientId).order("data", { ascending: false }).limit(2000);
+      const ultimo = {};
+      (ent || []).forEach((e) => {
+        const u = (ultimo[e.exercise_id] = ultimo[e.exercise_id] || { data: e.data, serie: {} });
+        if (u.data === e.data && (e.kg != null || e.ripetizioni)) u.serie[e.numero_serie] = { kg: e.kg, rip: e.ripetizioni };
+      });
+      const dati = {
+        clientId,
+        giorni: giorni.map((g) => ({
+          id: g.id, nome: g.nome,
+          esercizi: (es || []).filter((x) => x.training_day_id === g.id).map((x) => ({ id: x.id, nome: x.nome, serie: x.serie || 3, rip: x.ripetizioni || "", note: x.note || "", ultimo: ultimo[x.id]?.serie || {} })),
+        })),
+      };
+      const html = PAGINA_OFFLINE.replace("__DATI__", () => JSON.stringify(dati).replace(/</g, "\\u003c"));
+      scaricaFile("allenamento-offline.html", html, "text/html");
+      setMsg("Fatto ✨ Apri il file scaricato (cartella Download / app File) e compila senza internet.");
+    } catch (e) { setMsg("Non sono riuscita a preparare il file: riprova con la connessione attiva."); }
+  };
+
+  const leggi = (str) => {
+    try {
+      const j = JSON.parse(str);
+      if (j?.tipo !== "log-offline" || !Array.isArray(j.righe)) throw new Error("formato");
+      if (j.clientId !== clientId) { setMsg("Questo file appartiene a un altro profilo: non lo carico."); setAnteprima(null); return; }
+      setAnteprima({ righe: j.righe }); setMsg("");
+    } catch (e) { setMsg("Il file non sembra un log compilato: controlla di aver scelto quello giusto."); setAnteprima(null); }
+  };
+
+  const conferma = async () => {
+    if (!anteprima) return;
+    setInvio(true); setMsg("Carico il log…");
+    let nuove = 0, giaPresenti = 0, sconosciuti = 0, inCoda = 0;
+    try {
+      const { data: es } = await supabase.from("training_exercises").select("id").eq("client_id", clientId);
+      const noti = new Set((es || []).map((x) => x.id));
+      for (const r of anteprima.righe) {
+        if (!noti.has(r.exerciseId)) { sconosciuti++; continue; }
+        const kg = num(r.kg); const rip = r.rip === "" || r.rip == null ? null : String(r.rip);
+        if (kg == null && !rip) continue;
+        const op = { clientId, exerciseId: r.exerciseId, data: r.data, n: Number(r.n), payload: { kg, ripetizioni: rip, completata: true } };
+        try {
+          const { data: ex } = await supabase.from("training_entries").select("id, kg, ripetizioni").eq("client_id", clientId).eq("exercise_id", op.exerciseId).eq("data", op.data).eq("numero_serie", op.n).limit(1);
+          if (ex && ex.length && (ex[0].kg != null || ex[0].ripetizioni)) { giaPresenti++; continue; }
+          await scriviSerieRemoto(op); nuove++;
+        } catch (e) { accodaOp(op); inCoda++; }
+      }
+      if (inCoda) inviaCoda();
+      setMsg(`Fatto ✨ ${nuove + inCoda} serie inserite${giaPresenti ? `, ${giaPresenti} già presenti lasciate com'erano` : ""}${sconosciuti ? `, ${sconosciuti} di esercizi non più nel programma saltate` : ""}.`);
+      setAnteprima(null); setTesto("");
+      try { window.dispatchEvent(new Event("coda-sync")); } catch (e) { /* ignora */ }
+    } catch (e) { setMsg("Qualcosa non ha funzionato: riprova con la connessione attiva."); }
+    setInvio(false);
+  };
+
+  const dateAnteprima = anteprima ? [...new Set(anteprima.righe.filter((r) => r.kg || r.rip).map((r) => r.data))].sort() : [];
+  return (
+    <Card className="p-3">
+      <button onClick={() => setAperto(!aperto)} className="w-full flex justify-between items-center text-sm font-medium text-slate-700">
+        <span>Allenamento senza internet?</span><ChevronRight size={16} className={aperto ? "rotate-90" : ""} />
+      </button>
+      {aperto && (
+        <div className="mt-3 space-y-3 text-[13px] text-slate-600">
+          <p>1. Con la connessione, scarica la pagina da compilare. 2. In palestra aprila e scrivi kg e ripetizioni, anche senza rete. 3. Quando hai internet, carica qui il file che salvi dalla pagina.</p>
+          <button onClick={scarica} className="w-full rounded-xl py-2.5 text-sm font-semibold text-white" style={{ background: "#27466D" }}>Scarica la pagina da compilare</button>
+          <div className="space-y-2">
+            <label className="block w-full text-center border border-slate-200 rounded-xl py-2 text-sm font-medium text-slate-700 cursor-pointer">
+              Carica il file compilato
+              <input type="file" accept=".json,application/json" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) leggi(await f.text()); }} />
+            </label>
+            <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={2} placeholder="…oppure incolla qui il testo copiato" className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs" />
+            {testo.trim() && <button onClick={() => leggi(testo.trim())} className="w-full rounded-xl py-2 text-sm font-medium bg-slate-100 text-slate-700">Leggi il testo incollato</button>}
+          </div>
+          {anteprima && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 space-y-2">
+              <p className="text-sm text-slate-700">Trovate <b>{anteprima.righe.filter((r) => r.kg || r.rip).length}</b> serie in {dateAnteprima.length} allenamento/i ({dateAnteprima.map((d) => d.split("-").reverse().join("/")).join(", ")}). Le serie già segnate nell'app non vengono toccate.</p>
+              <button onClick={conferma} disabled={invio} className="w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50" style={{ background: "#27466D" }}>{invio ? "Carico…" : "Aggiungi al mio log"}</button>
+            </div>
+          )}
+          {msg && <p className="text-xs" style={{ color: "#3F78B3" }}>{msg}</p>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function DiarioAllenamento({ clientId, isAdmin }) {
   const [giorni, setGiorni] = useState([]);
   const [giornoAttivo, setGiornoAttivo] = useState(null);
@@ -4112,6 +4257,8 @@ function DiarioAllenamento({ clientId, isAdmin }) {
       </div>
 
       <BloccoPreparazione clientId={clientId} isAdmin={isAdmin} libreriaVideo={libreriaVideo} />
+
+      {giorni.length > 0 && <LogOffline clientId={clientId} giorni={giorni} />}
 
       <div className="flex gap-1.5">
         {giorni.map((g, i) => {
