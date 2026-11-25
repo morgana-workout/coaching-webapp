@@ -12859,6 +12859,31 @@ function calcolaFidelizzazione(pagamenti, pacchetti, clients, oggiStr) {
   return { righe, mediaOnl: media("onl"), mediaBulb: media("bulb"), mediaTot: media("tot"), lista, durataMediaRinnovate, durataMediaTutte: nConDurata ? Math.round((sommaDurate / nConDurata) * 10) / 10 : 0, nClientiTotali: nConDurata };
 }
 
+/* Opzione fiscale unica: includere o no i pagamenti Satispay nei prospetti (ricevute ed esportazione per il commercialista). I contanti restano sempre fuori. */
+async function leggiOpzioniFiscali() {
+  try {
+    const { data } = await supabase.from("ricevute_config").select("opzioni").eq("id", 1).maybeSingle();
+    return { includi_satispay: data?.opzioni?.includi_satispay !== false };
+  } catch (e) { return { includi_satispay: true }; }
+}
+const metodoEscluso = (m, op) => m === "contanti" || (!op.includi_satispay && m === "satispay");
+function OpzioneSatispay({ onCambiata }) {
+  const [incl, setIncl] = useState(null);
+  useEffect(() => { leggiOpzioniFiscali().then((o) => setIncl(o.includi_satispay)); }, []);
+  const cambia = async (v) => {
+    setIncl(v);
+    try { await supabase.from("ricevute_config").upsert({ id: 1, opzioni: { includi_satispay: v }, updated_at: new Date().toISOString() }); } catch (e) { /* ignora */ }
+    onCambiata?.(v);
+  };
+  if (incl === null) return null;
+  return (
+    <label className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-slate-700">
+      <input type="checkbox" checked={incl} onChange={(e) => cambia(e.target.checked)} className="w-4 h-4 mt-0.5" />
+      <span><b>Includi i pagamenti Satispay</b> nelle ricevute e nel file per il commercialista. Se togli la spunta, restano solo nei guadagni dell'app, come i contanti.</span>
+    </label>
+  );
+}
+
 function righeContabili(pagamenti) {
   const out = [];
   pagamenti.forEach((p) => {
@@ -12873,10 +12898,11 @@ function righeContabili(pagamenti) {
 async function esportaRiepilogoCommercialista(meseChiave) {
   const XLSX = await caricaModuloExcel();
   const pagamenti = await leggiTutto(() => supabase.from("payments").select("*, clients(nome, cognome)").order("data_pagamento").order("id"));
+  const opFisc = await leggiOpzioniFiscali();
   const righe = righeContabili(pagamenti).filter((r) => (r.d || "").slice(0, 7) === meseChiave);
   const nomeOrd = (r) => (r.p.clients ? `${r.p.clients.nome} ${r.p.clients.cognome || ""}`.trim() : "").toLowerCase();
   // Incassi del mese ordinati per cliente e poi per data: i pagamenti della stessa persona restano vicini
-  const incassi = righe.filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti") // i contanti non vanno al commercialista
+  const incassi = righe.filter((r) => r.tipo === "incasso" && !metodoEscluso(r.p.metodo_pagamento, opFisc)) // i contanti (e, se scelto, i Satispay) non vanno al commercialista
     .sort((x, y) => nomeOrd(x).localeCompare(nomeOrd(y)) || (x.d || "").localeCompare(y.d || ""));
   const spese = righe.filter((r) => r.tipo === "spesa");
   const tot = (l) => Math.round(l.reduce((s, r) => s + r.imp, 0) * 100) / 100;
@@ -12893,7 +12919,7 @@ async function esportaRiepilogoCommercialista(meseChiave) {
 
   // Storico per cliente: tutti i pagamenti (senza contanti) dall'inizio dell'anno fino al mese scelto,
   // raggruppati per cliente, così si vedono i rinnovi uno sotto l'altro con il totale di ciascuna.
-  const storico = righeContabili(pagamenti).filter((r) => r.tipo === "incasso" && r.p.metodo_pagamento !== "contanti"
+  const storico = righeContabili(pagamenti).filter((r) => r.tipo === "incasso" && !metodoEscluso(r.p.metodo_pagamento, opFisc)
     && (r.d || "").slice(0, 4) === String(anno) && (r.d || "").slice(0, 7) <= meseChiave)
     .sort((x, y) => nomeOrd(x).localeCompare(nomeOrd(y)) || (x.d || "").localeCompare(y.d || ""));
   const gruppi = [];
@@ -13111,6 +13137,7 @@ function StatisticheCoach({ clients }) {
       <Card className="p-4 space-y-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 font-medium">Riepilogo per il commercialista</p>
         <p className="text-xs text-slate-500">Un file Excel con incassi, spese, metodi di pagamento e totali del mese scelto, più un foglio con i pagamenti raggruppati per cliente (rinnovi vicini). Senza i pagamenti in contanti.</p>
+        <OpzioneSatispay />
         <button onClick={esporta} disabled={esportando} className="w-full bg-slate-800 text-white rounded-xl py-2.5 text-sm font-medium disabled:opacity-50">{esportando ? "Preparo il file..." : <><Ic n="download"/> Scarica riepilogo {labelMese(mese)}</>}</button>
         {msg && <p className="text-xs text-slate-500">{msg}</p>}
       </Card>
@@ -16140,7 +16167,8 @@ function RicevuteOccasionali() {
     setLavoro(true); setMsg(""); setRighe(null);
     try {
       const { data: pag } = await supabase.from("payments").select("id, client_id, data_pagamento, tipo_piano, importo, metodo_pagamento, stato, note").gte("data_pagamento", da).lte("data_pagamento", a).eq("stato", "saldato").gt("importo", 0).order("data_pagamento");
-      const lista = (pag || []).filter((p) => p.metodo_pagamento !== "contanti" && !/vinted/i.test(p.tipo_piano || "") && !/vinted/i.test(p.note || "")); // i contanti restano solo nei guadagni, mai nelle ricevute
+      const opFisc = await leggiOpzioniFiscali();
+      const lista = (pag || []).filter((p) => !metodoEscluso(p.metodo_pagamento, opFisc) && !/vinted/i.test(p.tipo_piano || "") && !/vinted/i.test(p.note || "")); // i contanti restano solo nei guadagni, mai nelle ricevute
       const { data: cl } = await supabase.from("clients").select("id, nome, cognome");
       const nomi = Object.fromEntries((cl || []).map((c) => [c.id, `${c.nome || ""} ${c.cognome || ""}`.trim()]));
       const ids = lista.map((p) => p.id);
@@ -16199,6 +16227,7 @@ function RicevuteOccasionali() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-600">Scegli il periodo: ti mostro i pagamenti incassati con metodo tracciabile (i contanti restano fuori), li completi se serve, e crei una ricevuta per foglio (numerate n/anno, con dicitura per prestazione occasionale e marca da bollo oltre 77,47 €). Le ricevute create restano salvate: ristampandole mantengono lo stesso numero.</p>
+      <OpzioneSatispay onCambiata={() => setRighe(null)} />
       <button onClick={() => setDatiAperti(!datiAperti)} className="text-xs font-medium text-sky-700">{datiAperti ? "▴" : "▾"} I tuoi dati sulla ricevuta</button>
       {datiAperti && (
         <div className="space-y-1.5">
