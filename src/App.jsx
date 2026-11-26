@@ -4684,13 +4684,14 @@ function NotaFinaleAllenamento({ clientId, data }) {
   const [nota, setNota] = useState("");
   const [salvata, setSalvata] = useState("");
   const [stato, setStato] = useState("");
+  const [rispostaCoach, setRispostaCoach] = useState("");
   useEffect(() => {
     let vivo = true;
-    setNota(""); setSalvata(""); setStato("");
+    setNota(""); setSalvata(""); setStato(""); setRispostaCoach("");
     (async () => {
       try {
-        const { data: r } = await supabase.from("note_allenamento").select("nota").eq("client_id", clientId).eq("data", data).maybeSingle();
-        if (vivo) { setNota(r?.nota || ""); setSalvata(r?.nota || ""); }
+        const { data: r } = await supabase.from("note_allenamento").select("nota, risposta_coach").eq("client_id", clientId).eq("data", data).maybeSingle();
+        if (vivo) { setNota(r?.nota || ""); setSalvata(r?.nota || ""); setRispostaCoach(r?.risposta_coach || ""); }
       } catch (e) { /* ignora */ }
     })();
     return () => { vivo = false; };
@@ -4699,7 +4700,7 @@ function NotaFinaleAllenamento({ clientId, data }) {
     if (nota === salvata) return;
     setStato("Salvo…");
     const { error } = nota.trim()
-      ? await supabase.from("note_allenamento").upsert({ client_id: clientId, data, nota: nota.trim(), updated_at: new Date().toISOString() })
+      ? await supabase.from("note_allenamento").upsert({ client_id: clientId, data, nota: nota.trim(), coach_vista: false, updated_at: new Date().toISOString() })
       : await supabase.from("note_allenamento").delete().eq("client_id", clientId).eq("data", data);
     if (error) { setStato("Non siamo riusciti a salvare, riprova 🫶🏻"); return; }
     setSalvata(nota); setStato("Nota salvata ✓");
@@ -4710,6 +4711,12 @@ function NotaFinaleAllenamento({ clientId, data }) {
       <p className="text-xs mt-0.5" style={{ color: "#7a8da3" }}>Com'è andata in generale? Energia, sensazioni, cosa ricordare per la prossima volta.</p>
       <textarea value={nota} onChange={(e) => setNota(e.target.value)} onBlur={salva} rows={3} placeholder="Scrivi qui la tua nota finale ✨" className="w-full mt-2 text-sm rounded-xl px-3 py-2 border" style={{ borderColor: "#C9E0F7", color: "#27466D" }} />
       {stato && <p className="text-xs mt-1" style={{ color: "#3F78B3" }}>{stato}</p>}
+      {rispostaCoach && (
+        <div className="mt-2 rounded-xl px-3 py-2" style={{ background: "#EAF3FC", border: "1px solid #C9E0F7" }}>
+          <p className="text-[11px] uppercase tracking-wide font-medium" style={{ color: "#3F78B3" }}>Morgana ✨</p>
+          <p className="text-sm whitespace-pre-wrap" style={{ color: "#27466D" }}>{rispostaCoach}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -11679,16 +11686,81 @@ function BilanciLunediCoach({ clients, onSelect }) {
   );
 }
 
+/* Commenti delle clienti sugli allenamenti (nota finale): Morgana risponde e la cliente riceve una notifica in app con la nota citata */
+function CommentiAllenamentoCoach({ clients, onFatto }) {
+  const [righe, setRighe] = useState(null);
+  const [aperta, setAperta] = useState(null);
+  const [testo, setTesto] = useState("");
+  const [invio, setInvio] = useState(false);
+  const [errore, setErrore] = useState("");
+  const carica = async () => {
+    try {
+      const { data } = await supabase.from("note_allenamento").select("client_id, data, nota, risposta_coach, risposta_il, updated_at").eq("coach_vista", false).order("data", { ascending: false });
+      setRighe((data || []).filter((r) => (r.nota || "").trim()));
+    } catch (e) { setRighe([]); }
+  };
+  useEffect(() => { carica(); }, []);
+  if (righe === null) return null;
+  const nomeDi = (id) => { const c = (clients || []).find((x) => x.id === id); return c ? `${c.nome} ${c.cognome || ""}`.trim() : "Cliente"; };
+  const dt = (d) => String(d).split("-").reverse().join("/");
+  const segnaVista = async (r) => {
+    await supabase.from("note_allenamento").update({ coach_vista: true }).eq("client_id", r.client_id).eq("data", r.data);
+    await carica(); onFatto?.();
+  };
+  const rispondi = async (r) => {
+    const t = testo.trim(); if (!t) return;
+    setInvio(true); setErrore("");
+    const { error } = await supabase.from("note_allenamento").update({ risposta_coach: t, risposta_il: new Date().toISOString(), coach_vista: true }).eq("client_id", r.client_id).eq("data", r.data);
+    if (error) { setInvio(false); setErrore("Non siamo riusciti a inviare, riprova 🫶🏻"); return; }
+    const citata = r.nota.trim().replace(/\s+/g, " "); const breve = citata.length > 140 ? citata.slice(0, 140) + "…" : citata;
+    const { data: n } = await supabase.from("notifiche").insert({ client_id: r.client_id, tipo: "nota", messaggio: `Morgana ha risposto al tuo commento sull'allenamento del ${dt(r.data)} ✨\n\nTu hai scritto: «${breve}»\n\n${t}`, stato: "inviata", coach_vista: true }).select("id").single();
+    if (n?.id) inviaPush({ evento: "nota", notifica_id: n.id });
+    setInvio(false); setAperta(null); setTesto("");
+    await carica(); onFatto?.();
+  };
+  if (!righe.length) return null;
+  return (
+    <div className="space-y-2 pt-1">
+      <p className="text-[11px] text-slate-400">Commenti delle clienti sugli allenamenti</p>
+      {righe.map((r) => {
+        const k = `${r.client_id}|${r.data}`;
+        return (
+          <Card key={k} className="p-3 space-y-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="font-medium text-slate-700 text-sm">{nomeDi(r.client_id)}</p>
+              <p className="text-[11px] text-slate-400">Allenamento del {dt(r.data)}</p>
+            </div>
+            <p className="text-slate-600 text-sm whitespace-pre-wrap rounded-lg bg-sky-50/60 border border-sky-100 px-2.5 py-2">«{r.nota}»</p>
+            {r.risposta_coach && <p className="text-[11px] text-slate-400">Hai già risposto: {r.risposta_coach}</p>}
+            {aperta === k ? (
+              <div className="space-y-1.5">
+                <textarea value={testo} onChange={(e) => setTesto(e.target.value)} rows={3} placeholder="Scrivi la tua risposta alla cliente…" className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs bg-white" />
+                {errore && <p className="text-slate-800 text-[11px]">{errore}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => rispondi(r)} disabled={invio || !testo.trim()} className="flex-1 bg-slate-800 text-white text-xs font-medium rounded-lg py-2 disabled:opacity-50">{invio ? "Invio..." : "Invia come notifica"}</button>
+                  <button onClick={() => { setAperta(null); setTesto(""); setErrore(""); }} className="px-3 text-xs text-slate-500">Annulla</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={() => { setAperta(k); setTesto(""); setErrore(""); }} className="flex-1 bg-sky-500 text-white text-xs font-medium rounded-lg py-2">Rispondi</button>
+                <button onClick={() => segnaVista(r)} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-2">Segna vista</button>
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletare = [], onSelect, onChanged, onAggiorna }) {
-  const [autoNuove, setAutoNuove] = useState([]);
   const [richieste, setRichieste] = useState([]);
   const [checkDaRivedere, setCheckDaRivedere] = useState([]);
   const [proponiPer, setProponiPer] = useState(null);
   const [caricando, setCaricando] = useState(true);
 
   const carica = async () => {
-    const { data: au } = await supabase.from("notifiche").select("*, clients(nome, cognome)").eq("coach_vista", false).or("proposta_luogo.like.promemoria_%,proposta_luogo.like.auto_%,proposta_luogo.like.lez_%").order("created_at", { ascending: false });
-    setAutoNuove(au || []);
     const { data: r } = await supabase.from("calendar_events").select("*, clients(nome, cognome)").eq("stato", "richiesta").order("data");
     const idOrig = (r || []).map((x) => x.sostituisce_id).filter(Boolean);
     let orig = {};
@@ -11733,29 +11805,6 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
     carica();
   };
 
-  const segnaAutoViste = async (ids) => {
-    await supabase.from("notifiche").update({ coach_vista: true }).in("id", ids);
-    await carica();
-    onAggiorna?.();
-  };
-  const titoloAuto = (m) => (m || "").startsWith("promemoria_pacchetto") ? "Promemoria: pacchetto in scadenza" : (m || "").startsWith("promemoria_check") ? "Promemoria: check in arrivo" : (m || "").startsWith("auto_check") ? "Check ricevuto ✨" : (m || "").startsWith("auto_pacchetto") ? "Pacchetto lezioni quasi finito" : (m || "").startsWith("auto_traguardo_record") ? "Nuovo record 🏆" : (m || "").startsWith("auto_traguardo_streak") ? "Costanza 🔥" : "Messaggio automatico";
-
-  const eLezAuto = (n) => /^(lez_|promemoria_pacchetto|auto_pacchetto)/.test(n.proposta_luogo || "");
-  const autoLezioni = autoNuove.filter(eLezAuto);
-  const autoCheck = autoNuove.filter((n) => !eLezAuto(n));
-  const cardAuto = (n) => (
-    <Card key={n.id} className="p-3 space-y-1 bg-sky-50/60 border-sky-100">
-      <p className="font-medium text-slate-700 text-sm">{n.clients?.nome} {n.clients?.cognome}</p>
-      <p className="text-slate-500 text-xs font-medium">{(n.proposta_luogo || "").startsWith("lez_prom") ? "Promemoria lezione inviato" : (n.proposta_luogo || "").startsWith("lez_mod") ? "Lezione spostata (avviso inviato)" : (n.proposta_luogo || "").startsWith("lez_nuova") ? "Nuova lezione (avviso inviato)" : titoloAuto(n.proposta_luogo)}</p>
-      <p className="text-slate-600 text-xs">{n.messaggio}</p>
-      <CommentoCoach n={n} onSalvato={carica} />
-      <div className="flex items-center justify-between pt-1">
-        <p className="text-slate-400 text-[11px]">{new Date(n.created_at).toLocaleDateString("it-IT")} {new Date(n.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</p>
-        <button onClick={() => segnaAutoViste([n.id])} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-1.5">Segna vista</button>
-      </div>
-    </Card>
-  );
-
   if (caricando) return <Spinner />;
 
   return (
@@ -11799,9 +11848,9 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
         <TrendClientiCoach clients={clients} onSelect={onSelect} />
       </Sezione>
 
-      <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length + autoLezioni.length} aperta={richieste.length + autoLezioni.length>0} ricorda={false}  evidenzia>
+      <Sezione id="richieste" titolo="Richieste lezione/call" conteggio={richieste.length} aperta={richieste.length>0} ricorda={false}  evidenzia>
         <div className="space-y-2">
-          {richieste.length === 0 && autoLezioni.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
+          {richieste.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessuna richiesta in sospeso.</Card>}
           {richieste.map((r) => (
             <Card key={r.id} className="p-3 space-y-2">
               <button onClick={() => !r.tutti && onSelect(r.client_id)} className="w-full text-left">
@@ -11822,18 +11871,12 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
               )}
             </Card>
           ))}
-          {autoLezioni.length > 0 && (
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between"><p className="text-[11px] text-slate-400">Messaggi automatici inviati</p><button onClick={() => segnaAutoViste(autoLezioni.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button></div>
-              {autoLezioni.map(cardAuto)}
-            </div>
-          )}
         </div>
       </Sezione>
 
-      <Sezione id="check_rivedere" titolo="Check da rivedere" conteggio={checkDaRivedere.length + autoCheck.length} aperta={checkDaRivedere.length + autoCheck.length>0} ricorda={false}  evidenzia>
+      <Sezione id="check_rivedere" titolo="Check da rivedere" conteggio={checkDaRivedere.length} aperta={true} ricorda={false}  evidenzia>
         <div className="space-y-2">
-          {checkDaRivedere.length === 0 && autoCheck.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun check da rivedere.</Card>}
+          {checkDaRivedere.length === 0 && <Card className="p-4 text-center text-slate-400 text-sm">Nessun check da rivedere.</Card>}
           {checkDaRivedere.map((c) => (
             <Card key={c.id} className="p-3 flex items-center gap-3">
               <button onClick={() => onSelect(c.client_id)} className="flex-1 min-w-0 text-left">
@@ -11843,12 +11886,7 @@ function CentroNotificheCoach({ clients, promemoriaDomani = [], nuoveDaCompletar
               <button onClick={() => segnaRevisionato(c.id)} className="bg-sky-50 text-sky-700 text-xs font-medium rounded-lg px-3 py-2 flex-shrink-0">Segna rivisto</button>
             </Card>
           ))}
-          {autoCheck.length > 0 && (
-            <div className="space-y-2 pt-1">
-              <div className="flex items-center justify-between"><p className="text-[11px] text-slate-400">Messaggi automatici inviati</p><button onClick={() => segnaAutoViste(autoCheck.map((n) => n.id))} className="text-[11px] text-sky-600 font-medium">Segna tutti visti</button></div>
-              {autoCheck.map(cardAuto)}
-            </div>
-          )}
+          <CommentiAllenamentoCoach clients={clients} onFatto={onAggiorna} />
         </div>
       </Sezione>
 
@@ -15903,7 +15941,8 @@ function AdminList({ clients, onSelect, onChanged, vista, setVista, backupInCors
     const { count: c } = await supabase.from("checkins").select("id", { count: "exact", head: true }).eq("stato", "ricevuto");
     const { count: m } = await supabase.from("appunti").select("client_id", { count: "exact", head: true }).eq("nuovo_per_coach", true);
     setChatNonLette(m || 0);
-    setNonLetteCoach((r || 0) + (c || 0)); // i messaggi automatici non fanno più numero né notifica
+    let cn = 0; try { const { count } = await supabase.from("note_allenamento").select("client_id", { count: "exact", head: true }).eq("coach_vista", false).not("nota", "is", null); cn = count || 0; } catch (e) { /* ignora */ }
+    setNonLetteCoach((r || 0) + (c || 0) + cn); // i messaggi automatici non fanno più numero né notifica
     try { setSfideDaFare(await contaSfideCoach()); } catch (e) { /* non blocca mai il caricamento */ }
   };
   const caricaCandidatureNuove = async () => {
