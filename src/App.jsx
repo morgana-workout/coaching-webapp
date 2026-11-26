@@ -11714,7 +11714,10 @@ function CommentiAllenamentoCoach({ clients, onFatto }) {
     if (error) { setInvio(false); setErrore("Non siamo riusciti a inviare, riprova 🫶🏻"); return; }
     const citata = r.nota.trim().replace(/\s+/g, " "); const breve = citata.length > 140 ? citata.slice(0, 140) + "…" : citata;
     const { data: n } = await supabase.from("notifiche").insert({ client_id: r.client_id, tipo: "nota", messaggio: `Morgana ha risposto al tuo commento sull'allenamento del ${dt(r.data)} ✨\n\nTu hai scritto: «${breve}»\n\n${t}`, stato: "inviata", coach_vista: true }).select("id").single();
-    if (n?.id) inviaPush({ evento: "nota", notifica_id: n.id });
+    // la stessa risposta compare anche in chat; l'avviso push parte una volta sola (dal messaggio in chat)
+    const { data: msg } = await supabase.from("messaggi").insert({ client_id: r.client_id, mittente: "coach", testo: `Risposta al tuo commento sull'allenamento del ${dt(r.data)} ✨\n«${breve}»\n\n${t}` }).select("id").single();
+    if (msg?.id) inviaPush({ evento: "messaggio", messaggio_id: msg.id });
+    else if (n?.id) inviaPush({ evento: "nota", notifica_id: n.id });
     setInvio(false); setAperta(null); setTesto("");
     await carica(); onFatto?.();
   };
